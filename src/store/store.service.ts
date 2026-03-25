@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateStoreDto } from './dto/create-store.dto';
@@ -26,6 +26,9 @@ export class StoreService {
   async create(createStoreDto: CreateStoreDto, user: User) {
     const { companyId, categoryId, ...storeDetails } = createStoreDto;
 
+    // Validar unicidad de RIF y teléfono programáticamente
+    await this.checkUniqueness(storeDetails.rif, storeDetails.phone, user, companyId);
+
     // Si el usuario es VENDOR y ya tiene una tienda, no se le permite crear otra
     if (user.role === UserRole.VENDOR) {
       const existingStore = await this.storeRepository.findOne({
@@ -52,7 +55,12 @@ export class StoreService {
       owner: user,
     });
 
-    const savedStore = await this.storeRepository.save(store);
+    let savedStore;
+    try {
+      savedStore = await this.storeRepository.save(store);
+    } catch (error) {
+      this.handleDBExceptions(error);
+    }
 
     // Si el usuario tenía rol USER, lo promovemos a VENDOR
     if (user.role === UserRole.USER) {
@@ -81,9 +89,20 @@ export class StoreService {
     return store;
   }
 
-  async update(id: string, updateStoreDto: UpdateStoreDto) {
+  async update(id: string, updateStoreDto: UpdateStoreDto, user: User) {
     const { companyId, categoryId, ...updateDetails } = updateStoreDto;
     const store = await this.findOne(id);
+
+    // Validar unicidad si se están actualizando rif o teléfono
+    if (updateDetails.rif || updateDetails.phone) {
+      await this.checkUniqueness(
+        updateDetails.rif ?? store.rif,
+        updateDetails.phone ?? store.phone,
+        user,
+        companyId ?? store.company?.id,
+        id,
+      );
+    }
 
     if (companyId !== undefined) {
       if (companyId) {
@@ -102,12 +121,55 @@ export class StoreService {
     }
 
     this.storeRepository.merge(store, updateDetails);
-    return await this.storeRepository.save(store);
+    try {
+      return await this.storeRepository.save(store);
+    } catch (error) {
+      this.handleDBExceptions(error);
+    }
   }
 
   async remove(id: string) {
     const store = await this.findOne(id);
     await this.storeRepository.remove(store);
     return { deleted: true };
+  }
+
+  private handleDBExceptions(error: any): never {
+    console.log(error);
+    throw new InternalServerErrorException('Unexpected error, check server logs');
+  }
+
+  private async checkUniqueness(rif: string, phone: string, user: User, companyId?: string, excludeStoreId?: string): Promise<void> {
+    // Verificar RIF
+    const existingRifStore = await this.storeRepository.findOne({
+      where: { rif },
+      relations: ['company']
+    });
+
+    if (existingRifStore && existingRifStore.id !== excludeStoreId) {
+      const isSameCompany = user.role === UserRole.COMPANY &&
+        companyId &&
+        existingRifStore.company?.id === companyId;
+
+      if (!isSameCompany) {
+        throw new BadRequestException('El RIF ya está registrado por otro ente');
+      }
+    }
+
+    // Verificar Teléfono
+    const existingPhoneStore = await this.storeRepository.findOne({
+      where: { phone },
+      relations: ['company']
+    });
+
+    if (existingPhoneStore && existingPhoneStore.id !== excludeStoreId) {
+      const isSameCompany = user.role === UserRole.COMPANY &&
+        companyId &&
+        existingPhoneStore.company?.id === companyId;
+
+      if (!isSameCompany) {
+        throw new BadRequestException('El número de teléfono ya está registrado por otro ente');
+      }
+    }
   }
 }

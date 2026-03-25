@@ -30,8 +30,12 @@ export class StoreController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateStoreDto: UpdateStoreDto) {
-    return this.storeService.update(id, updateStoreDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateStoreDto: UpdateStoreDto,
+    @GetUser() user: User,
+  ) {
+    return this.storeService.update(id, updateStoreDto, user);
   }
 
   @Delete(':id')
