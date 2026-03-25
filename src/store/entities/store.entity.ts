@@ -1,7 +1,9 @@
-import { PrimaryGeneratedColumn, Column, Entity, CreateDateColumn, UpdateDateColumn, ManyToOne } from "typeorm";
+import { PrimaryGeneratedColumn, Column, Entity, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, BeforeInsert, BeforeUpdate } from "typeorm";
 import { Company } from "src/company/entities/company.entity";
 import { Category } from "src/category/entities/category.entity";
 import { User } from "src/user/entities/user.entity";
+import { Item } from "src/item/entities/item.entity";
+import slugify from "slugify";
 
 @Entity('stores')
 export class Store {
@@ -51,10 +53,39 @@ export class Store {
   @ManyToOne(() => User, { nullable: true })
   owner?: User;
 
+  @Column('text', {
+    unique: true,
+    nullable: false
+  })
+  slug: string;
+
+  @OneToMany(() => Item, (item) => item.store)
+  items: Item[];
+
   @CreateDateColumn()
   createdAt: string;
 
   @UpdateDateColumn()
   updatedAt: string;
+
+  @BeforeInsert()
+  checkSlugInsert() {
+    this.slug = slugify(this.name, {
+      lower: true,
+      trim: true,
+      replacement: '-',
+      remove: /[^a-zA-Z0-9]/g,
+    });
+  }
+
+  @BeforeUpdate()
+  checkSlugUpdate() {
+    this.slug = slugify(this.name, {
+      lower: true,
+      trim: true,
+      replacement: '-',
+      remove: /[^a-zA-Z0-9]/g,
+    });
+  }
 
 }

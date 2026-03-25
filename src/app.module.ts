@@ -8,6 +8,7 @@ import { AddressModule } from './address/address.module';
 import { CompanyModule } from './company/company.module';
 import { StoreModule } from './store/store.module';
 import { CategoryModule } from './category/category.module';
+import { ItemModule } from './item/item.module';
 
 @Module({
   imports: [
@@ -37,7 +38,8 @@ import { CategoryModule } from './category/category.module';
     AddressModule,
     CompanyModule,
     StoreModule,
-    CategoryModule
+    CategoryModule,
+    ItemModule,
   ],
   controllers: [],
   providers: [],
