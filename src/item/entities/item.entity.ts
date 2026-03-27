@@ -2,6 +2,7 @@ import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, Up
 import { ItemType } from "../types/item-type.enum";
 import { ItemAttributes } from "../types/item-attributes.interface";
 import { Store } from "src/store/entities/store.entity";
+import { StoreCategory } from "src/store-category/entities/store-category.entity";
 
 /**
  * Entidad núcleo de la plataforma comercial.
@@ -85,6 +86,9 @@ export class Item {
 
   @ManyToOne(() => Store, (store) => store.items)
   store: Store;
+
+  @ManyToOne(() => StoreCategory, (category) => category.items, { nullable: true })
+  category: StoreCategory;
 
   @CreateDateColumn()
   createdAt: string;

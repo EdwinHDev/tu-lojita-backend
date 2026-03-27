@@ -9,6 +9,7 @@ import { CompanyModule } from './company/company.module';
 import { StoreModule } from './store/store.module';
 import { CategoryModule } from './category/category.module';
 import { ItemModule } from './item/item.module';
+import { StoreCategoryModule } from './store-category/store-category.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ItemModule } from './item/item.module';
     StoreModule,
     CategoryModule,
     ItemModule,
+    StoreCategoryModule,
   ],
   controllers: [],
   providers: [],

@@ -13,6 +13,11 @@ export class CreateItemDto {
   @IsUUID('4', { message: 'El ID de la tienda debe ser un UUID válido' })
   storeId: string;
 
+  @IsString({ message: 'El ID de la categoría debe ser una cadena de texto' })
+  @IsUUID('4', { message: 'El ID de la categoría debe ser un UUID válido' })
+  @IsOptional()
+  categoryId?: string;
+
   @IsString({ message: 'La descripción debe ser una cadena de texto' })
   @IsNotEmpty({ message: 'La descripción no puede estar vacía' })
   @MinLength(10, { message: 'La descripción debe tener al menos 10 caracteres' })

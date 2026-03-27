@@ -6,6 +6,7 @@ import { UpdateItemDto } from './dto/update-item.dto';
 import { Item } from './entities/item.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 
 @Injectable()
 export class ItemService {
@@ -14,10 +15,12 @@ export class ItemService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
+    @InjectRepository(StoreCategory)
+    private readonly storeCategoryRepository: Repository<StoreCategory>,
   ) {}
 
   async create(createItemDto: CreateItemDto, user: User) {
-    const { storeId, ...itemData } = createItemDto;
+    const { storeId, categoryId, ...itemData } = createItemDto;
 
     const store = await this.storeRepository.findOne({
       where: { id: storeId },
@@ -32,9 +35,21 @@ export class ItemService {
       throw new ForbiddenException('No tienes permiso para agregar productos a esta tienda');
     }
 
+    let category: StoreCategory | undefined;
+    if (categoryId) {
+      category = await this.storeCategoryRepository.findOne({
+        where: { id: categoryId, store: { id: storeId } }
+      }) ?? undefined;
+
+      if (!category) {
+        throw new NotFoundException(`Categoría con ID ${categoryId} no encontrada en esta tienda`);
+      }
+    }
+
     const item = this.itemRepository.create({
       ...itemData,
-      store
+      store,
+      category
     });
 
     return await this.itemRepository.save(item);
@@ -42,14 +57,14 @@ export class ItemService {
 
   async findAll() {
     return await this.itemRepository.find({
-      relations: ['store']
+      relations: ['store', 'category']
     });
   }
 
   async findOne(id: string) {
     const item = await this.itemRepository.findOne({
       where: { id },
-      relations: ['store', 'store.owner']
+      relations: ['store', 'store.owner', 'category']
     });
 
     if (!item) {

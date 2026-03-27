@@ -1,6 +1,7 @@
 import { PrimaryGeneratedColumn, Column, Entity, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, BeforeInsert, BeforeUpdate } from "typeorm";
-import { Company } from "src/company/entities/company.entity";
+import { StoreCategory } from "src/store-category/entities/store-category.entity";
 import { Category } from "src/category/entities/category.entity";
+import { Company } from "src/company/entities/company.entity";
 import { User } from "src/user/entities/user.entity";
 import { Item } from "src/item/entities/item.entity";
 import slugify from "slugify";
@@ -61,6 +62,9 @@ export class Store {
 
   @OneToMany(() => Item, (item) => item.store)
   items: Item[];
+
+  @OneToMany(() => StoreCategory, (storeCategory) => storeCategory.store)
+  storeCategories: StoreCategory[];
 
   @CreateDateColumn()
   createdAt: string;
