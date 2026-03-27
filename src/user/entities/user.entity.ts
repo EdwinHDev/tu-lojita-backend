@@ -35,10 +35,7 @@ export class User {
   })
   avatarUrl: string;
 
-  @Column('text', {
-    select: false,
-    nullable: true
-  })
+  @Column({ type: 'text', select: false, nullable: true })
   password: string;
 
   @Column('bool', {

@@ -7,7 +7,7 @@ export class StoreCategory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column('text')
+  @Column({ type: 'text' })
   name: string;
 
   @Column('text')

@@ -36,7 +36,10 @@ export class Item {
   })
   price: number;
 
-  @Column('text', { array: true, default: [] })
+  @Column('text')
+  mainImage: string;
+
+  @Column({ type: 'text', array: true, default: [] })
   images: string[];
 
   /**

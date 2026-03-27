@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from "class-validator";
+import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUrl, IsUUID, MaxLength, Min, MinLength } from "class-validator";
 import { ItemType } from "../types/item-type.enum";
 import { ItemAttributes } from "../types/item-attributes.interface";
 
@@ -21,13 +21,17 @@ export class CreateItemDto {
   @IsString({ message: 'La descripción debe ser una cadena de texto' })
   @IsNotEmpty({ message: 'La descripción no puede estar vacía' })
   @MinLength(10, { message: 'La descripción debe tener al menos 10 caracteres' })
-  @MaxLength(1000, { message: 'La descripción debe tener menos de 1000 caracteres' })
+  @MaxLength(2000, { message: 'La descripción debe tener menos de 2000 caracteres' })
   description: string;
 
   @IsNumber({}, { message: 'El precio debe ser un número válido' })
   @Min(0, { message: 'El precio no puede ser negativo' })
   @IsOptional()
   price?: number;
+
+  @IsString({ message: 'La imagen principal debe ser una cadena de texto' })
+  @IsNotEmpty({ message: 'La imagen principal es obligatoria' })
+  mainImage: string;
 
   @IsArray({ message: 'Las imágenes deben ser una lista (array)' })
   @IsString({ each: true, message: 'Cada imagen debe ser una cadena de texto (URL)' })

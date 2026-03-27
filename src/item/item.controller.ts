@@ -24,6 +24,11 @@ export class ItemController {
     return this.itemService.findAll();
   }
 
+  @Get('store/:storeId')
+  findByStore(@Param('storeId') storeId: string) {
+    return this.itemService.findByStore(storeId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.itemService.findOne(id);

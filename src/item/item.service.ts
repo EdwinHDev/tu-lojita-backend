@@ -61,6 +61,13 @@ export class ItemService {
     });
   }
 
+  async findByStore(storeId: string) {
+    return await this.itemRepository.find({
+      where: { store: { id: storeId } },
+      relations: ['category']
+    });
+  }
+
   async findOne(id: string) {
     const item = await this.itemRepository.findOne({
       where: { id },
