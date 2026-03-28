@@ -1,4 +1,5 @@
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsNumber, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 export class StorePaginationDto extends PaginationDto {

@@ -4,6 +4,7 @@ import { Subcategory } from "src/subcategory/entities/subcategory.entity";
 import { Company } from "src/company/entities/company.entity";
 import { User } from "src/user/entities/user.entity";
 import { Item } from "src/item/entities/item.entity";
+import { StoreAddress } from "src/store-address/entities/store-address.entity";
 import slugify from "slugify";
 
 @Entity('stores')
@@ -23,21 +24,6 @@ export class Store {
 
   @Column('text')
   phone: string;
-
-  @Column('text', {
-    nullable: true
-  })
-  address: string;
-
-  @Column('text', {
-    nullable: true
-  })
-  city: string;
-
-  @Column('text', {
-    nullable: true
-  })
-  state: string;
 
   @Column('text')
   logo: string;
@@ -59,6 +45,9 @@ export class Store {
     nullable: false
   })
   slug: string;
+
+  @OneToMany(() => StoreAddress, (address) => address.store)
+  addresses: StoreAddress[];
 
   @OneToMany(() => Item, (item) => item.store)
   items: Item[];

@@ -80,7 +80,7 @@ export class ItemService {
       .leftJoinAndSelect('item.category', 'category')
       .leftJoin('store.subcategory', 'subCategory')
       .leftJoin('subCategory.category', 'globalCategory')
-      // Usamos limit/offset porque no tenemos relaciones 1:N que dupliquen filas del Item
+      .leftJoin('store.addresses', 'address')
       .limit(limit)
       .offset(offset);
 
@@ -104,12 +104,12 @@ export class ItemService {
       queryBuilder.andWhere('globalCategory.id = :globalCategoryId', { globalCategoryId });
     }
 
-    // Filtros de Ubicación (vía Store)
+    // Filtros de Ubicación (vía StoreAddress)
     if (city) {
-      queryBuilder.andWhere('store.city = :city', { city });
+      queryBuilder.andWhere('address.city ILIKE :city', { city: `%${city}%` });
     }
     if (state) {
-      queryBuilder.andWhere('store.state = :state', { state });
+      queryBuilder.andWhere('address.state ILIKE :state', { state: `%${state}%` });
     }
 
     // Búsqueda por Texto

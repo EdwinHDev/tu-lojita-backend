@@ -1,9 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { DataSource, Like, Repository } from 'typeorm';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { Store } from './entities/store.entity';
+import { StoreAddress } from 'src/store-address/entities/store-address.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 import { Company } from 'src/company/entities/company.entity';
 import { Category } from 'src/category/entities/category.entity';
@@ -25,53 +26,71 @@ export class StoreService {
     private readonly subcategoryRepository: Repository<Subcategory>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly dataSource: DataSource,
   ) { }
 
   async create(createStoreDto: CreateStoreDto, user: User) {
-    const { companyId, subCategoryId, ...storeDetails } = createStoreDto;
+    const { companyId, subCategoryId, mainAddress, ...storeDetails } = createStoreDto;
 
-    // Validar unicidad de RIF y teléfono programáticamente
+    // Validar unicidad de RIF y teléfono
     await this.checkUniqueness(storeDetails.rif, storeDetails.phone, user, companyId);
 
-    // Si el usuario es VENDOR y ya tiene una tienda, no se le permite crear otra
+    // Validación de rol VENDOR (una sola tienda)
     if (user.role === UserRole.VENDOR) {
       const existingStore = await this.storeRepository.findOne({
         where: { owner: { id: user.id } },
       });
       if (existingStore) {
-        throw new ForbiddenException('Ya tienes una tienda registrada. Solo los usuarios con rol COMPANY pueden tener más de una tienda.');
+        throw new ForbiddenException('Ya tienes una tienda registrada.');
       }
     }
+
+    const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
+    if (!subcategory) throw new NotFoundException(`Subcategoría no encontrada`);
 
     let company: Company | undefined;
     if (companyId) {
       company = await this.companyRepository.findOneBy({ id: companyId }) ?? undefined;
-      if (!company) throw new NotFoundException(`Empresa con ID ${companyId} no encontrada`);
     }
 
-    const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
-    if (!subcategory) throw new NotFoundException(`Subcategoría con ID ${subCategoryId} no encontrada`);
+    // Iniciar Transacción para Store + Address
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const store = this.storeRepository.create({
-      ...storeDetails,
-      company,
-      subcategory,
-      owner: user,
-    });
-
-    let savedStore;
     try {
-      savedStore = await this.storeRepository.save(store);
+      const store = queryRunner.manager.create(Store, {
+        ...storeDetails,
+        subcategory,
+        company,
+        owner: user,
+      });
+
+      const savedStore = await queryRunner.manager.save(store);
+
+      if (mainAddress) {
+        const address = queryRunner.manager.create(StoreAddress, {
+          ...mainAddress,
+          isMain: true,
+          store: savedStore,
+        });
+        await queryRunner.manager.save(address);
+      }
+
+      // Promover a VENDOR si era USER
+      if (user.role === UserRole.USER) {
+        await queryRunner.manager.update(User, user.id, { role: UserRole.VENDOR });
+      }
+
+      await queryRunner.commitTransaction();
+      return savedStore;
+
     } catch (error) {
+      await queryRunner.rollbackTransaction();
       this.handleDBExceptions(error);
+    } finally {
+      await queryRunner.release();
     }
-
-    // Si el usuario tenía rol USER, lo promovemos a VENDOR
-    if (user.role === UserRole.USER) {
-      await this.userRepository.update(user.id, { role: UserRole.VENDOR });
-    }
-
-    return savedStore;
   }
 
   async findAll(paginationDto: StorePaginationDto) {
@@ -84,31 +103,35 @@ export class StoreService {
       subCategoryId,
       city, 
       state, 
-      q 
+      q
     } = paginationDto;
 
+    // Usamos QueryBuilder para manejar la lógica de múltiples direcciones
     const queryBuilder = this.storeRepository.createQueryBuilder('store')
       .leftJoinAndSelect('store.subcategory', 'subCategory')
       .leftJoinAndSelect('subCategory.category', 'category')
+      .leftJoinAndSelect('store.owner', 'owner')
+      .leftJoinAndSelect('store.addresses', 'address')
       .take(limit)
-      .skip(offset)
-      .orderBy(`store.${sort}`, order);
+      .skip(offset);
 
-    // Filtro por subcategoría específica
-    if (subCategoryId) {
-      queryBuilder.andWhere('subCategory.id = :subCategoryId', { subCategoryId });
-    }
-
-    // Filtro por categoría padre (trae todas las tiendas de sus subcategorías)
-    if (categoryId) {
-      queryBuilder.andWhere('category.id = :categoryId', { categoryId });
-    }
-
-    if (city) queryBuilder.andWhere('store.city = :city', { city });
-    if (state) queryBuilder.andWhere('store.state = :state', { state });
+    // Filtros
+    if (subCategoryId) queryBuilder.andWhere('subCategory.id = :subCategoryId', { subCategoryId });
+    if (categoryId) queryBuilder.andWhere('category.id = :categoryId', { categoryId });
+    if (city) queryBuilder.andWhere('address.city ILIKE :city', { city: `%${city}%` });
+    if (state) queryBuilder.andWhere('address.state ILIKE :state', { state: `%${state}%` });
     if (q) queryBuilder.andWhere('store.name ILIKE :q', { q: `%${q}%` });
 
+    queryBuilder.orderBy(`store.${sort}`, order);
+
     const [data, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      data,
+      total,
+      limit,
+      offset
+    };
 
     return {
       data,
@@ -121,7 +144,7 @@ export class StoreService {
   async findOne(id: string) {
     const store = await this.storeRepository.findOne({
       where: { id },
-      relations: ['company', 'subcategory', 'subcategory.category', 'owner']
+      relations: ['company', 'subcategory', 'subcategory.category', 'owner', 'addresses']
     });
 
     if (!store) {

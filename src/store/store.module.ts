@@ -7,9 +7,10 @@ import { Company } from 'src/company/entities/company.entity';
 import { Category } from 'src/category/entities/category.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 import { User } from 'src/user/entities/user.entity';
+import { StoreAddress } from 'src/store-address/entities/store-address.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Store, Company, Category, Subcategory, User])],
+  imports: [TypeOrmModule.forFeature([Store, Company, Category, Subcategory, User, StoreAddress])],
   controllers: [StoreController],
   providers: [StoreService],
 })
