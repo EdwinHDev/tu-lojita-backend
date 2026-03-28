@@ -41,6 +41,15 @@ export class CreateItemDto {
   @IsEnum(ItemType, { message: 'El tipo de item debe ser PRODUCT o SERVICE' })
   itemType: ItemType;
 
+  @IsBoolean({ message: 'isFeatured debe ser un valor booleano' })
+  @IsOptional()
+  isFeatured?: boolean;
+
+  @IsNumber({}, { message: 'El precio de descuento debe ser un número válido' })
+  @Min(0, { message: 'El precio de descuento no puede ser negativo' })
+  @IsOptional()
+  discountPrice?: number;
+
   @IsBoolean({ message: 'trackInventory debe ser un valor booleano' })
   @IsOptional()
   trackInventory?: boolean;

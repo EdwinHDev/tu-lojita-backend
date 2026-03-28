@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { Item } from './entities/item.entity';
+import { ItemPaginationDto } from './dto/item-pagination.dto';
 import { User } from 'src/user/entities/user.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
@@ -55,10 +56,99 @@ export class ItemService {
     return await this.itemRepository.save(item);
   }
 
-  async findAll() {
-    return await this.itemRepository.find({
-      relations: ['store', 'category']
-    });
+  async findAll(paginationDto: ItemPaginationDto) {
+    const { 
+      limit = 10, 
+      offset = 0, 
+      sort = 'createdAt', 
+      order = 'DESC',
+      minPrice,
+      maxPrice,
+      storeId,
+      storeCategoryId,
+      globalCategoryId,
+      city,
+      state,
+      q,
+      isFeatured,
+      hasDiscount,
+      onlyInStock
+    } = paginationDto;
+
+    const queryBuilder = this.itemRepository.createQueryBuilder('item')
+      .leftJoinAndSelect('item.store', 'store')
+      .leftJoinAndSelect('item.category', 'category')
+      // Usamos limit/offset porque no tenemos relaciones 1:N que dupliquen filas del Item
+      .limit(limit)
+      .offset(offset);
+
+    // Filtros de Precio
+    if (minPrice !== undefined) {
+      queryBuilder.andWhere('item.price >= :minPrice', { minPrice });
+    }
+    if (maxPrice !== undefined) {
+      queryBuilder.andWhere('item.price <= :maxPrice', { maxPrice });
+    }
+
+    // Filtros de Relación
+    if (storeId) {
+      queryBuilder.andWhere('store.id = :storeId', { storeId });
+    }
+    if (storeCategoryId) {
+      queryBuilder.andWhere('category.id = :storeCategoryId', { storeCategoryId });
+    }
+    if (globalCategoryId) {
+      // Filtramos por la relación de la tienda (Store -> Category)
+      queryBuilder.andWhere('store.category = :globalCategoryId', { globalCategoryId });
+    }
+
+    // Filtros de Ubicación (vía Store)
+    if (city) {
+      queryBuilder.andWhere('store.city = :city', { city });
+    }
+    if (state) {
+      queryBuilder.andWhere('store.state = :state', { state });
+    }
+
+    // Búsqueda por Texto
+    if (q) {
+      queryBuilder.andWhere('LOWER(item.title) LIKE LOWER(:q)', { q: `%${q}%` });
+    }
+
+    // Filtros de Marketplace
+    if (isFeatured !== undefined) {
+      queryBuilder.andWhere('item.isFeatured = :isFeatured', { isFeatured });
+    }
+
+    if (hasDiscount) {
+      // Filtrar items que tienen precio de descuento activo
+      queryBuilder.andWhere('item.discountPrice IS NOT NULL');
+    }
+
+    if (onlyInStock) {
+      // Filtrar items disponibles (ilimitados O limitados con stock > 0)
+      queryBuilder.andWhere(
+        '(item.trackInventory = false OR (item.trackInventory = true AND item.stockQuantity > 0))'
+      );
+    }
+
+    // Ordenamiento (Normal o Aleatorio para Postgres)
+    if (sort === 'random') {
+      // Para RANDOM() en Postgres con DISTINCT/Pagination, añadimos el select
+      queryBuilder.addSelect('RANDOM()', 'temp_random');
+      queryBuilder.orderBy('temp_random', 'ASC');
+    } else {
+      queryBuilder.orderBy(`item.${sort}`, order as 'ASC' | 'DESC');
+    }
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      data,
+      total,
+      limit,
+      offset
+    };
   }
 
   async findByStore(storeId: string) {

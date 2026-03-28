@@ -43,6 +43,26 @@ export class Item {
   images: string[];
 
   /**
+   * DESTACADO: Permite resaltar productos en el Home o secciones especiales.
+   */
+  @Column('boolean', {
+    default: false
+  })
+  isFeatured: boolean;
+
+  /**
+   * PRECIO DE OFERTA: Si está presente, indica que el producto tiene un descuento activo.
+   */
+  @Column('numeric', {
+    nullable: true,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => value ? parseFloat(value) : null,
+    }
+  })
+  discountPrice?: number;
+
+  /**
    * Clasificador principal del elemento.
    * Dicta las reglas de negocio base: un PRODUCT normalmente requiere cálculo de envío,
    * mientras que un SERVICE ignora la logística de transporte.
