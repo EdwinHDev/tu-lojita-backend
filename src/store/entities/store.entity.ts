@@ -1,6 +1,6 @@
 import { PrimaryGeneratedColumn, Column, Entity, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, BeforeInsert, BeforeUpdate } from "typeorm";
 import { StoreCategory } from "src/store-category/entities/store-category.entity";
-import { Category } from "src/category/entities/category.entity";
+import { Subcategory } from "src/subcategory/entities/subcategory.entity";
 import { Company } from "src/company/entities/company.entity";
 import { User } from "src/user/entities/user.entity";
 import { Item } from "src/item/entities/item.entity";
@@ -46,9 +46,9 @@ export class Store {
   @ManyToOne(() => Company, (company) => company.stores, { nullable: true })
   company?: Company;
 
-  // Relación con la categoría de la tienda
-  @ManyToOne(() => Category, (category) => category.stores)
-  category: Category;
+  // Relación con la subcategoría de la tienda
+  @ManyToOne(() => Subcategory, (subcategory) => subcategory.stores)
+  subcategory: Subcategory;
 
   // Propietario de la tienda (usuario que la creó)
   @ManyToOne(() => User, { nullable: true })

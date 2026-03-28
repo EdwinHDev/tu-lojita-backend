@@ -10,6 +10,7 @@ import { StoreModule } from './store/store.module';
 import { CategoryModule } from './category/category.module';
 import { ItemModule } from './item/item.module';
 import { StoreCategoryModule } from './store-category/store-category.module';
+import { SubcategoryModule } from './subcategory/subcategory.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { StoreCategoryModule } from './store-category/store-category.module';
     CategoryModule,
     ItemModule,
     StoreCategoryModule,
+    SubcategoryModule,
   ],
   controllers: [],
   providers: [],

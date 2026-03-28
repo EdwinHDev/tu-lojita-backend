@@ -4,6 +4,7 @@ import { Like, Repository } from 'typeorm';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { Store } from './entities/store.entity';
+import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 import { Company } from 'src/company/entities/company.entity';
 import { Category } from 'src/category/entities/category.entity';
 import { User } from 'src/user/entities/user.entity';
@@ -20,12 +21,14 @@ export class StoreService {
     private readonly companyRepository: Repository<Company>,
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+    @InjectRepository(Subcategory)
+    private readonly subcategoryRepository: Repository<Subcategory>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
   ) { }
 
   async create(createStoreDto: CreateStoreDto, user: User) {
-    const { companyId, categoryId, ...storeDetails } = createStoreDto;
+    const { companyId, subCategoryId, ...storeDetails } = createStoreDto;
 
     // Validar unicidad de RIF y teléfono programáticamente
     await this.checkUniqueness(storeDetails.rif, storeDetails.phone, user, companyId);
@@ -46,13 +49,13 @@ export class StoreService {
       if (!company) throw new NotFoundException(`Empresa con ID ${companyId} no encontrada`);
     }
 
-    const category = await this.categoryRepository.findOneBy({ id: categoryId });
-    if (!category) throw new NotFoundException(`Categoría con ID ${categoryId} no encontrada`);
+    const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
+    if (!subcategory) throw new NotFoundException(`Subcategoría con ID ${subCategoryId} no encontrada`);
 
     const store = this.storeRepository.create({
       ...storeDetails,
       company,
-      category,
+      subcategory,
       owner: user,
     });
 
@@ -71,34 +74,41 @@ export class StoreService {
     return savedStore;
   }
 
-  async findAll(storePaginationDto: StorePaginationDto) {
+  async findAll(paginationDto: StorePaginationDto) {
     const { 
       limit = 10, 
       offset = 0, 
-      sort = 'createdAt', 
-      order = 'DESC',
+      sort = 'name', 
+      order = 'ASC', 
       categoryId,
-      city,
-      state,
-      q
-    } = storePaginationDto;
+      subCategoryId,
+      city, 
+      state, 
+      q 
+    } = paginationDto;
 
-    const queryOptions: any = {
-      where: {},
-      relations: ['company', 'category', 'owner'],
-      take: limit,
-      skip: offset,
-      order: {
-        [sort]: order
-      }
-    };
+    const queryBuilder = this.storeRepository.createQueryBuilder('store')
+      .leftJoinAndSelect('store.subcategory', 'subCategory')
+      .leftJoinAndSelect('subCategory.category', 'category')
+      .take(limit)
+      .skip(offset)
+      .orderBy(`store.${sort}`, order);
 
-    if (categoryId) queryOptions.where.category = { id: categoryId };
-    if (city) queryOptions.where.city = city;
-    if (state) queryOptions.where.state = state;
-    if (q) queryOptions.where.name = Like(`%${q}%`);
+    // Filtro por subcategoría específica
+    if (subCategoryId) {
+      queryBuilder.andWhere('subCategory.id = :subCategoryId', { subCategoryId });
+    }
 
-    const [data, total] = await this.storeRepository.findAndCount(queryOptions);
+    // Filtro por categoría padre (trae todas las tiendas de sus subcategorías)
+    if (categoryId) {
+      queryBuilder.andWhere('category.id = :categoryId', { categoryId });
+    }
+
+    if (city) queryBuilder.andWhere('store.city = :city', { city });
+    if (state) queryBuilder.andWhere('store.state = :state', { state });
+    if (q) queryBuilder.andWhere('store.name ILIKE :q', { q: `%${q}%` });
+
+    const [data, total] = await queryBuilder.getManyAndCount();
 
     return {
       data,
@@ -111,7 +121,7 @@ export class StoreService {
   async findOne(id: string) {
     const store = await this.storeRepository.findOne({
       where: { id },
-      relations: ['company', 'category', 'owner']
+      relations: ['company', 'subcategory', 'subcategory.category', 'owner']
     });
 
     if (!store) {
@@ -122,7 +132,7 @@ export class StoreService {
   }
 
   async update(id: string, updateStoreDto: UpdateStoreDto, user: User) {
-    const { companyId, categoryId, ...updateDetails } = updateStoreDto;
+    const { companyId, subCategoryId, ...updateDetails } = updateStoreDto;
     const store = await this.findOne(id);
 
     // Validar unicidad si se están actualizando rif o teléfono
@@ -146,10 +156,10 @@ export class StoreService {
       }
     }
 
-    if (categoryId) {
-      const category = await this.categoryRepository.findOneBy({ id: categoryId });
-      if (!category) throw new NotFoundException(`Categoría con ID ${categoryId} no encontrada`);
-      store.category = category;
+    if (subCategoryId) {
+      const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
+      if (!subcategory) throw new NotFoundException(`Subcategoría con ID ${subCategoryId} no encontrada`);
+      store.subcategory = subcategory;
     }
 
     this.storeRepository.merge(store, updateDetails);

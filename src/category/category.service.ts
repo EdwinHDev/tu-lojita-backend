@@ -22,11 +22,12 @@ export class CategoryService {
   async findAll(queryDto: CategoryQueryDto) {
     const { inUse } = queryDto;
 
-    const queryBuilder = this.categoryRepository.createQueryBuilder('category');
+    const queryBuilder = this.categoryRepository.createQueryBuilder('category')
+      .leftJoinAndSelect('category.subcategories', 'subCategory');
 
     if (inUse) {
-      // Filtrar solo las categorías que tienen al menos una tienda asociada
-      queryBuilder.innerJoin('category.stores', 'store');
+      // Filtrar solo las categorías que tienen al menos una subcategoría con una tienda asociada
+      queryBuilder.innerJoin('subCategory.stores', 'store');
       queryBuilder.distinct(true);
     }
 
@@ -35,7 +36,8 @@ export class CategoryService {
 
   async findOne(id: string) {
     const category = await this.categoryRepository.findOne({
-      where: { id }
+      where: { id },
+      relations: ['subcategories']
     });
 
     if (!category) {

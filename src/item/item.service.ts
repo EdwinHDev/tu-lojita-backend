@@ -78,6 +78,8 @@ export class ItemService {
     const queryBuilder = this.itemRepository.createQueryBuilder('item')
       .leftJoinAndSelect('item.store', 'store')
       .leftJoinAndSelect('item.category', 'category')
+      .leftJoin('store.subcategory', 'subCategory')
+      .leftJoin('subCategory.category', 'globalCategory')
       // Usamos limit/offset porque no tenemos relaciones 1:N que dupliquen filas del Item
       .limit(limit)
       .offset(offset);
@@ -98,8 +100,8 @@ export class ItemService {
       queryBuilder.andWhere('category.id = :storeCategoryId', { storeCategoryId });
     }
     if (globalCategoryId) {
-      // Filtramos por la relación de la tienda (Store -> Category)
-      queryBuilder.andWhere('store.category = :globalCategoryId', { globalCategoryId });
+      // Filtramos por la categoría global (Abuela) a través de la subcategoría de la tienda
+      queryBuilder.andWhere('globalCategory.id = :globalCategoryId', { globalCategoryId });
     }
 
     // Filtros de Ubicación (vía Store)

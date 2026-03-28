@@ -1,5 +1,6 @@
 import { PrimaryGeneratedColumn, Column, Entity, CreateDateColumn, UpdateDateColumn, OneToMany } from "typeorm";
 import { Store } from "src/store/entities/store.entity";
+import { Subcategory } from "src/subcategory/entities/subcategory.entity";
 
 @Entity('categories')
 export class Category {
@@ -16,9 +17,9 @@ export class Category {
   @Column('text')
   image: string;
 
-  // Relación con tiendas: Una categoría puede ser usada por varias tiendas
-  @OneToMany(() => Store, (store) => store.category)
-  stores: Store[];
+  // Relación con Subcategorías
+  @OneToMany(() => Subcategory, (subcategory) => subcategory.category)
+  subcategories: Subcategory[];
 
   @CreateDateColumn()
   createdAt: string;

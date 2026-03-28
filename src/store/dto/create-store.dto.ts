@@ -51,7 +51,7 @@ export class CreateStoreDto {
   @IsOptional()
   companyId?: string;
 
-  @IsUUID('4', { message: 'El ID de la categoría debe ser un UUID válido' })
-  categoryId: string;
+  @IsUUID('4', { message: 'El ID de la subcategoría debe ser un UUID válido' })
+  subCategoryId: string;
 
 }
