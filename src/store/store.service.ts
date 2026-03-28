@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { Store } from './entities/store.entity';
@@ -8,6 +8,7 @@ import { Company } from 'src/company/entities/company.entity';
 import { Category } from 'src/category/entities/category.entity';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
+import { StorePaginationDto } from './dto/store-pagination.dto';
 
 @Injectable()
 export class StoreService {
@@ -70,10 +71,41 @@ export class StoreService {
     return savedStore;
   }
 
-  findAll() {
-    return this.storeRepository.find({
-      relations: ['company', 'category', 'owner']
-    });
+  async findAll(storePaginationDto: StorePaginationDto) {
+    const { 
+      limit = 10, 
+      offset = 0, 
+      sort = 'createdAt', 
+      order = 'DESC',
+      categoryId,
+      city,
+      state,
+      q
+    } = storePaginationDto;
+
+    const queryOptions: any = {
+      where: {},
+      relations: ['company', 'category', 'owner'],
+      take: limit,
+      skip: offset,
+      order: {
+        [sort]: order
+      }
+    };
+
+    if (categoryId) queryOptions.where.category = { id: categoryId };
+    if (city) queryOptions.where.city = city;
+    if (state) queryOptions.where.state = state;
+    if (q) queryOptions.where.name = Like(`%${q}%`);
+
+    const [data, total] = await this.storeRepository.findAndCount(queryOptions);
+
+    return {
+      data,
+      total,
+      limit,
+      offset
+    };
   }
 
   async findOne(id: string) {

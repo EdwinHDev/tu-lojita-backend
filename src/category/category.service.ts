@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { Category } from './entities/category.entity';
+import { CategoryQueryDto } from './dto/category-query.dto';
 
 @Injectable()
 export class CategoryService {
@@ -18,8 +19,18 @@ export class CategoryService {
     return await this.categoryRepository.save(category);
   }
 
-  findAll() {
-    return this.categoryRepository.find();
+  async findAll(queryDto: CategoryQueryDto) {
+    const { inUse } = queryDto;
+
+    const queryBuilder = this.categoryRepository.createQueryBuilder('category');
+
+    if (inUse) {
+      // Filtrar solo las categorías que tienen al menos una tienda asociada
+      queryBuilder.innerJoin('category.stores', 'store');
+      queryBuilder.distinct(true);
+    }
+
+    return await queryBuilder.getMany();
   }
 
   async findOne(id: string) {

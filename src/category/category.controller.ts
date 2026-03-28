@@ -1,23 +1,24 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
 import { CategoryService } from './category.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { UserRole } from 'src/user/types';
+import { CategoryQueryDto } from './dto/category-query.dto';
 
 @Controller('categories')
 export class CategoryController {
   constructor(private readonly categoryService: CategoryService) { }
 
-  @Auth(UserRole.ADMIN, UserRole.SUPER)
+  // @Auth(UserRole.ADMIN, UserRole.SUPER)
   @Post()
   create(@Body() createCategoryDto: CreateCategoryDto) {
     return this.categoryService.create(createCategoryDto);
   }
 
   @Get()
-  findAll() {
-    return this.categoryService.findAll();
+  findAll(@Query() queryDto: CategoryQueryDto) {
+    return this.categoryService.findAll(queryDto);
   }
 
   @Get(':id')
