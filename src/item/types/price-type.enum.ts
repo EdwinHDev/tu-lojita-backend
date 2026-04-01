@@ -1,0 +1,7 @@
+export enum PriceType {
+  FIXED = 'FIXED',
+  STARTING_AT = 'STARTING_AT',
+  NEGOTIABLE = 'NEGOTIABLE',
+  ON_DEMAND = 'ON_DEMAND',
+  FREE = 'FREE',
+}

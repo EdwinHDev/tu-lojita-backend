@@ -1,5 +1,6 @@
 import { Type, Transform } from 'class-transformer';
-import { IsOptional, IsNumber, IsUUID, IsString, Min, IsBoolean } from 'class-validator';
+import { IsOptional, IsNumber, IsUUID, IsString, Min, IsBoolean, IsEnum } from 'class-validator';
+import { PriceType } from '../types/price-type.enum';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 export class ItemPaginationDto extends PaginationDto {
@@ -14,6 +15,10 @@ export class ItemPaginationDto extends PaginationDto {
   @Min(0, { message: 'El precio máximo no puede ser negativo' })
   @Type(() => Number)
   maxPrice?: number;
+
+  @IsOptional()
+  @IsEnum(PriceType, { message: 'El tipo de precio no es válido' })
+  priceType?: PriceType;
 
   @IsOptional()
   @IsUUID('4', { message: 'El ID de la tienda debe ser un UUID válido' })

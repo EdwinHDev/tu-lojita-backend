@@ -1,5 +1,6 @@
 import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUrl, IsUUID, MaxLength, Min, MinLength } from "class-validator";
 import { ItemType } from "../types/item-type.enum";
+import { PriceType } from "../types/price-type.enum";
 import { ItemAttributes } from "../types/item-attributes.interface";
 
 export class CreateItemDto {
@@ -28,6 +29,10 @@ export class CreateItemDto {
   @Min(0, { message: 'El precio no puede ser negativo' })
   @IsOptional()
   price?: number;
+
+  @IsEnum(PriceType, { message: 'El tipo de precio no es válido' })
+  @IsOptional()
+  priceType?: PriceType;
 
   @IsString({ message: 'La imagen principal debe ser una cadena de texto' })
   @IsNotEmpty({ message: 'La imagen principal es obligatoria' })

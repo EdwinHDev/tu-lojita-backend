@@ -1,5 +1,6 @@
 import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 import { ItemType } from "../types/item-type.enum";
+import { PriceType } from "../types/price-type.enum";
 import { ItemAttributes } from "../types/item-attributes.interface";
 import { Store } from "src/store/entities/store.entity";
 import { StoreCategory } from "src/store-category/entities/store-category.entity";
@@ -35,6 +36,15 @@ export class Item {
     }
   })
   price: number;
+
+  /**
+   * Tipo de precio (Fijo o con base "Desde").
+   */
+  @Column('enum', {
+    enum: PriceType,
+    default: PriceType.FIXED
+  })
+  priceType: PriceType;
 
   @Column('text')
   mainImage: string;

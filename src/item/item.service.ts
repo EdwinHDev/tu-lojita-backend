@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { Item } from './entities/item.entity';
+import { PriceType } from './types/price-type.enum';
 import { ItemPaginationDto } from './dto/item-pagination.dto';
 import { User } from 'src/user/entities/user.entity';
 import { Store } from 'src/store/entities/store.entity';
@@ -47,8 +48,18 @@ export class ItemService {
       }
     }
 
+    let { price, discountPrice, priceType } = itemData;
+
+    // Lógica profesional para tipos de precio especiales
+    if (priceType === PriceType.FREE || priceType === PriceType.ON_DEMAND) {
+      price = 0;
+      discountPrice = undefined; // Usamos undefined para que TypeORM no lo guarde o lo limpie según la entidad
+    }
+
     const item = this.itemRepository.create({
       ...itemData,
+      price,
+      discountPrice,
       store,
       category
     });
@@ -72,7 +83,8 @@ export class ItemService {
       q,
       isFeatured,
       hasDiscount,
-      onlyInStock
+      onlyInStock,
+      priceType
     } = paginationDto;
 
     const queryBuilder = this.itemRepository.createQueryBuilder('item')
@@ -90,6 +102,19 @@ export class ItemService {
     }
     if (maxPrice !== undefined) {
       queryBuilder.andWhere('item.price <= :maxPrice', { maxPrice });
+    }
+
+    // Filtro por Tipo de Precio
+    if (priceType) {
+      queryBuilder.andWhere('item.priceType = :priceType', { priceType });
+    } else {
+      /**
+       * Si no se pide explícitamente ON_DEMAND, lo excluimos de filtros de rango 
+       * de precio para evitar confusión, ya que su precio 0 es simbólico.
+       */
+      if (minPrice !== undefined || maxPrice !== undefined) {
+        queryBuilder.andWhere('item.priceType != :onDemand', { onDemand: PriceType.ON_DEMAND });
+      }
     }
 
     // Filtros de Relación
@@ -177,6 +202,12 @@ export class ItemService {
 
     if (item.store.owner?.id !== user.id) {
       throw new ForbiddenException('No tienes permiso para actualizar este producto');
+    }
+
+    // Aplicar lógica de tipos de precio en la actualización
+    if (updateItemDto.priceType === PriceType.FREE || updateItemDto.priceType === PriceType.ON_DEMAND) {
+      updateItemDto.price = 0;
+      updateItemDto.discountPrice = undefined;
     }
 
     this.itemRepository.merge(item, updateItemDto);
