@@ -19,7 +19,7 @@ export class ItemService {
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(StoreCategory)
     private readonly storeCategoryRepository: Repository<StoreCategory>,
-  ) {}
+  ) { }
 
   async create(createItemDto: CreateItemDto, user: User) {
     const { storeId, categoryId, ...itemData } = createItemDto;
@@ -68,10 +68,10 @@ export class ItemService {
   }
 
   async findAll(paginationDto: ItemPaginationDto) {
-    const { 
-      limit = 10, 
-      offset = 0, 
-      sort = 'createdAt', 
+    const {
+      limit = 10,
+      offset = 0,
+      sort = 'createdAt',
       order = 'DESC',
       minPrice,
       maxPrice,
@@ -181,7 +181,7 @@ export class ItemService {
   async findByStore(storeId: string) {
     return await this.itemRepository.find({
       where: { store: { id: storeId } },
-      relations: ['category']
+      relations: ['category', 'store']
     });
   }
 
