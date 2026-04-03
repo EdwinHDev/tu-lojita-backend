@@ -2,7 +2,9 @@ import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/commo
 import { StoreAddressService } from './store-address.service';
 import { CreateStoreAddressDto } from './dto/create-store-address.dto';
 import { UpdateStoreAddressDto } from './dto/update-store-address.dto';
+import { Auth } from 'src/auth/decorators/auth.decorator';
 
+@Auth()
 @Controller('store-address')
 export class StoreAddressController {
   constructor(private readonly storeAddressService: StoreAddressService) {}
@@ -19,16 +21,16 @@ export class StoreAddressController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.storeAddressService.findOne(+id);
+    return this.storeAddressService.findOne(id);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateStoreAddressDto: UpdateStoreAddressDto) {
-    return this.storeAddressService.update(+id, updateStoreAddressDto);
+    return this.storeAddressService.update(id, updateStoreAddressDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.storeAddressService.remove(+id);
+    return this.storeAddressService.remove(id);
   }
 }

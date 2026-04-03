@@ -4,6 +4,8 @@ import { UserRole } from "../types";
 import { Address } from "src/address/entities/address.entity";
 import { Company } from "src/company/entities/company.entity";
 import { Store } from "src/store/entities/store.entity";
+import { Order } from "src/order/entities/order.entity";
+import { Payment } from "src/payment/entities/payment.entity";
 
 @Entity('users')
 export class User {
@@ -78,6 +80,12 @@ export class User {
   // Relación con la tienda (para usuarios con rol VENDOR)
   @ManyToOne(() => Store, { nullable: true })
   store?: Store;
+
+  @OneToMany(() => Order, (order) => order.user)
+  orders: Order[];
+
+  @OneToMany(() => Payment, (payment) => payment.user)
+  payments: Payment[];
 
   @BeforeInsert()
   @BeforeUpdate()

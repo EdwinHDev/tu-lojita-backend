@@ -12,15 +12,15 @@ export class StoreAddressService {
     return `This action returns all storeAddress`;
   }
 
-  findOne(id: number) {
+  findOne(id: string) {
     return `This action returns a #${id} storeAddress`;
   }
 
-  update(id: number, updateStoreAddressDto: UpdateStoreAddressDto) {
+  update(id: string, updateStoreAddressDto: UpdateStoreAddressDto) {
     return `This action updates a #${id} storeAddress`;
   }
 
-  remove(id: number) {
+  remove(id: string) {
     return `This action removes a #${id} storeAddress`;
   }
 }

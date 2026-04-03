@@ -12,6 +12,9 @@ export class Company {
   name: string;
 
   @Column('text')
+  rif: string;
+
+  @Column('text')
   logo: string;
 
   // Relación con tiendas: Una empresa puede tener una o más tiendas

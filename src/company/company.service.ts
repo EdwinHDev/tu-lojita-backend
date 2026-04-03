@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -18,6 +18,9 @@ export class CompanyService {
   ) { }
 
   async create(createCompanyDto: CreateCompanyDto, user: User) {
+    // Verificar si el RIF ya está en uso
+    await this.checkRifUniqueness(createCompanyDto.rif);
+
     const company = this.companyRepository.create({
       ...createCompanyDto,
       owner: user,
@@ -53,6 +56,12 @@ export class CompanyService {
 
   async update(id: string, updateCompanyDto: UpdateCompanyDto) {
     const company = await this.findOne(id);
+    
+    // Si se está actualizando el RIF, verificar unicidad
+    if (updateCompanyDto.rif && updateCompanyDto.rif !== company.rif) {
+      await this.checkRifUniqueness(updateCompanyDto.rif, id);
+    }
+    
     this.companyRepository.merge(company, updateCompanyDto);
     return await this.companyRepository.save(company);
   }
@@ -61,5 +70,15 @@ export class CompanyService {
     const company = await this.findOne(id);
     await this.companyRepository.remove(company);
     return { deleted: true };
+  }
+
+  private async checkRifUniqueness(rif: string, excludeCompanyId?: string): Promise<void> {
+    const existingCompany = await this.companyRepository.findOne({
+      where: { rif },
+    });
+
+    if (existingCompany && existingCompany.id !== excludeCompanyId) {
+      throw new BadRequestException('El RIF ya está registrado por otra empresa');
+    }
   }
 }

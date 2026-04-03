@@ -12,6 +12,9 @@ import { ItemModule } from './item/item.module';
 import { StoreCategoryModule } from './store-category/store-category.module';
 import { SubcategoryModule } from './subcategory/subcategory.module';
 import { StoreAddressModule } from './store-address/store-address.module';
+import { PaymentModule } from './payment/payment.module';
+import { OrderModule } from './order/order.module';
+import { OrderItemModule } from './order-item/order-item.module';
 
 @Module({
   imports: [
@@ -46,6 +49,9 @@ import { StoreAddressModule } from './store-address/store-address.module';
     StoreCategoryModule,
     SubcategoryModule,
     StoreAddressModule,
+    PaymentModule,
+    OrderModule,
+    OrderItemModule,
   ],
   controllers: [],
   providers: [],
