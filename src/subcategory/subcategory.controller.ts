@@ -10,7 +10,7 @@ import { UserRole } from 'src/user/types';
 export class SubcategoryController {
   constructor(private readonly subcategoryService: SubcategoryService) { }
 
-  @Auth(UserRole.ADMIN, UserRole.SUPER)
+  @Auth(UserRole.ADMIN)
   @Post()
   create(@Body() createSubcategoryDto: CreateSubcategoryDto) {
     return this.subcategoryService.create(createSubcategoryDto);
@@ -26,13 +26,13 @@ export class SubcategoryController {
     return this.subcategoryService.findOne(id);
   }
 
-  @Auth(UserRole.ADMIN, UserRole.SUPER)
+  @Auth(UserRole.ADMIN)
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateSubcategoryDto: UpdateSubcategoryDto) {
     return this.subcategoryService.update(id, updateSubcategoryDto);
   }
 
-  @Auth(UserRole.ADMIN, UserRole.SUPER)
+  @Auth(UserRole.ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.subcategoryService.remove(id);

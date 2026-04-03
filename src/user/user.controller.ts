@@ -16,7 +16,7 @@ export class UserController {
   }
 
   @Get()
-  @Auth(UserRole.ADMIN, UserRole.SUPER) // <-- Solo ADMIN y SUPER pueden entrar
+  @Auth(UserRole.ADMIN) // <-- Solo ADMIN y SUPER pueden entrar
   findAll() {
     return this.userService.findAll();
   }
