@@ -27,6 +27,16 @@ export class User {
   email: string;
 
   @Column('text', {
+    nullable: true
+  })
+  identification?: string;
+
+  @Column('text', {
+    nullable: true
+  })
+  phone?: string;
+
+  @Column('text', {
     unique: true,
     nullable: true
   })

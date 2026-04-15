@@ -21,6 +21,18 @@ export class UserController {
     return this.userService.findAll();
   }
 
+  @Auth()
+  @Get('check/has-store')
+  checkHasStore(@GetUser('id') userId: string) {
+    return this.userService.checkHasStore(userId);
+  }
+
+  @Auth()
+  @Get('check/has-company')
+  checkHasCompany(@GetUser('id') userId: string) {
+    return this.userService.checkHasCompany(userId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.userService.findOne(id);
@@ -34,17 +46,5 @@ export class UserController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.userService.remove(id);
-  }
-
-  @Auth()
-  @Get('check/has-store')
-  checkHasStore(@GetUser('id') userId: string) {
-    return this.userService.checkHasStore(userId);
-  }
-
-  @Auth()
-  @Get('check/has-company')
-  checkHasCompany(@GetUser('id') userId: string) {
-    return this.userService.checkHasCompany(userId);
   }
 }

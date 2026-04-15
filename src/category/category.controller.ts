@@ -10,7 +10,7 @@ import { CategoryQueryDto } from './dto/category-query.dto';
 export class CategoryController {
   constructor(private readonly categoryService: CategoryService) { }
 
-  @Auth(UserRole.ADMIN)
+  // @Auth(UserRole.ADMIN)
   @Post()
   create(@Body() createCategoryDto: CreateCategoryDto) {
     return this.categoryService.create(createCategoryDto);

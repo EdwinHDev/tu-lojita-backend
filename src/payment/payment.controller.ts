@@ -18,9 +18,8 @@ export class PaymentController {
     @Body() createPaymentDto: CreatePaymentDto,
     @GetUser() user: User,
   ) {
-    // Sobrescribir el userId del DTO con el del usuario autenticado por seguridad
-    createPaymentDto.userId = user.id;
-    return this.paymentService.create(createPaymentDto);
+    // El userId se obtiene del usuario autenticado, no del body
+    return this.paymentService.create(createPaymentDto, user.id);
   }
 
   @Post(':id/verify')

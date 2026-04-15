@@ -30,8 +30,8 @@ export class OrderService {
     private readonly dataSource: DataSource,
   ) { }
 
-  async create(createOrderDto: CreateOrderDto) {
-    const { storeId, userId, items: itemsDto, isPartialPayment = false } = createOrderDto;
+  async create(createOrderDto: CreateOrderDto, userId: string) {
+    const { storeId, items: itemsDto, isPartialPayment = false } = createOrderDto;
 
     // 1. Validar Tienda
     const store = await this.storeRepository.findOneBy({ id: storeId });
@@ -142,6 +142,7 @@ export class OrderService {
         'store.subcategory',
         'payments', 
         'user', 
+        'user.addresses',
         'orderItems', 
         'orderItems.item',
         'orderItems.item.store',
@@ -157,7 +158,8 @@ export class OrderService {
 
     const queryBuilder = this.orderRepository.createQueryBuilder('order')
       .leftJoinAndSelect('order.store', 'store')
-      .leftJoinAndSelect('order.user', 'user');
+      .leftJoinAndSelect('order.user', 'user')
+      .leftJoinAndSelect('user.addresses', 'addresses');
 
     if (status) {
       queryBuilder.andWhere('order.status = :status', { status });

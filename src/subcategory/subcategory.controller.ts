@@ -10,7 +10,7 @@ import { UserRole } from 'src/user/types';
 export class SubcategoryController {
   constructor(private readonly subcategoryService: SubcategoryService) { }
 
-  @Auth(UserRole.ADMIN)
+  // @Auth(UserRole.ADMIN)
   @Post()
   create(@Body() createSubcategoryDto: CreateSubcategoryDto) {
     return this.subcategoryService.create(createSubcategoryDto);

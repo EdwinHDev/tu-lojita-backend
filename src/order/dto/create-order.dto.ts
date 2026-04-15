@@ -9,10 +9,6 @@ export class CreateOrderDto {
   @IsNotEmpty({ message: 'El ID de la tienda es obligatorio' })
   storeId: string;
 
-  @IsUUID('4', { message: 'El ID del usuario debe ser un UUID válido' })
-  @IsNotEmpty({ message: 'El ID del usuario es obligatorio' })
-  userId: string;
-
   @IsBoolean({ message: 'isPartialPayment debe ser un valor booleano' })
   @IsOptional()
   isPartialPayment?: boolean;

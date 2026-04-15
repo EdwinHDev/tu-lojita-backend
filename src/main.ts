@@ -22,8 +22,20 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
 
   app.enableCors({
-    origin: [envs.hostOrigin],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE'
+    origin: [
+      // Desarrollo
+      envs.frontendVendorUrlDev,
+      envs.frontendAdminUrlDev,
+      envs.frontendCustomerUrlDev,
+      // Producción
+      envs.frontendVendorUrlProd,
+      envs.frontendAdminUrlProd,
+      envs.frontendCustomerUrlProd,
+      'https://www.tulojita.com',   // Alias adicional
+      envs.hostOrigin,              // Configuración adicional desde env
+    ],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
   });
 
   await app.listen(envs.port);

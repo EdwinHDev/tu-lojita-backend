@@ -44,9 +44,10 @@ export class UserService {
   }
 
   findAll() {
-    return this.userRepository.find({
+    const users = this.userRepository.find({
       relations: ['addresses', 'company', 'store']
     });
+    return users;
   }
 
   async findOne(id: string) {

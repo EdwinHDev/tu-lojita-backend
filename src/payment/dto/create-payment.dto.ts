@@ -30,8 +30,4 @@ export class CreatePaymentDto {
   @IsUUID('4', { message: 'El ID de la tienda debe ser un UUID válido (v4)' })
   @IsNotEmpty({ message: 'El ID de la tienda es obligatorio' })
   storeId: string;
-
-  @IsUUID('4', { message: 'El ID del usuario debe ser un UUID válido (v4)' })
-  @IsNotEmpty({ message: 'El ID del usuario es obligatorio' })
-  userId: string;
 }

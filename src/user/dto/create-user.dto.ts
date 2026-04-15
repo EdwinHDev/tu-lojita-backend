@@ -20,7 +20,15 @@ export class CreateUserDto {
   @MaxLength(100, { message: 'El correo debe tener menos de 100 caracteres' })
   email: string;
 
-  @IsString()
+  @IsString({ message: 'La identificación debe de ser una cadena de texto' })
+  @IsOptional()
+  identification?: string;
+
+  @IsString({ message: 'El teléfono debe de ser una cadena de texto' })
+  @IsOptional()
+  phone?: string;
+
+  @IsString({ message: 'El avatar debe de ser una cadena de texto' })
   @IsOptional()
   avatarUrl?: string;
 

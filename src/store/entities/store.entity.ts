@@ -8,6 +8,7 @@ import { StoreAddress } from "src/store-address/entities/store-address.entity";
 import { Payment } from "src/payment/entities/payment.entity";
 import { Order } from "src/order/entities/order.entity";
 import slugify from "slugify";
+import { StoreStatus } from "../types/status.enum";
 
 @Entity('stores')
 export class Store {
@@ -47,6 +48,12 @@ export class Store {
     nullable: false
   })
   slug: string;
+
+  @Column('enum', {
+    enum: StoreStatus,
+    default: StoreStatus.ACTIVE
+  })
+  status: StoreStatus;
 
   @OneToMany(() => StoreAddress, (address) => address.store)
   addresses: StoreAddress[];

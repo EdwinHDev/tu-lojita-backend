@@ -6,6 +6,7 @@ import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/user/entities/user.entity';
 import { OrderPaginationDto } from './dto/order-pagination.dto';
+import { transformUserDataByRole } from '../common/utils/transform-user-data.util';
 
 @Auth()
 @Controller('order')
@@ -17,19 +18,39 @@ export class OrderController {
     @Body() createOrderDto: CreateOrderDto,
     @GetUser() user: User,
   ) {
-    // Sobrescribir el userId del DTO con el del usuario autenticado por seguridad
-    createOrderDto.userId = user.id;
-    return this.orderService.create(createOrderDto);
+    // El userId se obtiene del usuario autenticado, no del body
+    return this.orderService.create(createOrderDto, user.id);
   }
 
   @Get()
-  findAll(@Query() paginationDto: OrderPaginationDto) {
-    return this.orderService.findAll(paginationDto);
+  async findAll(
+    @Query() paginationDto: OrderPaginationDto,
+    @GetUser() requestingUser: User,
+  ) {
+    const result = await this.orderService.findAll(paginationDto);
+    
+    const transformedItems = result.items.map(order => ({
+      ...order,
+      user: transformUserDataByRole(order.user, requestingUser.role, requestingUser.id)
+    }));
+    
+    return {
+      ...result,
+      items: transformedItems
+    };
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.orderService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @GetUser() requestingUser: User,
+  ) {
+    const order = await this.orderService.findOne(id);
+    
+    return {
+      ...order,
+      user: transformUserDataByRole(order.user, requestingUser.role, requestingUser.id)
+    };
   }
 
   @Patch(':id')

@@ -127,8 +127,8 @@ export class PaymentService {
     }
   }
 
-  async create(createPaymentDto: CreatePaymentDto) {
-    const { orderId, amount, userId, storeId } = createPaymentDto;
+  async create(createPaymentDto: CreatePaymentDto, userId: string) {
+    const { orderId, amount, storeId } = createPaymentDto;
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();

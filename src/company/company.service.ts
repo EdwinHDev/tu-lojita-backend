@@ -5,6 +5,7 @@ import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { Company } from './entities/company.entity';
 import { User } from 'src/user/entities/user.entity';
+import { Store } from 'src/store/entities/store.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
 
 @Injectable()
@@ -15,6 +16,8 @@ export class CompanyService {
     private readonly companyRepository: Repository<Company>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Store)
+    private readonly storeRepository: Repository<Store>,
   ) { }
 
   async create(createCompanyDto: CreateCompanyDto, user: User) {
@@ -26,6 +29,19 @@ export class CompanyService {
       owner: user,
     });
     const savedCompany = await this.companyRepository.save(company);
+
+    // Si el usuario era VENDOR, asociar su tienda existente a la empresa
+    if (user.role === UserRole.VENDOR) {
+      const userStore = await this.storeRepository.findOne({
+        where: { owner: { id: user.id } },
+      });
+
+      if (userStore) {
+        // Asociar la tienda a la empresa
+        userStore.company = savedCompany;
+        await this.storeRepository.save(userStore);
+      }
+    }
 
     // Si el usuario era USER o VENDOR, lo promovemos a COMPANY
     if (user.role === UserRole.USER || user.role === UserRole.VENDOR) {

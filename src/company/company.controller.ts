@@ -6,7 +6,7 @@ import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/user/entities/user.entity';
 
-@Auth()
+// @Auth()
 @Controller('companies')
 export class CompanyController {
   constructor(private readonly companyService: CompanyService) { }

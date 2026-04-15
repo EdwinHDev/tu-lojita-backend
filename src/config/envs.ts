@@ -18,6 +18,14 @@ interface EnvVars {
   EMAIL_PASS: string;
   GOOGLE_CLIENT_ID: string;
   JWT_REFRESH_SECRET: string;
+  
+  // Frontend URLs
+  FRONTEND_VENDOR_URL_DEV: string;
+  FRONTEND_VENDOR_URL_PROD: string;
+  FRONTEND_ADMIN_URL_DEV: string;
+  FRONTEND_ADMIN_URL_PROD: string;
+  FRONTEND_CUSTOMER_URL_DEV: string;
+  FRONTEND_CUSTOMER_URL_PROD: string;
 }
 
 const envsSchema = joi.object({
@@ -37,6 +45,14 @@ const envsSchema = joi.object({
   EMAIL_PASS: joi.string().required(),
   GOOGLE_CLIENT_ID: joi.string().required(),
   JWT_REFRESH_SECRET: joi.string().required(),
+  
+  // Frontend URLs
+  FRONTEND_VENDOR_URL_DEV: joi.string().required(),
+  FRONTEND_VENDOR_URL_PROD: joi.string().required(),
+  FRONTEND_ADMIN_URL_DEV: joi.string().required(),
+  FRONTEND_ADMIN_URL_PROD: joi.string().required(),
+  FRONTEND_CUSTOMER_URL_DEV: joi.string().required(),
+  FRONTEND_CUSTOMER_URL_PROD: joi.string().required(),
 })
   .unknown(true);
 
@@ -67,4 +83,12 @@ export const envs = {
   emailPass: envVars.EMAIL_PASS,
   googleClientId: envVars.GOOGLE_CLIENT_ID,
   jwtRefreshSecret: envVars.JWT_REFRESH_SECRET,
+  
+  // Frontend URLs
+  frontendVendorUrlDev: envVars.FRONTEND_VENDOR_URL_DEV,
+  frontendVendorUrlProd: envVars.FRONTEND_VENDOR_URL_PROD,
+  frontendAdminUrlDev: envVars.FRONTEND_ADMIN_URL_DEV,
+  frontendAdminUrlProd: envVars.FRONTEND_ADMIN_URL_PROD,
+  frontendCustomerUrlDev: envVars.FRONTEND_CUSTOMER_URL_DEV,
+  frontendCustomerUrlProd: envVars.FRONTEND_CUSTOMER_URL_PROD,
 }
