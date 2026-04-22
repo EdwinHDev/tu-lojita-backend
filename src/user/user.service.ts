@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from './entities/user.entity';
 import { Company } from 'src/company/entities/company.entity';
 import { Store } from 'src/store/entities/store.entity';
@@ -126,5 +127,19 @@ export class UserService {
       companyId: company?.id || null,
       companyName: company?.name || null,
     };
+  }
+
+  async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
+    const user = await this.findOne(userId);
+
+    if (updateProfileDto.identification !== undefined) {
+      user.identification = updateProfileDto.identification;
+    }
+
+    if (updateProfileDto.phone !== undefined) {
+      user.phone = updateProfileDto.phone;
+    }
+
+    return await this.userRepository.save(user);
   }
 }

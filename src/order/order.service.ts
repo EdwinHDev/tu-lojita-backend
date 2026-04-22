@@ -59,8 +59,16 @@ export class OrderService {
 
       // 4. Procesar items y validar stock
       for (const itemDto of itemsDto) {
-        const item = await queryRunner.manager.findOne(Item, { where: { id: itemDto.itemId } });
+        const item = await queryRunner.manager.findOne(Item, { 
+          where: { id: itemDto.itemId },
+          relations: ['store']
+        });
         if (!item) throw new NotFoundException(`Item con ID ${itemDto.itemId} no encontrado`);
+
+        // Validar que el item pertenece a la tienda especificada
+        if (item.store.id !== storeId) {
+          throw new BadRequestException(`El item "${item.title}" no pertenece a la tienda seleccionada. Solo puedes ordenar items de una misma tienda.`);
+        }
 
         // Comprobar inventario si el item lo requiere (Producto físico)
         if (item.trackInventory) {
@@ -158,8 +166,12 @@ export class OrderService {
 
     const queryBuilder = this.orderRepository.createQueryBuilder('order')
       .leftJoinAndSelect('order.store', 'store')
+      .leftJoinAndSelect('store.subcategory', 'subcategory')
       .leftJoinAndSelect('order.user', 'user')
-      .leftJoinAndSelect('user.addresses', 'addresses');
+      .leftJoinAndSelect('user.addresses', 'addresses')
+      .leftJoinAndSelect('order.orderItems', 'orderItems')
+      .leftJoinAndSelect('orderItems.item', 'item')
+      .leftJoinAndSelect('order.payments', 'payments');
 
     if (status) {
       queryBuilder.andWhere('order.status = :status', { status });

@@ -103,7 +103,8 @@ export class StoreService {
       subCategoryId,
       city, 
       state, 
-      q
+      q,
+      withItems = false
     } = paginationDto;
 
     // Usamos QueryBuilder para manejar la lógica de múltiples direcciones
@@ -115,6 +116,17 @@ export class StoreService {
       .take(limit)
       .skip(offset);
 
+    // Si withItems es true, solo traer tiendas que tienen items
+    if (withItems) {
+      queryBuilder
+        .innerJoin('store.items', 'item')
+        .groupBy('store.id')
+        .addGroupBy('subCategory.id')
+        .addGroupBy('category.id')
+        .addGroupBy('owner.id')
+        .addGroupBy('address.id');
+    }
+
     // Filtros
     if (subCategoryId) queryBuilder.andWhere('subCategory.id = :subCategoryId', { subCategoryId });
     if (categoryId) queryBuilder.andWhere('category.id = :categoryId', { categoryId });
@@ -124,14 +136,37 @@ export class StoreService {
 
     queryBuilder.orderBy(`store.${sort}`, order);
 
-    const [data, total] = await queryBuilder.getManyAndCount();
+    // Cuando usamos GROUP BY, necesitamos contar de forma diferente
+    let total: number;
+    let data: Store[];
 
-    return {
-      data,
-      total,
-      limit,
-      offset
-    };
+    if (withItems) {
+      // Primero obtenemos los datos
+      data = await queryBuilder.getMany();
+
+      // Para el total, creamos una query separada sin paginación ni GROUP BY
+      const countQueryBuilder = this.storeRepository.createQueryBuilder('store')
+        .innerJoin('store.items', 'item')
+        .leftJoin('store.subcategory', 'subCategory')
+        .leftJoin('subCategory.category', 'category')
+        .leftJoin('store.addresses', 'address');
+
+      // Aplicamos los mismos filtros
+      if (subCategoryId) countQueryBuilder.andWhere('subCategory.id = :subCategoryId', { subCategoryId });
+      if (categoryId) countQueryBuilder.andWhere('category.id = :categoryId', { categoryId });
+      if (city) countQueryBuilder.andWhere('address.city ILIKE :city', { city: `%${city}%` });
+      if (state) countQueryBuilder.andWhere('address.state ILIKE :state', { state: `%${state}%` });
+      if (q) countQueryBuilder.andWhere('store.name ILIKE :q', { q: `%${q}%` });
+
+      // Contamos tiendas distintas
+      total = await countQueryBuilder
+        .select('COUNT(DISTINCT store.id)', 'count')
+        .getRawOne()
+        .then(result => parseInt(result.count));
+    } else {
+      // Sin GROUP BY, podemos usar getManyAndCount normalmente
+      [data, total] = await queryBuilder.getManyAndCount();
+    }
 
     return {
       data,
@@ -152,6 +187,26 @@ export class StoreService {
     }
 
     return store;
+  }
+
+  async findLatestWithItems(limit: number = 10) {
+    const stores = await this.storeRepository
+      .createQueryBuilder('store')
+      .leftJoinAndSelect('store.subcategory', 'subcategory')
+      .leftJoinAndSelect('subcategory.category', 'category')
+      .leftJoinAndSelect('store.owner', 'owner')
+      .leftJoinAndSelect('store.addresses', 'address')
+      .innerJoin('store.items', 'item')
+      .groupBy('store.id')
+      .addGroupBy('subcategory.id')
+      .addGroupBy('category.id')
+      .addGroupBy('owner.id')
+      .addGroupBy('address.id')
+      .orderBy('store.createdAt', 'DESC')
+      .limit(limit)
+      .getMany();
+
+    return stores;
   }
 
   async update(id: string, updateStoreDto: UpdateStoreDto, user: User) {

@@ -26,8 +26,11 @@ export class ItemController {
   }
 
   @Get('store/:storeId')
-  findByStore(@Param('storeId') storeId: string) {
-    return this.itemService.findByStore(storeId);
+  findByStore(
+    @Param('storeId') storeId: string,
+    @Query() paginationDto: ItemPaginationDto,
+  ) {
+    return this.itemService.findByStore(storeId, paginationDto);
   }
 
   @Get(':id')

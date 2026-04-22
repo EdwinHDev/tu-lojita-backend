@@ -178,10 +178,11 @@ export class ItemService {
     };
   }
 
-  async findByStore(storeId: string) {
-    return await this.itemRepository.find({
-      where: { store: { id: storeId } },
-      relations: ['category', 'store']
+  async findByStore(storeId: string, paginationDto: ItemPaginationDto) {
+    // Usar findAll con el filtro de storeId para aprovechar toda la lógica de paginación y búsqueda
+    return await this.findAll({
+      ...paginationDto,
+      storeId,
     });
   }
 

@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/commo
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { UserRole } from './types/user-role.enum';
@@ -33,16 +34,27 @@ export class UserController {
     return this.userService.checkHasCompany(userId);
   }
 
+  @Auth()
+  @Patch('profile')
+  updateProfile(
+    @GetUser('id') userId: string,
+    @Body() updateProfileDto: UpdateProfileDto
+  ) {
+    return this.userService.updateProfile(userId, updateProfileDto);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.userService.findOne(id);
   }
 
+  @Auth(UserRole.ADMIN)
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     return this.userService.update(id, updateUserDto);
   }
 
+  @Auth(UserRole.ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.userService.remove(id);

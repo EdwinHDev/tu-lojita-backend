@@ -25,6 +25,11 @@ export class StoreController {
     return this.storeService.findAll(storePaginationDto);
   }
 
+  @Get('latest')
+  findLatestWithItems(@Query('limit') limit?: number) {
+    return this.storeService.findLatestWithItems(limit);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.storeService.findOne(id);
