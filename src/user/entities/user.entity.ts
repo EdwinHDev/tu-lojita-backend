@@ -1,15 +1,24 @@
-import { BeforeInsert, BeforeUpdate, Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import {
+  BeforeInsert,
+  BeforeUpdate,
+  Column,
+  CreateDateColumn,
+  Entity,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { UserRole } from "../types";
-import { Address } from "src/address/entities/address.entity";
-import { Company } from "src/company/entities/company.entity";
-import { Store } from "src/store/entities/store.entity";
-import { Order } from "src/order/entities/order.entity";
-import { Payment } from "src/payment/entities/payment.entity";
+import { UserRole } from '../types';
+import { Address } from 'src/address/entities/address.entity';
+import { Company } from 'src/company/entities/company.entity';
+import { Store } from 'src/store/entities/store.entity';
+import { Order } from 'src/order/entities/order.entity';
+import { Payment } from 'src/payment/entities/payment.entity';
 
 @Entity('users')
 export class User {
-
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -17,33 +26,33 @@ export class User {
   firstName: string;
 
   @Column('text', {
-    nullable: true
+    nullable: true,
   })
   lastName?: string;
 
   @Column('text', {
-    unique: true
+    unique: true,
   })
   email: string;
 
   @Column('text', {
-    nullable: true
+    nullable: true,
   })
   identification?: string;
 
   @Column('text', {
-    nullable: true
+    nullable: true,
   })
   phone?: string;
 
   @Column('text', {
     unique: true,
-    nullable: true
+    nullable: true,
   })
   googleId: string;
 
   @Column('text', {
-    nullable: true
+    nullable: true,
   })
   avatarUrl: string;
 
@@ -51,26 +60,26 @@ export class User {
   password: string;
 
   @Column('bool', {
-    default: true
+    default: true,
   })
   isActive: boolean;
 
   @Column('bool', {
     default: false,
-    select: false
+    select: false,
   })
   confirm: boolean;
 
   @Column('text', {
     select: false,
-    nullable: true
+    nullable: true,
   })
   confirmToken?: string;
 
   @Column({
     type: 'enum',
     enum: UserRole,
-    default: UserRole.USER
+    default: UserRole.USER,
   })
   role: UserRole;
 
@@ -105,5 +114,4 @@ export class User {
       this.password = bcrypt.hashSync(this.password, 10);
     }
   }
-
 }

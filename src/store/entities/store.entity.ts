@@ -1,18 +1,27 @@
-import { PrimaryGeneratedColumn, Column, Entity, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, BeforeInsert, BeforeUpdate } from "typeorm";
-import { StoreCategory } from "src/store-category/entities/store-category.entity";
-import { Subcategory } from "src/subcategory/entities/subcategory.entity";
-import { Company } from "src/company/entities/company.entity";
-import { User } from "src/user/entities/user.entity";
-import { Item } from "src/item/entities/item.entity";
-import { StoreAddress } from "src/store-address/entities/store-address.entity";
-import { Payment } from "src/payment/entities/payment.entity";
-import { Order } from "src/order/entities/order.entity";
-import slugify from "slugify";
-import { StoreStatus } from "../types/status.enum";
+import {
+  PrimaryGeneratedColumn,
+  Column,
+  Entity,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  OneToMany,
+  BeforeInsert,
+  BeforeUpdate,
+} from 'typeorm';
+import { StoreCategory } from 'src/store-category/entities/store-category.entity';
+import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
+import { Company } from 'src/company/entities/company.entity';
+import { User } from 'src/user/entities/user.entity';
+import { Item } from 'src/item/entities/item.entity';
+import { StoreAddress } from 'src/store-address/entities/store-address.entity';
+import { Payment } from 'src/payment/entities/payment.entity';
+import { Order } from 'src/order/entities/order.entity';
+import slugify from 'slugify';
+import { StoreStatus } from '../types/status.enum';
 
 @Entity('stores')
 export class Store {
-
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -51,13 +60,13 @@ export class Store {
 
   @Column('text', {
     unique: true,
-    nullable: false
+    nullable: false,
   })
   slug: string;
 
   @Column('enum', {
     enum: StoreStatus,
-    default: StoreStatus.ACTIVE
+    default: StoreStatus.ACTIVE,
   })
   status: StoreStatus;
 
@@ -97,7 +106,9 @@ export class Store {
 
   @BeforeInsert()
   checkSlugInsert() {
-    const slugBase = this.branchName ? `${this.name} ${this.branchName}` : this.name;
+    const slugBase = this.branchName
+      ? `${this.name} ${this.branchName}`
+      : this.name;
     this.slug = slugify(slugBase, {
       lower: true,
       trim: true,
@@ -108,7 +119,9 @@ export class Store {
 
   @BeforeUpdate()
   checkSlugUpdate() {
-    const slugBase = this.branchName ? `${this.name} ${this.branchName}` : this.name;
+    const slugBase = this.branchName
+      ? `${this.name} ${this.branchName}`
+      : this.name;
     this.slug = slugify(slugBase, {
       lower: true,
       trim: true,
@@ -116,5 +129,4 @@ export class Store {
       remove: /[^a-zA-Z0-9]/g,
     });
   }
-
 }

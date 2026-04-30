@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from '@nestjs/common';
 import { StoreCategoryService } from './store-category.service';
 import { CreateStoreCategoryDto } from './dto/create-store-category.dto';
 import { UpdateStoreCategoryDto } from './dto/update-store-category.dto';
@@ -7,7 +15,7 @@ import { Auth } from 'src/auth/decorators/auth.decorator';
 @Auth()
 @Controller('store-categories')
 export class StoreCategoryController {
-  constructor(private readonly storeCategoryService: StoreCategoryService) { }
+  constructor(private readonly storeCategoryService: StoreCategoryService) {}
 
   @Post()
   create(@Body() createStoreCategoryDto: CreateStoreCategoryDto) {
@@ -30,12 +38,30 @@ export class StoreCategoryController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateStoreCategoryDto: UpdateStoreCategoryDto) {
+  update(
+    @Param('id') id: string,
+    @Body() updateStoreCategoryDto: UpdateStoreCategoryDto,
+  ) {
     return this.storeCategoryService.update(id, updateStoreCategoryDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.storeCategoryService.remove(id);
+  }
+
+  @Get(':id/templates')
+  findTemplates(@Param('id') id: string) {
+    return this.storeCategoryService.findTemplates(id);
+  }
+
+  @Post(':id/templates')
+  addTemplate(@Param('id') id: string, @Body() templateData: any) {
+    return this.storeCategoryService.addTemplate(id, templateData);
+  }
+
+  @Delete('templates/:templateId')
+  removeTemplate(@Param('templateId') templateId: string) {
+    return this.storeCategoryService.removeTemplate(templateId);
   }
 }

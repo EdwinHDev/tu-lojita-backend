@@ -1,7 +1,11 @@
 import { UserRole } from 'src/user/types';
 import { User } from 'src/user/entities/user.entity';
 
-export function transformUserDataByRole(user: User, requestingUserRole: UserRole, requestingUserId?: string) {
+export function transformUserDataByRole(
+  user: User,
+  requestingUserRole: UserRole,
+  requestingUserId?: string,
+) {
   if (!user) return null;
 
   // Si el usuario está viendo sus propios datos, retornar todo

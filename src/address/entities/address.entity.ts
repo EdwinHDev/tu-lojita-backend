@@ -1,5 +1,13 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
-import { User } from "src/user/entities/user.entity";
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { User } from 'src/user/entities/user.entity';
 
 const columnNumericTransformer = {
   to: (data: number): number => data,
@@ -18,7 +26,7 @@ export class Address {
   fullAddress: string;
 
   @Column('text', {
-    nullable: true
+    nullable: true,
   })
   reference: string;
 
@@ -33,7 +41,7 @@ export class Address {
   longitude: number;
 
   @Column('boolean', {
-    default: true
+    default: true,
   })
   isActive: boolean;
 

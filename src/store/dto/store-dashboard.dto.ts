@@ -1,4 +1,4 @@
-import { RecentSaleDto } from "src/company/dto/recent-sales.dto";
+import { RecentSaleDto } from 'src/company/dto/recent-sales.dto';
 
 export class StoreDashboardDto {
   stats: {

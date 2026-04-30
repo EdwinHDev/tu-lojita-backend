@@ -1,10 +1,17 @@
-import { IsString, IsUUID, MinLength, IsOptional, MaxLength, IsNotEmpty, ValidateNested } from "class-validator";
-import { Type } from "class-transformer";
-import { CreateStoreAddressDto } from "src/store-address/dto/create-store-address.dto";
-import { IsRif } from "../decorators/is-rif.decorator";
+import {
+  IsString,
+  IsUUID,
+  MinLength,
+  IsOptional,
+  MaxLength,
+  IsNotEmpty,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { CreateStoreAddressDto } from 'src/store-address/dto/create-store-address.dto';
+import { IsRif } from '../decorators/is-rif.decorator';
 
 export class CreateStoreDto {
-
   @IsString({ message: 'El nombre debe ser una cadena de texto' })
   @MinLength(1, { message: 'El nombre no puede estar vacío' })
   name: string;
@@ -41,9 +48,12 @@ export class CreateStoreDto {
   @IsUUID('4', { message: 'El ID de la subcategoría debe ser un UUID válido' })
   subCategoryId: string;
 
-  @IsString({ message: 'El nombre de la sucursal debe ser una cadena de texto' })
+  @IsString({
+    message: 'El nombre de la sucursal debe ser una cadena de texto',
+  })
   @IsOptional()
-  @MaxLength(100, { message: 'El nombre de la sucursal debe tener menos de 100 caracteres' })
+  @MaxLength(100, {
+    message: 'El nombre de la sucursal debe tener menos de 100 caracteres',
+  })
   branchName?: string;
-
 }

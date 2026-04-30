@@ -8,13 +8,12 @@ import { User } from 'src/user/entities/user.entity';
 
 @Injectable()
 export class AddressService {
-
   constructor(
     @InjectRepository(Address)
     private readonly addressRepository: Repository<Address>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-  ) { }
+  ) {}
 
   async create(createAddressDto: CreateAddressDto, userId: string) {
     const existUser = await this.userRepository.findOneBy({ id: userId });
@@ -25,14 +24,14 @@ export class AddressService {
     // 1. Apagamos TODAS las direcciones anteriores de este usuario
     await this.addressRepository.update(
       { user: { id: userId } },
-      { isActive: false }
+      { isActive: false },
     );
 
     // 2. Creamos la nueva asegurándonos que sea la activa
     const address = this.addressRepository.create({
       ...createAddressDto,
       isActive: true, // Forzamos a true
-      user: existUser
+      user: existUser,
     });
 
     const newAddress = await this.addressRepository.save(address);
@@ -43,18 +42,20 @@ export class AddressService {
   async findAll(userId: string) {
     return this.addressRepository.find({
       where: { user: { id: userId } },
-      order: { createdAt: 'DESC' } // Mostramos las más recientes primero
+      order: { createdAt: 'DESC' }, // Mostramos las más recientes primero
     });
   }
 
   async findOne(id: string, userId: string) {
     // Verificamos por id y por el userId para evitar que vean direcciones de otros
     const address = await this.addressRepository.findOne({
-      where: { id, user: { id: userId } }
+      where: { id, user: { id: userId } },
     });
 
     if (!address) {
-      throw new NotFoundException('No se encontró la dirección o no tienes permisos');
+      throw new NotFoundException(
+        'No se encontró la dirección o no tienes permisos',
+      );
     }
     return address;
   }
@@ -67,7 +68,7 @@ export class AddressService {
     if (updateAddressDto.isActive === true) {
       await this.addressRepository.update(
         { user: { id: userId } },
-        { isActive: false }
+        { isActive: false },
       );
     }
 
@@ -90,7 +91,7 @@ export class AddressService {
     if (wasActive) {
       const remainingAddress = await this.addressRepository.findOne({
         where: { user: { id: userId } },
-        order: { createdAt: 'DESC' } // Toma la última que haya creado
+        order: { createdAt: 'DESC' }, // Toma la última que haya creado
       });
 
       if (remainingAddress) {

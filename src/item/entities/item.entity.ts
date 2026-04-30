@@ -1,19 +1,25 @@
-import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
-import { ItemType } from "../types/item-type.enum";
-import { PriceType } from "../types/price-type.enum";
-import { ItemAttributes } from "../types/item-attributes.interface";
-import { Store } from "src/store/entities/store.entity";
-import { StoreCategory } from "src/store-category/entities/store-category.entity";
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { ItemType } from '../types/item-type.enum';
+import { PriceType } from '../types/price-type.enum';
+import { ItemAttributes } from '../types/item-attributes.interface';
+import { Store } from 'src/store/entities/store.entity';
+import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 
 /**
  * Entidad núcleo de la plataforma comercial.
- * Representa cualquier elemento que una tienda pueda ofrecer, unificando bajo 
- * una misma estructura tanto productos físicos (que se envían y agotan) 
+ * Representa cualquier elemento que una tienda pueda ofrecer, unificando bajo
+ * una misma estructura tanto productos físicos (que se envían y agotan)
  * como servicios (que se agendan o proveen de forma continua).
  */
 @Entity('items')
 export class Item {
-
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -24,8 +30,8 @@ export class Item {
   description: string;
 
   /**
-   * Precio base de venta. 
-   * Nota: Se usa 'numeric' para evitar problemas de precisión con decimales 
+   * Precio base de venta.
+   * Nota: Se usa 'numeric' para evitar problemas de precisión con decimales
    * (muy común si se usara 'float' para dinero).
    */
   @Column('numeric', {
@@ -33,7 +39,7 @@ export class Item {
     transformer: {
       to: (value: number) => value,
       from: (value: string) => parseFloat(value),
-    }
+    },
   })
   price: number;
 
@@ -42,7 +48,7 @@ export class Item {
    */
   @Column('enum', {
     enum: PriceType,
-    default: PriceType.FIXED
+    default: PriceType.FIXED,
   })
   priceType: PriceType;
 
@@ -56,7 +62,7 @@ export class Item {
    * DESTACADO: Permite resaltar productos en el Home o secciones especiales.
    */
   @Column('boolean', {
-    default: false
+    default: false,
   })
   isFeatured: boolean;
 
@@ -67,8 +73,8 @@ export class Item {
     nullable: true,
     transformer: {
       to: (value: number) => value,
-      from: (value: string) => value ? parseFloat(value) : null,
-    }
+      from: (value: string) => (value ? parseFloat(value) : null),
+    },
   })
   discountPrice?: number;
 
@@ -79,7 +85,7 @@ export class Item {
    */
   @Column('enum', {
     enum: ItemType,
-    default: ItemType.PRODUCT
+    default: ItemType.PRODUCT,
   })
   itemType: ItemType;
 
@@ -89,7 +95,7 @@ export class Item {
    * - false: El elemento tiene disponibilidad ilimitada (ej. un servicio digital, o una tienda que asume stock infinito).
    */
   @Column('boolean', {
-    default: true
+    default: true,
   })
   trackInventory: boolean;
 
@@ -103,8 +109,8 @@ export class Item {
     nullable: true,
     transformer: {
       to: (value: number) => value,
-      from: (value: string) => value ? parseFloat(value) : 0,
-    }
+      from: (value: string) => (value ? parseFloat(value) : 0),
+    },
   })
   stockQuantity?: number;
 
@@ -114,7 +120,7 @@ export class Item {
    * - false: El elemento es de consumo o despacho inmediato (comportamiento clásico de e-commerce).
    */
   @Column('boolean', {
-    default: false
+    default: false,
   })
   requiresBooking: boolean;
 
@@ -124,7 +130,9 @@ export class Item {
   @ManyToOne(() => Store, (store) => store.items)
   store: Store;
 
-  @ManyToOne(() => StoreCategory, (category) => category.items, { nullable: true })
+  @ManyToOne(() => StoreCategory, (category) => category.items, {
+    nullable: true,
+  })
   category: StoreCategory;
 
   @CreateDateColumn()

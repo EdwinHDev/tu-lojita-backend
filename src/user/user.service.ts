@@ -10,7 +10,6 @@ import { Store } from 'src/store/entities/store.entity';
 
 @Injectable()
 export class UserService {
-
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -18,21 +17,28 @@ export class UserService {
     private readonly companyRepository: Repository<Company>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
-  ) { }
+  ) {}
 
   async create(createUserDto: CreateUserDto) {
     const { companyId, storeId, ...userDetails } = createUserDto;
 
     let company: Company | undefined;
     if (companyId) {
-      company = await this.companyRepository.findOneBy({ id: companyId }) ?? undefined;
-      if (!company) throw new NotFoundException(`Empresa con ID ${companyId} no encontrada`);
+      company =
+        (await this.companyRepository.findOneBy({ id: companyId })) ??
+        undefined;
+      if (!company)
+        throw new NotFoundException(
+          `Empresa con ID ${companyId} no encontrada`,
+        );
     }
 
     let store: Store | undefined;
     if (storeId) {
-      store = await this.storeRepository.findOneBy({ id: storeId }) ?? undefined;
-      if (!store) throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
+      store =
+        (await this.storeRepository.findOneBy({ id: storeId })) ?? undefined;
+      if (!store)
+        throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
     }
 
     const user = this.userRepository.create({
@@ -46,7 +52,7 @@ export class UserService {
 
   findAll() {
     const users = this.userRepository.find({
-      relations: ['addresses', 'company', 'store']
+      relations: ['addresses', 'company', 'store'],
     });
     return users;
   }
@@ -54,10 +60,11 @@ export class UserService {
   async findOne(id: string) {
     const user = await this.userRepository.findOne({
       where: { id },
-      relations: ['addresses', 'company', 'store']
+      relations: ['addresses', 'company', 'store'],
     });
 
-    if (!user) throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+    if (!user)
+      throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     return user;
   }
 
@@ -67,8 +74,13 @@ export class UserService {
 
     if (companyId !== undefined) {
       if (companyId) {
-        const company = await this.companyRepository.findOneBy({ id: companyId }) ?? undefined;
-        if (!company) throw new NotFoundException(`Empresa con ID ${companyId} no encontrada`);
+        const company =
+          (await this.companyRepository.findOneBy({ id: companyId })) ??
+          undefined;
+        if (!company)
+          throw new NotFoundException(
+            `Empresa con ID ${companyId} no encontrada`,
+          );
         user.company = company;
       } else {
         user.company = undefined;
@@ -77,8 +89,10 @@ export class UserService {
 
     if (storeId !== undefined) {
       if (storeId) {
-        const store = await this.storeRepository.findOneBy({ id: storeId }) ?? undefined;
-        if (!store) throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
+        const store =
+          (await this.storeRepository.findOneBy({ id: storeId })) ?? undefined;
+        if (!store)
+          throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
         user.store = store;
       } else {
         user.store = undefined;
@@ -96,7 +110,7 @@ export class UserService {
   }
 
   async checkHasStore(userId: string) {
-    if (!await this.userRepository.findOneBy({ id: userId })) {
+    if (!(await this.userRepository.findOneBy({ id: userId }))) {
       throw new NotFoundException(`Usuario con ID ${userId} no encontrado`);
     }
 
@@ -115,7 +129,7 @@ export class UserService {
   }
 
   async checkHasCompany(userId: string) {
-    if (!await this.userRepository.findOneBy({ id: userId })) {
+    if (!(await this.userRepository.findOneBy({ id: userId }))) {
       throw new NotFoundException(`Usuario con ID ${userId} no encontrado`);
     }
 

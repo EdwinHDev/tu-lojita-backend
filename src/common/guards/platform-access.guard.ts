@@ -1,4 +1,9 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+} from '@nestjs/common';
 import { UserRole } from 'src/user/types';
 import { envs } from 'src/config/envs';
 
@@ -14,7 +19,6 @@ export enum Platform {
 
 @Injectable()
 export class PlatformAccessGuard implements CanActivate {
-  
   // Lista blanca de origins permitidos (NO MODIFICABLE por el usuario)
   private readonly allowedOrigins: Record<string, Platform> = {
     // Desarrollo
@@ -39,7 +43,7 @@ export class PlatformAccessGuard implements CanActivate {
 
     // Identificar plataforma
     const platform = this.identifyPlatform(request);
-    
+
     // Inyectar plataforma en request para uso posterior
     request.platform = platform;
 
@@ -49,7 +53,8 @@ export class PlatformAccessGuard implements CanActivate {
         statusCode: 403,
         message: 'Acceso denegado desde esta plataforma',
         reason: 'COMPANY_NOT_ALLOWED_ON_VENDOR_WEB',
-        details: 'Los usuarios con rol COMPANY deben usar la aplicación móvil de negocios para gestionar múltiples tiendas y acceder a funcionalidades avanzadas.',
+        details:
+          'Los usuarios con rol COMPANY deben usar la aplicación móvil de negocios para gestionar múltiples tiendas y acceder a funcionalidades avanzadas.',
       });
     }
 
@@ -74,7 +79,7 @@ export class PlatformAccessGuard implements CanActivate {
 
     // 3. Identificar por User-Agent (Apps móviles - Configurado nativamente)
     const userAgent = request.headers['user-agent'] || '';
-    
+
     if (userAgent.includes('TuLojitaBusiness')) {
       return Platform.APP_BUSINESS;
     }

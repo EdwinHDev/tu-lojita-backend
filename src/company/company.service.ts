@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -10,7 +16,6 @@ import { UserRole } from 'src/user/types/user-role.enum';
 
 @Injectable()
 export class CompanyService {
-
   constructor(
     @InjectRepository(Company)
     private readonly companyRepository: Repository<Company>,
@@ -18,12 +23,12 @@ export class CompanyService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
-  ) { }
+  ) {}
 
   async create(createCompanyDto: CreateCompanyDto, user: User) {
     // 1. Verificar si el usuario ya tiene una empresa registrada
     const existingUserCompany = await this.companyRepository.findOne({
-      where: { owner: { id: user.id } }
+      where: { owner: { id: user.id } },
     });
 
     if (existingUserCompany) {
@@ -67,14 +72,14 @@ export class CompanyService {
 
   findAll() {
     return this.companyRepository.find({
-      relations: ['stores', 'owner']
+      relations: ['stores', 'owner'],
     });
   }
 
   async findOne(id: string) {
     const company = await this.companyRepository.findOne({
       where: { id },
-      relations: ['stores', 'owner']
+      relations: ['stores', 'owner'],
     });
 
     if (!company) {
@@ -89,26 +94,32 @@ export class CompanyService {
 
     // Validar propiedad (solo dueño o ADMIN pueden editar)
     if (company.owner?.id !== user.id && user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('No tienes permiso para editar esta empresa');
+      throw new ForbiddenException(
+        'No tienes permiso para editar esta empresa',
+      );
     }
-    
+
     // Si se está actualizando el RIF, verificar unicidad
     if (updateCompanyDto.rif && updateCompanyDto.rif !== company.rif) {
       await this.checkRifUniqueness(updateCompanyDto.rif, id);
     }
-    
+
     this.companyRepository.merge(company, updateCompanyDto);
     const updatedCompany = await this.companyRepository.save(company);
 
     // Propagar cambios a las tiendas si cambió el nombre, rif o logo
-    if (updateCompanyDto.name || updateCompanyDto.rif || updateCompanyDto.logo) {
+    if (
+      updateCompanyDto.name ||
+      updateCompanyDto.rif ||
+      updateCompanyDto.logo
+    ) {
       await this.storeRepository.update(
         { company: { id: updatedCompany.id } },
         {
           ...(updateCompanyDto.name && { name: updatedCompany.name }),
           ...(updateCompanyDto.rif && { rif: updatedCompany.rif }),
           ...(updateCompanyDto.logo && { logo: updatedCompany.logo }),
-        }
+        },
       );
     }
 
@@ -121,13 +132,18 @@ export class CompanyService {
     return { deleted: true };
   }
 
-  private async checkRifUniqueness(rif: string, excludeCompanyId?: string): Promise<void> {
+  private async checkRifUniqueness(
+    rif: string,
+    excludeCompanyId?: string,
+  ): Promise<void> {
     const existingCompany = await this.companyRepository.findOne({
       where: { rif },
     });
 
     if (existingCompany && existingCompany.id !== excludeCompanyId) {
-      throw new BadRequestException('El RIF ya está registrado por otra empresa');
+      throw new BadRequestException(
+        'El RIF ya está registrado por otra empresa',
+      );
     }
   }
 }

@@ -13,10 +13,14 @@ export class PaginationDto {
   offset?: number = 0;
 
   @IsOptional()
-  @IsString({ message: 'El campo de ordenamiento debe ser una cadena de texto' })
+  @IsString({
+    message: 'El campo de ordenamiento debe ser una cadena de texto',
+  })
   sort?: string = 'createdAt';
 
   @IsOptional()
-  @IsString({ message: 'La dirección de ordenamiento debe ser una cadena de texto' })
+  @IsString({
+    message: 'La dirección de ordenamiento debe ser una cadena de texto',
+  })
   order?: 'ASC' | 'DESC' = 'DESC';
 }

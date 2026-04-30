@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from '@nestjs/common';
 import { AddressService } from './address.service';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
@@ -8,12 +16,12 @@ import { Auth } from 'src/auth/decorators/auth.decorator';
 @Auth()
 @Controller('address')
 export class AddressController {
-  constructor(private readonly addressService: AddressService) { }
+  constructor(private readonly addressService: AddressService) {}
 
   @Post()
   create(
     @Body() createAddressDto: CreateAddressDto,
-    @GetUser('id') userId: string
+    @GetUser('id') userId: string,
   ) {
     return this.addressService.create(createAddressDto, userId);
   }
@@ -26,7 +34,7 @@ export class AddressController {
   @Get(':id')
   findOne(
     @Param('id') id: string,
-    @GetUser('id') userId: string // Seguridad: Validar que sea dueño
+    @GetUser('id') userId: string, // Seguridad: Validar que sea dueño
   ) {
     return this.addressService.findOne(id, userId);
   }
@@ -35,7 +43,7 @@ export class AddressController {
   update(
     @Param('id') id: string,
     @Body() updateAddressDto: UpdateAddressDto,
-    @GetUser('id') userId: string // Inyectamos userId
+    @GetUser('id') userId: string, // Inyectamos userId
   ) {
     return this.addressService.update(id, updateAddressDto, userId);
   }
@@ -43,7 +51,7 @@ export class AddressController {
   @Delete(':id')
   remove(
     @Param('id') id: string,
-    @GetUser('id') userId: string // Inyectamos userId
+    @GetUser('id') userId: string, // Inyectamos userId
   ) {
     return this.addressService.remove(id, userId);
   }

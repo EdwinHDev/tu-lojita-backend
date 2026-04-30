@@ -1,9 +1,8 @@
-import { IsEnum, IsOptional, IsString, IsUUID } from "class-validator";
-import { PaginationDto } from "src/common/dto/pagination.dto";
-import { PaymentStatus } from "../types";
+import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { PaginationDto } from 'src/common/dto/pagination.dto';
+import { PaymentStatus } from '../types';
 
 export class PaymentPaginationDto extends PaginationDto {
-
   @IsOptional()
   @IsEnum(PaymentStatus, { message: 'Estado de pago no válido' })
   status?: PaymentStatus;

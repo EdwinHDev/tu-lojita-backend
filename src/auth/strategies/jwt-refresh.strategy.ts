@@ -7,7 +7,10 @@ import { User } from '../../user/entities/user.entity';
 import { envs } from '../../config/envs';
 
 @Injectable()
-export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
+export class JwtRefreshStrategy extends PassportStrategy(
+  Strategy,
+  'jwt-refresh',
+) {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,

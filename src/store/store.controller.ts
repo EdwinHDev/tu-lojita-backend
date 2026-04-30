@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+} from '@nestjs/common';
 import { StoreService } from './store.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
@@ -10,13 +19,10 @@ import { StorePaginationDto } from './dto/store-pagination.dto';
 @Auth()
 @Controller('stores')
 export class StoreController {
-  constructor(private readonly storeService: StoreService) { }
+  constructor(private readonly storeService: StoreService) {}
 
   @Post()
-  create(
-    @Body() createStoreDto: CreateStoreDto,
-    @GetUser() user: User,
-  ) {
+  create(@Body() createStoreDto: CreateStoreDto, @GetUser() user: User) {
     return this.storeService.create(createStoreDto, user);
   }
 

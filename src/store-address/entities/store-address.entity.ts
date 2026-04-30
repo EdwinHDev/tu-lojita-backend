@@ -1,5 +1,12 @@
-import { Store } from "src/store/entities/store.entity";
-import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Store } from 'src/store/entities/store.entity';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 @Entity('store_addresses')
 export class StoreAddress {
@@ -24,8 +31,8 @@ export class StoreAddress {
     scale: 7,
     transformer: {
       to: (value: number) => value,
-      from: (value: string) => value ? parseFloat(value) : null,
-    }
+      from: (value: string) => (value ? parseFloat(value) : null),
+    },
   })
   latitude: number;
 
@@ -34,8 +41,8 @@ export class StoreAddress {
     scale: 7,
     transformer: {
       to: (value: number) => value,
-      from: (value: string) => value ? parseFloat(value) : null,
-    }
+      from: (value: string) => (value ? parseFloat(value) : null),
+    },
   })
   longitude: number;
 

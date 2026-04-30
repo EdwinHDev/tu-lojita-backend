@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, MoreThanOrEqual, In } from 'typeorm';
 import { Company } from './entities/company.entity';
@@ -8,8 +12,14 @@ import { User } from 'src/user/entities/user.entity';
 import { Item } from 'src/item/entities/item.entity';
 import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 import { RecentSalesResponseDto, RecentSaleDto } from './dto/recent-sales.dto';
-import { StoresSummaryResponseDto, StoreSummaryDto } from './dto/stores-summary.dto';
-import { CompanyStoresResponseDto, CompanyStoreDto } from './dto/company-stores.dto';
+import {
+  StoresSummaryResponseDto,
+  StoreSummaryDto,
+} from './dto/stores-summary.dto';
+import {
+  CompanyStoresResponseDto,
+  CompanyStoreDto,
+} from './dto/company-stores.dto';
 import { OrderStatus } from 'src/order/types';
 
 @Injectable()
@@ -30,7 +40,10 @@ export class CompanyDashboardService {
   /**
    * Validar que el usuario pertenece a la empresa
    */
-  private async validateUserCompany(userId: string, companyId: string): Promise<void> {
+  private async validateUserCompany(
+    userId: string,
+    companyId: string,
+  ): Promise<void> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
     });
@@ -41,9 +54,9 @@ export class CompanyDashboardService {
 
     // Verificar que la empresa existe y que el usuario es el owner
     const company = await this.companyRepository.findOne({
-      where: { 
+      where: {
         id: companyId,
-        owner: { id: userId }
+        owner: { id: userId },
       },
     });
 
@@ -55,7 +68,10 @@ export class CompanyDashboardService {
   /**
    * Obtener estadísticas del dashboard
    */
-  async getDashboardStats(companyId: string, userId: string): Promise<DashboardStatsDto> {
+  async getDashboardStats(
+    companyId: string,
+    userId: string,
+  ): Promise<DashboardStatsDto> {
     await this.validateUserCompany(userId, companyId);
 
     const company = await this.companyRepository.findOne({
@@ -67,7 +83,7 @@ export class CompanyDashboardService {
       throw new NotFoundException('Empresa no encontrada');
     }
 
-    const storeIds = company.stores.map(store => store.id);
+    const storeIds = company.stores.map((store) => store.id);
 
     // Si no hay tiendas, retornar estadísticas en 0
     if (storeIds.length === 0) {
@@ -94,13 +110,17 @@ export class CompanyDashboardService {
 
     // Calcular fechas
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
     const startOfYesterday = new Date(startOfToday);
     startOfYesterday.setDate(startOfYesterday.getDate() - 1);
-    
+
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - 7);
-    
+
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     // 1. Ventas de hoy (incluye órdenes pagadas total o parcialmente)
@@ -108,10 +128,12 @@ export class CompanyDashboardService {
       .createQueryBuilder('order')
       .select('SUM(order.finalAmount)', 'total')
       .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', { 
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID] 
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
-      .andWhere('order.createdAt >= :startOfToday', { startOfToday: startOfToday.toISOString() })
+      .andWhere('order.createdAt >= :startOfToday', {
+        startOfToday: startOfToday.toISOString(),
+      })
       .getRawOne();
 
     // Ventas de ayer para calcular porcentaje
@@ -119,18 +141,24 @@ export class CompanyDashboardService {
       .createQueryBuilder('order')
       .select('SUM(order.finalAmount)', 'total')
       .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', { 
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID] 
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
-      .andWhere('order.createdAt >= :startOfYesterday', { startOfYesterday: startOfYesterday.toISOString() })
-      .andWhere('order.createdAt < :startOfToday', { startOfToday: startOfToday.toISOString() })
+      .andWhere('order.createdAt >= :startOfYesterday', {
+        startOfYesterday: startOfYesterday.toISOString(),
+      })
+      .andWhere('order.createdAt < :startOfToday', {
+        startOfToday: startOfToday.toISOString(),
+      })
       .getRawOne();
 
     const salesTodayAmount = parseFloat(salesToday?.total || '0');
     const salesYesterdayAmount = parseFloat(salesYesterday?.total || '0');
-    const salesPercentage = salesYesterdayAmount > 0 
-      ? ((salesTodayAmount - salesYesterdayAmount) / salesYesterdayAmount) * 100 
-      : 0;
+    const salesPercentage =
+      salesYesterdayAmount > 0
+        ? ((salesTodayAmount - salesYesterdayAmount) / salesYesterdayAmount) *
+          100
+        : 0;
 
     // 2. Total de tiendas
     const totalStores = company.stores.length;
@@ -158,8 +186,8 @@ export class CompanyDashboardService {
       .createQueryBuilder('order')
       .select('COUNT(DISTINCT order.userId)', 'total')
       .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', { 
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID] 
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
       .getRawOne();
 
@@ -167,10 +195,12 @@ export class CompanyDashboardService {
       .createQueryBuilder('order')
       .select('COUNT(DISTINCT order.userId)', 'total')
       .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', { 
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID] 
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
-      .andWhere('order.createdAt >= :startOfMonth', { startOfMonth: startOfMonth.toISOString() })
+      .andWhere('order.createdAt >= :startOfMonth', {
+        startOfMonth: startOfMonth.toISOString(),
+      })
       .getRawOne();
 
     return {
@@ -197,7 +227,11 @@ export class CompanyDashboardService {
   /**
    * Obtener ventas recientes
    */
-  async getRecentSales(companyId: string, userId: string, limit: number = 5): Promise<RecentSalesResponseDto> {
+  async getRecentSales(
+    companyId: string,
+    userId: string,
+    limit: number = 5,
+  ): Promise<RecentSalesResponseDto> {
     await this.validateUserCompany(userId, companyId);
 
     const company = await this.companyRepository.findOne({
@@ -209,7 +243,7 @@ export class CompanyDashboardService {
       throw new NotFoundException('Empresa no encontrada');
     }
 
-    const storeIds = company.stores.map(store => store.id);
+    const storeIds = company.stores.map((store) => store.id);
 
     // Si no hay tiendas, retornar array vacío
     if (storeIds.length === 0) {
@@ -223,14 +257,14 @@ export class CompanyDashboardService {
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.store', 'store')
       .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', { 
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID] 
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
       .orderBy('order.createdAt', 'DESC')
       .take(limit)
       .getMany();
 
-    const recentSales: RecentSaleDto[] = orders.map(order => {
+    const recentSales: RecentSaleDto[] = orders.map((order) => {
       const orderDate = new Date(order.createdAt);
       const hours = orderDate.getHours().toString().padStart(2, '0');
       const minutes = orderDate.getMinutes().toString().padStart(2, '0');
@@ -257,7 +291,10 @@ export class CompanyDashboardService {
   /**
    * Obtener resumen de tiendas
    */
-  async getStoresSummary(companyId: string, userId: string): Promise<StoresSummaryResponseDto> {
+  async getStoresSummary(
+    companyId: string,
+    userId: string,
+  ): Promise<StoresSummaryResponseDto> {
     await this.validateUserCompany(userId, companyId);
 
     const stores = await this.storeRepository.find({
@@ -266,7 +303,7 @@ export class CompanyDashboardService {
       order: { createdAt: 'DESC' },
     });
 
-    const storesSummary: StoreSummaryDto[] = stores.map(store => ({
+    const storesSummary: StoreSummaryDto[] = stores.map((store) => ({
       id: store.id,
       name: store.name,
       branchName: store.branchName,
@@ -284,7 +321,10 @@ export class CompanyDashboardService {
   /**
    * Obtener tiendas de la empresa con estadísticas
    */
-  async getCompanyStores(companyId: string, userId: string): Promise<CompanyStoresResponseDto> {
+  async getCompanyStores(
+    companyId: string,
+    userId: string,
+  ): Promise<CompanyStoresResponseDto> {
     await this.validateUserCompany(userId, companyId);
 
     const stores = await this.storeRepository.find({
@@ -295,7 +335,11 @@ export class CompanyDashboardService {
 
     // Calcular fecha de inicio del día
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
 
     const companyStores: CompanyStoreDto[] = await Promise.all(
       stores.map(async (store) => {
@@ -307,7 +351,9 @@ export class CompanyDashboardService {
           .andWhere('order.status IN (:...statuses)', {
             statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
           })
-          .andWhere('order.createdAt >= :startOfToday', { startOfToday: startOfToday.toISOString() })
+          .andWhere('order.createdAt >= :startOfToday', {
+            startOfToday: startOfToday.toISOString(),
+          })
           .getRawOne();
 
         return {
@@ -321,7 +367,7 @@ export class CompanyDashboardService {
           salesToday: parseFloat(salesToday?.total || '0'),
           currency: 'USD',
         };
-      })
+      }),
     );
 
     return {

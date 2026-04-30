@@ -1,9 +1,16 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateStoreDto } from './create-store.dto';
-import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class UpdateStoreDto extends PartialType(CreateStoreDto) {
-
   @IsBoolean({ message: 'El campo allowPartialPayments debe ser un booleano' })
   @IsOptional()
   allowPartialPayments?: boolean;

@@ -1,10 +1,16 @@
-import { PrimaryGeneratedColumn, Column, Entity, CreateDateColumn, UpdateDateColumn, OneToMany } from "typeorm";
-import { Store } from "src/store/entities/store.entity";
-import { Subcategory } from "src/subcategory/entities/subcategory.entity";
+import {
+  PrimaryGeneratedColumn,
+  Column,
+  Entity,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToMany,
+} from 'typeorm';
+import { Store } from 'src/store/entities/store.entity';
+import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 
 @Entity('categories')
 export class Category {
-
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -26,5 +32,4 @@ export class Category {
 
   @UpdateDateColumn()
   updatedAt: string;
-
 }

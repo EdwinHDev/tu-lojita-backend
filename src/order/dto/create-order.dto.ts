@@ -1,9 +1,16 @@
-import { IsArray, IsBoolean, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested } from "class-validator";
-import { Type } from "class-transformer";
-import { CreateOrderItemDto } from "../../order-item/dto/create-order-item.dto";
+import {
+  IsArray,
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { CreateOrderItemDto } from '../../order-item/dto/create-order-item.dto';
 
 export class CreateOrderDto {
-
   @IsString({ message: 'El ID de la tienda debe ser una cadena de texto' })
   @IsUUID('4', { message: 'El ID de la tienda debe ser un UUID válido' })
   @IsNotEmpty({ message: 'El ID de la tienda es obligatorio' })
@@ -18,5 +25,4 @@ export class CreateOrderDto {
   @Type(() => CreateOrderItemDto)
   @IsNotEmpty({ message: 'La orden debe tener al menos un item' })
   items: CreateOrderItemDto[];
-
 }

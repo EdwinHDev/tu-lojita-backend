@@ -3,11 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ItemService } from './item.service';
 import { ItemController } from './item.controller';
 import { Item } from './entities/item.entity';
+import { ItemPropertyTemplate } from './entities/item-property-template.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Item, Store, StoreCategory])],
+  imports: [TypeOrmModule.forFeature([Item, ItemPropertyTemplate, Store, StoreCategory])],
   controllers: [ItemController],
   providers: [ItemService],
 })

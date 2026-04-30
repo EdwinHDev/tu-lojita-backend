@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthGoogleLoginDto } from './dto/auth-google-login.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -8,7 +18,7 @@ import { Auth } from './decorators/auth.decorator';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(private readonly authService: AuthService) {}
 
   @Post('google')
   checkGoogleAuth(@Body() authGoogleLoginDto: AuthGoogleLoginDto) {

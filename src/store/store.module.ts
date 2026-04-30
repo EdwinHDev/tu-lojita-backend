@@ -13,8 +13,20 @@ import { Item } from 'src/item/entities/item.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Store, Company, Category, Subcategory, User, StoreAddress, Order, Item, StoreCategory])],
+  imports: [
+    TypeOrmModule.forFeature([
+      Store,
+      Company,
+      Category,
+      Subcategory,
+      User,
+      StoreAddress,
+      Order,
+      Item,
+      StoreCategory,
+    ]),
+  ],
   controllers: [StoreController],
   providers: [StoreService],
 })
-export class StoreModule { }
+export class StoreModule {}

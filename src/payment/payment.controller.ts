@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+} from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
@@ -14,10 +23,7 @@ export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
   @Post()
-  create(
-    @Body() createPaymentDto: CreatePaymentDto,
-    @GetUser() user: User,
-  ) {
+  create(@Body() createPaymentDto: CreatePaymentDto, @GetUser() user: User) {
     // El userId se obtiene del usuario autenticado, no del body
     return this.paymentService.create(createPaymentDto, user.id);
   }

@@ -1,5 +1,11 @@
 import { Reflector } from '@nestjs/core';
-import { BadRequestException, CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { User } from 'src/user/entities/user.entity';
 import { META_ROLES } from '../decorators/role-protected.decorator';
@@ -7,14 +13,16 @@ import { META_ROLES } from '../decorators/role-protected.decorator';
 @Injectable()
 export class UserRoleGuard implements CanActivate {
   // Reflector nos permite leer los metadatos que guardó el decorador @RoleProtected
-  constructor(private readonly reflector: Reflector) { }
+  constructor(private readonly reflector: Reflector) {}
 
   canActivate(
     context: ExecutionContext,
   ): boolean | Promise<boolean> | Observable<boolean> {
-
     // 1. Leemos qué roles requiere esta ruta en específico
-    const validRoles: string[] = this.reflector.get(META_ROLES, context.getHandler());
+    const validRoles: string[] = this.reflector.get(
+      META_ROLES,
+      context.getHandler(),
+    );
 
     // 2. Si la ruta no tiene el decorador @RoleProtected, la dejamos pasar por defecto
     if (!validRoles) return true;
@@ -25,7 +33,9 @@ export class UserRoleGuard implements CanActivate {
     const user = req.user as User;
 
     if (!user) {
-      throw new BadRequestException('Usuario no encontrado (¿Olvidaste poner el AuthGuard?)');
+      throw new BadRequestException(
+        'Usuario no encontrado (¿Olvidaste poner el AuthGuard?)',
+      );
     }
 
     // 4. Verificamos si el rol del usuario está dentro de los roles permitidos (O si es SUPER admin)
@@ -38,7 +48,7 @@ export class UserRoleGuard implements CanActivate {
 
     // 5. Si llega hasta aquí, no tiene permisos
     throw new ForbiddenException(
-      `El usuario ${user.firstName} necesita uno de estos roles: [${validRoles}]`
+      `El usuario ${user.firstName} necesita uno de estos roles: [${validRoles}]`,
     );
   }
 }

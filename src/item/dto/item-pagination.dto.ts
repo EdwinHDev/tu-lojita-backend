@@ -1,5 +1,13 @@
 import { Type, Transform } from 'class-transformer';
-import { IsOptional, IsNumber, IsUUID, IsString, Min, IsBoolean, IsEnum } from 'class-validator';
+import {
+  IsOptional,
+  IsNumber,
+  IsUUID,
+  IsString,
+  Min,
+  IsBoolean,
+  IsEnum,
+} from 'class-validator';
 import { PriceType } from '../types/price-type.enum';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
@@ -25,11 +33,15 @@ export class ItemPaginationDto extends PaginationDto {
   storeId?: string;
 
   @IsOptional()
-  @IsUUID('4', { message: 'El ID de la categoría interna debe ser un UUID válido' })
+  @IsUUID('4', {
+    message: 'El ID de la categoría interna debe ser un UUID válido',
+  })
   storeCategoryId?: string;
 
   @IsOptional()
-  @IsUUID('4', { message: 'El ID de la categoría global debe ser un UUID válido' })
+  @IsUUID('4', {
+    message: 'El ID de la categoría global debe ser un UUID válido',
+  })
   globalCategoryId?: string;
 
   @IsOptional()
@@ -41,7 +53,9 @@ export class ItemPaginationDto extends PaginationDto {
   state?: string;
 
   @IsOptional()
-  @IsString({ message: 'El término de búsqueda (q) debe ser una cadena de texto' })
+  @IsString({
+    message: 'El término de búsqueda (q) debe ser una cadena de texto',
+  })
   q?: string;
 
   @IsOptional()

@@ -56,4 +56,4 @@ import { OrderItemModule } from './order-item/order-item.module';
   controllers: [],
   providers: [],
 })
-export class AppModule { }
+export class AppModule {}

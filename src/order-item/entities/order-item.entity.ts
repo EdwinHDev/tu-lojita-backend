@@ -1,10 +1,9 @@
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
-import { Order } from "../../order/entities/order.entity";
-import { Item } from "../../item/entities/item.entity";
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Order } from '../../order/entities/order.entity';
+import { Item } from '../../item/entities/item.entity';
 
 @Entity('order_items')
 export class OrderItem {
-
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -20,7 +19,7 @@ export class OrderItem {
     transformer: {
       to: (value: number) => value,
       from: (value: string) => parseFloat(value),
-    }
+    },
   })
   price: number; // Snapshot del precio al momento de la compra
 
@@ -29,5 +28,4 @@ export class OrderItem {
 
   @ManyToOne(() => Item)
   item: Item;
-
 }

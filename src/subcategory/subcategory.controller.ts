@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+} from '@nestjs/common';
 import { SubcategoryService } from './subcategory.service';
 import { CreateSubcategoryDto } from './dto/create-subcategory.dto';
 import { UpdateSubcategoryDto } from './dto/update-subcategory.dto';
@@ -8,7 +17,7 @@ import { UserRole } from 'src/user/types';
 
 @Controller('subcategories')
 export class SubcategoryController {
-  constructor(private readonly subcategoryService: SubcategoryService) { }
+  constructor(private readonly subcategoryService: SubcategoryService) {}
 
   // @Auth(UserRole.ADMIN)
   @Post()
@@ -28,7 +37,10 @@ export class SubcategoryController {
 
   @Auth(UserRole.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSubcategoryDto: UpdateSubcategoryDto) {
+  update(
+    @Param('id') id: string,
+    @Body() updateSubcategoryDto: UpdateSubcategoryDto,
+  ) {
     return this.subcategoryService.update(id, updateSubcategoryDto);
   }
 

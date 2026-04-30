@@ -1,8 +1,7 @@
-import { IsOptional, IsUUID } from "class-validator";
-import { PaginationDto } from "src/common/dto/pagination.dto";
+import { IsOptional, IsUUID } from 'class-validator';
+import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 export class OrderItemPaginationDto extends PaginationDto {
-
   @IsOptional()
   @IsUUID('4', { message: 'El ID de la orden debe ser un UUID válido' })
   orderId?: string;

@@ -15,8 +15,8 @@ async function bootstrap() {
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
-      }
-    })
+      },
+    }),
   );
 
   app.setGlobalPrefix('api/v1');
@@ -31,8 +31,8 @@ async function bootstrap() {
       envs.frontendVendorUrlProd,
       envs.frontendAdminUrlProd,
       envs.frontendCustomerUrlProd,
-      'https://www.tulojita.com',   // Alias adicional
-      envs.hostOrigin,              // Configuración adicional desde env
+      'https://www.tulojita.com', // Alias adicional
+      envs.hostOrigin, // Configuración adicional desde env
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,

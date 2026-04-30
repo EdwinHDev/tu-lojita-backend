@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Like, Repository } from 'typeorm';
 import { CreateStoreDto } from './dto/create-store.dto';
@@ -19,7 +25,6 @@ import { StoreDashboardDto } from './dto/store-dashboard.dto';
 
 @Injectable()
 export class StoreService {
-
   constructor(
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
@@ -38,17 +43,22 @@ export class StoreService {
     @InjectRepository(StoreCategory)
     private readonly storeCategoryRepository: Repository<StoreCategory>,
     private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   async create(createStoreDto: CreateStoreDto, user: User) {
-    const { companyId, subCategoryId, mainAddress, ...storeDetails } = createStoreDto;
+    const { companyId, subCategoryId, mainAddress, ...storeDetails } =
+      createStoreDto;
 
-    const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
+    const subcategory = await this.subcategoryRepository.findOneBy({
+      id: subCategoryId,
+    });
     if (!subcategory) throw new NotFoundException(`Subcategoría no encontrada`);
 
     let company: Company | undefined;
     if (companyId) {
-      company = await this.companyRepository.findOneBy({ id: companyId }) ?? undefined;
+      company =
+        (await this.companyRepository.findOneBy({ id: companyId })) ??
+        undefined;
     } else if (user.company) {
       company = user.company;
     }
@@ -61,7 +71,12 @@ export class StoreService {
     }
 
     // Validar unicidad de RIF y teléfono
-    await this.checkUniqueness(storeDetails.rif, storeDetails.phone, user, company?.id);
+    await this.checkUniqueness(
+      storeDetails.rif,
+      storeDetails.phone,
+      user,
+      company?.id,
+    );
 
     // Validación de rol VENDOR (una sola tienda)
     if (user.role === UserRole.VENDOR) {
@@ -99,12 +114,13 @@ export class StoreService {
 
       // Promover a VENDOR si era USER
       if (user.role === UserRole.USER) {
-        await queryRunner.manager.update(User, user.id, { role: UserRole.VENDOR });
+        await queryRunner.manager.update(User, user.id, {
+          role: UserRole.VENDOR,
+        });
       }
 
       await queryRunner.commitTransaction();
       return savedStore;
-
     } catch (error) {
       await queryRunner.rollbackTransaction();
       this.handleDBExceptions(error);
@@ -114,21 +130,22 @@ export class StoreService {
   }
 
   async findAll(paginationDto: StorePaginationDto) {
-    const { 
-      limit = 10, 
-      offset = 0, 
-      sort = 'name', 
-      order = 'ASC', 
+    const {
+      limit = 10,
+      offset = 0,
+      sort = 'name',
+      order = 'ASC',
       categoryId,
       subCategoryId,
-      city, 
-      state, 
+      city,
+      state,
       q,
-      withItems = false
+      withItems = false,
     } = paginationDto;
 
     // Usamos QueryBuilder para manejar la lógica de múltiples direcciones
-    const queryBuilder = this.storeRepository.createQueryBuilder('store')
+    const queryBuilder = this.storeRepository
+      .createQueryBuilder('store')
       .leftJoinAndSelect('store.subcategory', 'subCategory')
       .leftJoinAndSelect('subCategory.category', 'category')
       .leftJoinAndSelect('store.owner', 'owner')
@@ -148,10 +165,18 @@ export class StoreService {
     }
 
     // Filtros
-    if (subCategoryId) queryBuilder.andWhere('subCategory.id = :subCategoryId', { subCategoryId });
-    if (categoryId) queryBuilder.andWhere('category.id = :categoryId', { categoryId });
-    if (city) queryBuilder.andWhere('address.city ILIKE :city', { city: `%${city}%` });
-    if (state) queryBuilder.andWhere('address.state ILIKE :state', { state: `%${state}%` });
+    if (subCategoryId)
+      queryBuilder.andWhere('subCategory.id = :subCategoryId', {
+        subCategoryId,
+      });
+    if (categoryId)
+      queryBuilder.andWhere('category.id = :categoryId', { categoryId });
+    if (city)
+      queryBuilder.andWhere('address.city ILIKE :city', { city: `%${city}%` });
+    if (state)
+      queryBuilder.andWhere('address.state ILIKE :state', {
+        state: `%${state}%`,
+      });
     if (q) queryBuilder.andWhere('store.name ILIKE :q', { q: `%${q}%` });
 
     queryBuilder.orderBy(`store.${sort}`, order);
@@ -165,24 +190,35 @@ export class StoreService {
       data = await queryBuilder.getMany();
 
       // Para el total, creamos una query separada sin paginación ni GROUP BY
-      const countQueryBuilder = this.storeRepository.createQueryBuilder('store')
+      const countQueryBuilder = this.storeRepository
+        .createQueryBuilder('store')
         .innerJoin('store.items', 'item')
         .leftJoin('store.subcategory', 'subCategory')
         .leftJoin('subCategory.category', 'category')
         .leftJoin('store.addresses', 'address');
 
       // Aplicamos los mismos filtros
-      if (subCategoryId) countQueryBuilder.andWhere('subCategory.id = :subCategoryId', { subCategoryId });
-      if (categoryId) countQueryBuilder.andWhere('category.id = :categoryId', { categoryId });
-      if (city) countQueryBuilder.andWhere('address.city ILIKE :city', { city: `%${city}%` });
-      if (state) countQueryBuilder.andWhere('address.state ILIKE :state', { state: `%${state}%` });
+      if (subCategoryId)
+        countQueryBuilder.andWhere('subCategory.id = :subCategoryId', {
+          subCategoryId,
+        });
+      if (categoryId)
+        countQueryBuilder.andWhere('category.id = :categoryId', { categoryId });
+      if (city)
+        countQueryBuilder.andWhere('address.city ILIKE :city', {
+          city: `%${city}%`,
+        });
+      if (state)
+        countQueryBuilder.andWhere('address.state ILIKE :state', {
+          state: `%${state}%`,
+        });
       if (q) countQueryBuilder.andWhere('store.name ILIKE :q', { q: `%${q}%` });
 
       // Contamos tiendas distintas
       total = await countQueryBuilder
         .select('COUNT(DISTINCT store.id)', 'count')
         .getRawOne()
-        .then(result => parseInt(result.count));
+        .then((result) => parseInt(result.count));
     } else {
       // Sin GROUP BY, podemos usar getManyAndCount normalmente
       [data, total] = await queryBuilder.getManyAndCount();
@@ -192,14 +228,20 @@ export class StoreService {
       data,
       total,
       limit,
-      offset
+      offset,
     };
   }
 
   async findOne(id: string) {
     const store = await this.storeRepository.findOne({
       where: { id },
-      relations: ['company', 'subcategory', 'subcategory.category', 'owner', 'addresses']
+      relations: [
+        'company',
+        'subcategory',
+        'subcategory.category',
+        'owner',
+        'addresses',
+      ],
     });
 
     if (!store) {
@@ -253,8 +295,13 @@ export class StoreService {
 
     if (companyId !== undefined) {
       if (companyId) {
-        const company = await this.companyRepository.findOneBy({ id: companyId });
-        if (!company) throw new NotFoundException(`Empresa con ID ${companyId} no encontrada`);
+        const company = await this.companyRepository.findOneBy({
+          id: companyId,
+        });
+        if (!company)
+          throw new NotFoundException(
+            `Empresa con ID ${companyId} no encontrada`,
+          );
         store.company = company;
       } else {
         store.company = undefined;
@@ -262,8 +309,13 @@ export class StoreService {
     }
 
     if (subCategoryId) {
-      const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
-      if (!subcategory) throw new NotFoundException(`Subcategoría con ID ${subCategoryId} no encontrada`);
+      const subcategory = await this.subcategoryRepository.findOneBy({
+        id: subCategoryId,
+      });
+      if (!subcategory)
+        throw new NotFoundException(
+          `Subcategoría con ID ${subCategoryId} no encontrada`,
+        );
       store.subcategory = subcategory;
     }
 
@@ -283,7 +335,11 @@ export class StoreService {
 
   async getStoreDashboardData(storeId: string): Promise<StoreDashboardDto> {
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
 
     // 1. Sales today
     const salesToday = await this.orderRepository
@@ -291,19 +347,21 @@ export class StoreService {
       .select('SUM(order.finalAmount)', 'total')
       .where('order.storeId = :storeId', { storeId })
       .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
-      .andWhere('order.createdAt >= :startOfToday', { startOfToday: startOfToday.toISOString() })
+      .andWhere('order.createdAt >= :startOfToday', {
+        startOfToday: startOfToday.toISOString(),
+      })
       .getRawOne();
 
     // 2. Total items
     const totalItems = await this.itemRepository.count({
-      where: { store: { id: storeId } }
+      where: { store: { id: storeId } },
     });
 
     // 3. Total categories
     const totalCategories = await this.storeCategoryRepository.count({
-      where: { store: { id: storeId } }
+      where: { store: { id: storeId } },
     });
 
     // 4. Total customers (unique users who purchased)
@@ -312,7 +370,7 @@ export class StoreService {
       .select('COUNT(DISTINCT order.userId)', 'total')
       .where('order.storeId = :storeId', { storeId })
       .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
       .getRawOne();
 
@@ -322,13 +380,13 @@ export class StoreService {
       .leftJoinAndSelect('order.store', 'store')
       .where('order.storeId = :storeId', { storeId })
       .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
       .orderBy('order.createdAt', 'DESC')
       .take(5)
       .getMany();
 
-    const recentSales = orders.map(order => {
+    const recentSales = orders.map((order) => {
       const orderDate = new Date(order.createdAt);
       const minutes = orderDate.getMinutes().toString().padStart(2, '0');
       const ampm = orderDate.getHours() >= 12 ? 'PM' : 'AM';
@@ -361,39 +419,53 @@ export class StoreService {
 
   private handleDBExceptions(error: any): never {
     console.log(error);
-    throw new InternalServerErrorException('Unexpected error, check server logs');
+    throw new InternalServerErrorException(
+      'Unexpected error, check server logs',
+    );
   }
 
-  private async checkUniqueness(rif: string, phone: string, user: User, companyId?: string, excludeStoreId?: string): Promise<void> {
+  private async checkUniqueness(
+    rif: string,
+    phone: string,
+    user: User,
+    companyId?: string,
+    excludeStoreId?: string,
+  ): Promise<void> {
     // Verificar RIF
     const existingRifStore = await this.storeRepository.findOne({
       where: { rif },
-      relations: ['company']
+      relations: ['company'],
     });
 
     if (existingRifStore && existingRifStore.id !== excludeStoreId) {
-      const isSameCompany = user.role === UserRole.COMPANY &&
+      const isSameCompany =
+        user.role === UserRole.COMPANY &&
         companyId &&
         existingRifStore.company?.id === companyId;
 
       if (!isSameCompany) {
-        throw new BadRequestException('El RIF ya está registrado por otro ente');
+        throw new BadRequestException(
+          'El RIF ya está registrado por otro ente',
+        );
       }
     }
 
     // Verificar Teléfono
     const existingPhoneStore = await this.storeRepository.findOne({
       where: { phone },
-      relations: ['company']
+      relations: ['company'],
     });
 
     if (existingPhoneStore && existingPhoneStore.id !== excludeStoreId) {
-      const isSameCompany = user.role === UserRole.COMPANY &&
+      const isSameCompany =
+        user.role === UserRole.COMPANY &&
         companyId &&
         existingPhoneStore.company?.id === companyId;
 
       if (!isSameCompany) {
-        throw new BadRequestException('El número de teléfono ya está registrado por otro ente');
+        throw new BadRequestException(
+          'El número de teléfono ya está registrado por otro ente',
+        );
       }
     }
   }

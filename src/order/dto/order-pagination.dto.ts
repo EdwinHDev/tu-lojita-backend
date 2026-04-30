@@ -1,10 +1,16 @@
-import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID } from "class-validator";
-import { PaginationDto } from "src/common/dto/pagination.dto";
-import { OrderStatus } from "../types";
-import { Transform } from "class-transformer";
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
+import { PaginationDto } from 'src/common/dto/pagination.dto';
+import { OrderStatus } from '../types';
+import { Transform } from 'class-transformer';
 
 export class OrderPaginationDto extends PaginationDto {
-
   @IsOptional()
   @IsEnum(OrderStatus, { message: 'Estado de orden no válido' })
   status?: OrderStatus;
@@ -28,10 +34,16 @@ export class OrderPaginationDto extends PaginationDto {
   hasBalance?: boolean;
 
   @IsOptional()
-  @IsDateString({}, { message: 'Fecha de inicio no válida (formato ISO requerido)' })
+  @IsDateString(
+    {},
+    { message: 'Fecha de inicio no válida (formato ISO requerido)' },
+  )
   startDate?: string;
 
   @IsOptional()
-  @IsDateString({}, { message: 'Fecha de fin no válida (formato ISO requerido)' })
+  @IsDateString(
+    {},
+    { message: 'Fecha de fin no válida (formato ISO requerido)' },
+  )
   endDate?: string;
 }

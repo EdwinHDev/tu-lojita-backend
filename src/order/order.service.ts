@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -13,7 +17,6 @@ import { OrderPaginationDto } from './dto/order-pagination.dto';
 
 @Injectable()
 export class OrderService {
-
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
@@ -28,18 +31,24 @@ export class OrderService {
     private readonly userRepository: Repository<User>,
 
     private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   async create(createOrderDto: CreateOrderDto, userId: string) {
-    const { storeId, items: itemsDto, isPartialPayment = false } = createOrderDto;
+    const {
+      storeId,
+      items: itemsDto,
+      isPartialPayment = false,
+    } = createOrderDto;
 
     // 1. Validar Tienda
     const store = await this.storeRepository.findOneBy({ id: storeId });
-    if (!store) throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
+    if (!store)
+      throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
 
     // 2. Validar Usuario (Cliente)
     const user = await this.userRepository.findOneBy({ id: userId });
-    if (!user) throw new NotFoundException(`Usuario con ID ${userId} no encontrado`);
+    if (!user)
+      throw new NotFoundException(`Usuario con ID ${userId} no encontrado`);
 
     // Iniciar Transacción Atómica
     const queryRunner = this.dataSource.createQueryRunner();
@@ -48,10 +57,12 @@ export class OrderService {
 
     try {
       // 3. Validar items duplicados en la petición (Seguridad de Datos)
-      const itemIds = itemsDto.map(i => i.itemId);
+      const itemIds = itemsDto.map((i) => i.itemId);
       const uniqueItemIds = new Set(itemIds);
       if (uniqueItemIds.size !== itemIds.length) {
-        throw new BadRequestException('La orden contiene items duplicados. Por favor, agrupa las cantidades.');
+        throw new BadRequestException(
+          'La orden contiene items duplicados. Por favor, agrupa las cantidades.',
+        );
       }
 
       let subtotal = 0;
@@ -59,22 +70,31 @@ export class OrderService {
 
       // 4. Procesar items y validar stock
       for (const itemDto of itemsDto) {
-        const item = await queryRunner.manager.findOne(Item, { 
+        const item = await queryRunner.manager.findOne(Item, {
           where: { id: itemDto.itemId },
-          relations: ['store']
+          relations: ['store'],
         });
-        if (!item) throw new NotFoundException(`Item con ID ${itemDto.itemId} no encontrado`);
+        if (!item)
+          throw new NotFoundException(
+            `Item con ID ${itemDto.itemId} no encontrado`,
+          );
 
         // Validar que el item pertenece a la tienda especificada
         if (item.store.id !== storeId) {
-          throw new BadRequestException(`El item "${item.title}" no pertenece a la tienda seleccionada. Solo puedes ordenar items de una misma tienda.`);
+          throw new BadRequestException(
+            `El item "${item.title}" no pertenece a la tienda seleccionada. Solo puedes ordenar items de una misma tienda.`,
+          );
         }
 
         // Comprobar inventario si el item lo requiere (Producto físico)
         if (item.trackInventory) {
-          const currentStock = parseFloat(item.stockQuantity?.toString() || '0');
+          const currentStock = parseFloat(
+            item.stockQuantity?.toString() || '0',
+          );
           if (currentStock < itemDto.quantity) {
-            throw new BadRequestException(`Stock insuficiente para "${item.title}". Disponible: ${currentStock}`);
+            throw new BadRequestException(
+              `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+            );
           }
           // Restar stock
           item.stockQuantity = currentStock - itemDto.quantity;
@@ -82,10 +102,13 @@ export class OrderService {
         }
 
         // Determinar precio (prioridad a discountPrice si existe)
-        const priceAtOrder = item.discountPrice ? parseFloat(item.discountPrice.toString()) : parseFloat(item.price.toString());
-        
+        const priceAtOrder = item.discountPrice
+          ? parseFloat(item.discountPrice.toString())
+          : parseFloat(item.price.toString());
+
         // Usar redondeo a 2 decimales para evitar errores de coma flotante en el subtotal
-        subtotal = Math.round((subtotal + (priceAtOrder * itemDto.quantity)) * 100) / 100;
+        subtotal =
+          Math.round((subtotal + priceAtOrder * itemDto.quantity) * 100) / 100;
 
         // Preparar OrderItem (Snapshot)
         const orderItem = queryRunner.manager.create(OrderItem, {
@@ -101,9 +124,13 @@ export class OrderService {
       let feeAmount = 0;
       if (isPartialPayment) {
         if (!store.allowPartialPayments) {
-          throw new BadRequestException('Esta tienda no admite pagos parciales');
+          throw new BadRequestException(
+            'Esta tienda no admite pagos parciales',
+          );
         }
-        const feePercent = parseFloat(store.partialPaymentsFeePercentage.toString());
+        const feePercent = parseFloat(
+          store.partialPaymentsFeePercentage.toString(),
+        );
         feeAmount = Math.round(((subtotal * feePercent) / 100) * 100) / 100;
       }
 
@@ -133,7 +160,6 @@ export class OrderService {
 
       // Retornar la orden con sus items cargados
       return await this.findOne(savedOrder.id);
-
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -146,25 +172,38 @@ export class OrderService {
     const order = await this.orderRepository.findOne({
       where: { id },
       relations: [
-        'store', 
+        'store',
         'store.subcategory',
-        'payments', 
-        'user', 
+        'payments',
+        'user',
         'user.addresses',
-        'orderItems', 
+        'orderItems',
         'orderItems.item',
         'orderItems.item.store',
         'orderItems.item.store.subcategory',
-      ]
+      ],
     });
     if (!order) throw new NotFoundException(`Orden #${id} no encontrada`);
     return order;
   }
 
   async findAll(paginationDto: OrderPaginationDto) {
-    const { status, userId, storeId, isPartialPayment, hasBalance, startDate, endDate, limit, offset, sort, order } = paginationDto;
+    const {
+      status,
+      userId,
+      storeId,
+      isPartialPayment,
+      hasBalance,
+      startDate,
+      endDate,
+      limit,
+      offset,
+      sort,
+      order,
+    } = paginationDto;
 
-    const queryBuilder = this.orderRepository.createQueryBuilder('order')
+    const queryBuilder = this.orderRepository
+      .createQueryBuilder('order')
       .leftJoinAndSelect('order.store', 'store')
       .leftJoinAndSelect('store.subcategory', 'subcategory')
       .leftJoinAndSelect('order.user', 'user')
@@ -186,7 +225,9 @@ export class OrderService {
     }
 
     if (isPartialPayment !== undefined) {
-      queryBuilder.andWhere('order.isPartialPayment = :isPartialPayment', { isPartialPayment });
+      queryBuilder.andWhere('order.isPartialPayment = :isPartialPayment', {
+        isPartialPayment,
+      });
     }
 
     if (hasBalance !== undefined) {
@@ -206,8 +247,15 @@ export class OrderService {
     }
 
     // Ordenamiento Dinámico
-    const validSortFields = ['createdAt', 'totalAmount', 'balance', 'finalAmount'];
-    const sortField = validSortFields.includes(sort as string) ? `order.${sort}` : 'order.createdAt';
+    const validSortFields = [
+      'createdAt',
+      'totalAmount',
+      'balance',
+      'finalAmount',
+    ];
+    const sortField = validSortFields.includes(sort as string)
+      ? `order.${sort}`
+      : 'order.createdAt';
     queryBuilder.orderBy(sortField, order || 'DESC');
 
     // Paginación
@@ -219,7 +267,7 @@ export class OrderService {
       items,
       total,
       limit,
-      offset
+      offset,
     };
   }
 
@@ -228,7 +276,9 @@ export class OrderService {
 
     // Validar Seguridad: Solo el dueño de la orden puede cancelarla
     if (order.user.id !== userId) {
-      throw new BadRequestException('No tienes permiso para cancelar esta orden');
+      throw new BadRequestException(
+        'No tienes permiso para cancelar esta orden',
+      );
     }
 
     if (order.status === OrderStatus.CANCELLED) {
@@ -236,7 +286,9 @@ export class OrderService {
     }
 
     if (order.status === OrderStatus.FULLY_PAID) {
-      throw new BadRequestException('No se puede cancelar una orden que ya ha sido pagada en su totalidad');
+      throw new BadRequestException(
+        'No se puede cancelar una orden que ya ha sido pagada en su totalidad',
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -248,7 +300,9 @@ export class OrderService {
       for (const orderItem of order.orderItems) {
         const item = orderItem.item;
         if (item.trackInventory) {
-          const currentStock = parseFloat(item.stockQuantity?.toString() || '0');
+          const currentStock = parseFloat(
+            item.stockQuantity?.toString() || '0',
+          );
           item.stockQuantity = currentStock + orderItem.quantity;
           await queryRunner.manager.save(item);
         }
@@ -259,8 +313,10 @@ export class OrderService {
       await queryRunner.manager.save(order);
 
       await queryRunner.commitTransaction();
-      return { message: 'Orden cancelada y stock devuelto exitosamente', orderId: id };
-
+      return {
+        message: 'Orden cancelada y stock devuelto exitosamente',
+        orderId: id,
+      };
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;

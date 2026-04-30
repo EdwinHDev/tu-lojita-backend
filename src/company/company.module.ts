@@ -15,4 +15,4 @@ import { Item } from 'src/item/entities/item.entity';
   controllers: [CompanyController, CompanyDashboardController],
   providers: [CompanyService, CompanyDashboardService],
 })
-export class CompanyModule { }
+export class CompanyModule {}

@@ -9,36 +9,48 @@ import { Category } from 'src/category/entities/category.entity';
 
 @Injectable()
 export class SubcategoryService {
-
   constructor(
     @InjectRepository(Subcategory)
     private readonly subcategoryRepository: Repository<Subcategory>,
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
-  ) { }
+  ) {}
 
   async create(createSubcategoryDto: CreateSubcategoryDto) {
     const { categoryId, ...subcategoryData } = createSubcategoryDto;
 
-    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId },
+    });
     if (!category) {
-      throw new NotFoundException(`Categoría con ID ${categoryId} no encontrada`);
+      throw new NotFoundException(
+        `Categoría con ID ${categoryId} no encontrada`,
+      );
     }
 
     const subcategory = this.subcategoryRepository.create({
       ...subcategoryData,
-      category
+      category,
     });
 
     return await this.subcategoryRepository.save(subcategory);
   }
 
   async findAll(queryDto: SubcategoryQueryDto) {
-    const { categoryId, inUse, isActive, q, search, page = 1, limit = 20 } = queryDto;
+    const {
+      categoryId,
+      inUse,
+      isActive,
+      q,
+      search,
+      page = 1,
+      limit = 20,
+    } = queryDto;
 
     const searchTerm = search || q;
 
-    const queryBuilder = this.subcategoryRepository.createQueryBuilder('subCategory')
+    const queryBuilder = this.subcategoryRepository
+      .createQueryBuilder('subCategory')
       .leftJoinAndSelect('subCategory.category', 'category');
 
     if (categoryId) {
@@ -56,7 +68,9 @@ export class SubcategoryService {
     }
 
     if (searchTerm) {
-      queryBuilder.andWhere('subCategory.name ILIKE :searchTerm', { searchTerm: `%${searchTerm}%` });
+      queryBuilder.andWhere('subCategory.name ILIKE :searchTerm', {
+        searchTerm: `%${searchTerm}%`,
+      });
     }
 
     queryBuilder.skip((page - 1) * limit);
@@ -68,7 +82,7 @@ export class SubcategoryService {
   async findOne(id: string) {
     const subcategory = await this.subcategoryRepository.findOne({
       where: { id },
-      relations: ['category']
+      relations: ['category'],
     });
 
     if (!subcategory) {
@@ -83,9 +97,13 @@ export class SubcategoryService {
     const subcategory = await this.findOne(id);
 
     if (categoryId) {
-      const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+      const category = await this.categoryRepository.findOne({
+        where: { id: categoryId },
+      });
       if (!category) {
-        throw new NotFoundException(`Categoría con ID ${categoryId} no encontrada`);
+        throw new NotFoundException(
+          `Categoría con ID ${categoryId} no encontrada`,
+        );
       }
       subcategory.category = category;
     }

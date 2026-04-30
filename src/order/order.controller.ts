@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+} from '@nestjs/common';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
@@ -14,10 +23,7 @@ export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
   @Post()
-  create(
-    @Body() createOrderDto: CreateOrderDto,
-    @GetUser() user: User,
-  ) {
+  create(@Body() createOrderDto: CreateOrderDto, @GetUser() user: User) {
     // El userId se obtiene del usuario autenticado, no del body
     return this.orderService.create(createOrderDto, user.id);
   }
@@ -28,28 +34,33 @@ export class OrderController {
     @GetUser() requestingUser: User,
   ) {
     const result = await this.orderService.findAll(paginationDto);
-    
-    const transformedItems = result.items.map(order => ({
+
+    const transformedItems = result.items.map((order) => ({
       ...order,
-      user: transformUserDataByRole(order.user, requestingUser.role, requestingUser.id)
+      user: transformUserDataByRole(
+        order.user,
+        requestingUser.role,
+        requestingUser.id,
+      ),
     }));
-    
+
     return {
       ...result,
-      items: transformedItems
+      items: transformedItems,
     };
   }
 
   @Get(':id')
-  async findOne(
-    @Param('id') id: string,
-    @GetUser() requestingUser: User,
-  ) {
+  async findOne(@Param('id') id: string, @GetUser() requestingUser: User) {
     const order = await this.orderService.findOne(id);
-    
+
     return {
       ...order,
-      user: transformUserDataByRole(order.user, requestingUser.role, requestingUser.id)
+      user: transformUserDataByRole(
+        order.user,
+        requestingUser.role,
+        requestingUser.id,
+      ),
     };
   }
 
@@ -59,10 +70,7 @@ export class OrderController {
   }
 
   @Post(':id/cancel')
-  cancel(
-    @Param('id') id: string,
-    @GetUser() user: User,
-  ) {
+  cancel(@Param('id') id: string, @GetUser() user: User) {
     return this.orderService.cancelOrder(id, user.id);
   }
 

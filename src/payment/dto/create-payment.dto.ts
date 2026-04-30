@@ -1,7 +1,14 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min } from "class-validator";
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 
 export class CreatePaymentDto {
-
   @IsNumber({}, { message: 'El monto del pago debe ser un número válido' })
   @IsPositive({ message: 'El monto del pago debe ser un número positivo' })
   @Min(0.01, { message: 'El monto mínimo de pago es 0.01' })
@@ -19,7 +26,9 @@ export class CreatePaymentDto {
   @IsOptional()
   reference?: string;
 
-  @IsString({ message: 'La imagen del recibo debe ser una URL o identificador válido' })
+  @IsString({
+    message: 'La imagen del recibo debe ser una URL o identificador válido',
+  })
   @IsOptional()
   receiptImage?: string;
 

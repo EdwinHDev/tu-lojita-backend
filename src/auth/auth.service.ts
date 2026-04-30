@@ -16,8 +16,8 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    private readonly jwtService: JwtService
-  ) { }
+    private readonly jwtService: JwtService,
+  ) {}
 
   // Método auxiliar para generar tokens
   private getTokens(userId: string) {
@@ -67,7 +67,16 @@ export class AuthService {
       }
 
       // Quitamos datos sensibles
-      const { confirm, confirmToken, password, createdAt, updatedAt, googleId, isActive, ...restUser } = user;
+      const {
+        confirm,
+        confirmToken,
+        password,
+        createdAt,
+        updatedAt,
+        googleId,
+        isActive,
+        ...restUser
+      } = user;
 
       // Generamos los tokens
       const tokens = this.getTokens(user.id);
@@ -75,12 +84,16 @@ export class AuthService {
       // Retornamos el usuario y sus tokens
       return {
         user: restUser,
-        ...tokens
+        ...tokens,
       };
-
     } catch (error) {
-      this.logger.error(`Error verifying Google token: ${error.message}`, error.stack);
-      throw new UnauthorizedException('El token de Google no es válido o ha expirado.');
+      this.logger.error(
+        `Error verifying Google token: ${error.message}`,
+        error.stack,
+      );
+      throw new UnauthorizedException(
+        'El token de Google no es válido o ha expirado.',
+      );
     }
   }
 }

@@ -1,13 +1,20 @@
-import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
-import { Store } from "src/store/entities/store.entity";
-import { User } from "src/user/entities/user.entity";
-import { Payment } from "src/payment/entities/payment.entity";
-import { OrderItem } from "src/order-item/entities/order-item.entity";
-import { OrderStatus } from "../types";
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { Store } from 'src/store/entities/store.entity';
+import { User } from 'src/user/entities/user.entity';
+import { Payment } from 'src/payment/entities/payment.entity';
+import { OrderItem } from 'src/order-item/entities/order-item.entity';
+import { OrderStatus } from '../types';
 
 @Entity({ name: 'orders' })
 export class Order {
-
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -59,5 +66,4 @@ export class Order {
   // Lista de abonos/pagos realizados a esta orden
   @OneToMany(() => Payment, (payment) => payment.order)
   payments: Payment[];
-
 }

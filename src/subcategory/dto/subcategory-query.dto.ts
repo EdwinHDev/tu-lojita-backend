@@ -1,4 +1,11 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class SubcategoryQueryDto {
@@ -17,7 +24,9 @@ export class SubcategoryQueryDto {
   isActive?: boolean;
 
   @IsOptional()
-  @IsString({ message: 'El término de búsqueda (q) debe ser una cadena de texto' })
+  @IsString({
+    message: 'El término de búsqueda (q) debe ser una cadena de texto',
+  })
   q?: string;
 
   @IsOptional()

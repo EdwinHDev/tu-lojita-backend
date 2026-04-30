@@ -6,16 +6,17 @@ import { OrderItemPaginationDto } from './dto/order-item-pagination.dto';
 
 @Injectable()
 export class OrderItemService {
-
   constructor(
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
   ) {}
 
   async findAll(paginationDto: OrderItemPaginationDto) {
-    const { orderId, storeId, itemId, limit, offset, sort, order } = paginationDto;
+    const { orderId, storeId, itemId, limit, offset, sort, order } =
+      paginationDto;
 
-    const queryBuilder = this.orderItemRepository.createQueryBuilder('orderItem')
+    const queryBuilder = this.orderItemRepository
+      .createQueryBuilder('orderItem')
       .leftJoinAndSelect('orderItem.order', 'order')
       .leftJoinAndSelect('orderItem.item', 'item')
       .leftJoinAndSelect('order.store', 'store')
@@ -34,7 +35,9 @@ export class OrderItemService {
     }
 
     const validSortFields = ['createdAt', 'price', 'quantity'];
-    const sortField = validSortFields.includes(sort as string) ? `orderItem.${sort}` : 'orderItem.createdAt';
+    const sortField = validSortFields.includes(sort as string)
+      ? `orderItem.${sort}`
+      : 'orderItem.createdAt';
     queryBuilder.orderBy(sortField, order || 'DESC');
 
     queryBuilder.skip(offset).take(limit);
@@ -45,24 +48,25 @@ export class OrderItemService {
       items,
       total,
       limit,
-      offset
+      offset,
     };
   }
 
   async findByOrder(orderId: string) {
     return await this.orderItemRepository.find({
       where: { order: { id: orderId } },
-      relations: ['item']
+      relations: ['item'],
     });
   }
 
   async findOne(id: string) {
     const orderItem = await this.orderItemRepository.findOne({
       where: { id },
-      relations: ['order', 'item', 'order.store']
+      relations: ['order', 'item', 'order.store'],
     });
 
-    if (!orderItem) throw new NotFoundException(`Item de orden #${id} no encontrado`);
+    if (!orderItem)
+      throw new NotFoundException(`Item de orden #${id} no encontrado`);
     return orderItem;
   }
 }

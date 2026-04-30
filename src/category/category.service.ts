@@ -8,11 +8,10 @@ import { CategoryQueryDto } from './dto/category-query.dto';
 
 @Injectable()
 export class CategoryService {
-
   constructor(
     @InjectRepository(Category)
-    private readonly categoryRepository: Repository<Category>
-  ) { }
+    private readonly categoryRepository: Repository<Category>,
+  ) {}
 
   async create(createCategoryDto: CreateCategoryDto) {
     const category = this.categoryRepository.create(createCategoryDto);
@@ -22,7 +21,8 @@ export class CategoryService {
   async findAll(queryDto: CategoryQueryDto) {
     const { inUse, search, page = 1, limit = 20 } = queryDto;
 
-    const queryBuilder = this.categoryRepository.createQueryBuilder('category')
+    const queryBuilder = this.categoryRepository
+      .createQueryBuilder('category')
       .leftJoinAndSelect('category.subcategories', 'subCategory');
 
     if (inUse) {
@@ -32,7 +32,9 @@ export class CategoryService {
     }
 
     if (search) {
-      queryBuilder.andWhere('category.name ILIKE :search', { search: `%${search}%` });
+      queryBuilder.andWhere('category.name ILIKE :search', {
+        search: `%${search}%`,
+      });
     }
 
     queryBuilder.skip((page - 1) * limit);
@@ -44,7 +46,7 @@ export class CategoryService {
   async findOne(id: string) {
     const category = await this.categoryRepository.findOne({
       where: { id },
-      relations: ['subcategories']
+      relations: ['subcategories'],
     });
 
     if (!category) {

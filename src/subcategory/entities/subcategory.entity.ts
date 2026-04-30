@@ -1,6 +1,14 @@
-import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
-import { Category } from "src/category/entities/category.entity";
-import { Store } from "src/store/entities/store.entity";
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { Category } from 'src/category/entities/category.entity';
+import { Store } from 'src/store/entities/store.entity';
 
 @Entity('subcategories')
 export class Subcategory {
@@ -19,7 +27,9 @@ export class Subcategory {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
-  @ManyToOne(() => Category, (category) => category.subcategories, { nullable: false })
+  @ManyToOne(() => Category, (category) => category.subcategories, {
+    nullable: false,
+  })
   category: Category;
 
   @OneToMany(() => Store, (store) => store.subcategory)

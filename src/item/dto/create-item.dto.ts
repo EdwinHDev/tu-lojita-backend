@@ -1,7 +1,21 @@
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUrl, IsUUID, MaxLength, Min, MinLength } from "class-validator";
-import { ItemType } from "../types/item-type.enum";
-import { PriceType } from "../types/price-type.enum";
-import { ItemAttributes } from "../types/item-attributes.interface";
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+import { ItemType } from '../types/item-type.enum';
+import { PriceType } from '../types/price-type.enum';
+import { ItemAttributes } from '../types/item-attributes.interface';
 
 export class CreateItemDto {
   @IsString({ message: 'El título debe ser una cadena de texto' })
@@ -21,8 +35,12 @@ export class CreateItemDto {
 
   @IsString({ message: 'La descripción debe ser una cadena de texto' })
   @IsNotEmpty({ message: 'La descripción no puede estar vacía' })
-  @MinLength(10, { message: 'La descripción debe tener al menos 10 caracteres' })
-  @MaxLength(2000, { message: 'La descripción debe tener menos de 2000 caracteres' })
+  @MinLength(10, {
+    message: 'La descripción debe tener al menos 10 caracteres',
+  })
+  @MaxLength(2000, {
+    message: 'La descripción debe tener menos de 2000 caracteres',
+  })
   description: string;
 
   @IsNumber({}, { message: 'El precio debe ser un número válido' })
@@ -39,7 +57,10 @@ export class CreateItemDto {
   mainImage: string;
 
   @IsArray({ message: 'Las imágenes deben ser una lista (array)' })
-  @IsString({ each: true, message: 'Cada imagen debe ser una cadena de texto (URL)' })
+  @IsString({
+    each: true,
+    message: 'Cada imagen debe ser una cadena de texto (URL)',
+  })
   @IsNotEmpty({ message: 'Debes proporcionar al menos una imagen' })
   images: string[];
 
@@ -69,10 +90,10 @@ export class CreateItemDto {
   requiresBooking?: boolean;
 
   /**
-   * Atributos dinámicos. 
-   * Nota: Para una validación estricta por tipo (Food, Service, etc.) 
-   * se recomienda usar un Custom Validator o lógica en el Service, 
-   * ya que class-validator no maneja fácilmente uniones discriminadas 
+   * Atributos dinámicos.
+   * Nota: Para una validación estricta por tipo (Food, Service, etc.)
+   * se recomienda usar un Custom Validator o lógica en el Service,
+   * ya que class-validator no maneja fácilmente uniones discriminadas
    * basadas en campos hermanos sin tipos anidados.
    */
   @IsObject({ message: 'Los atributos deben ser un objeto válido' })

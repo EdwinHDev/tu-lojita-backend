@@ -1,4 +1,11 @@
-import { Controller, Get, Param, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  ParseIntPipe,
+  DefaultValuePipe,
+} from '@nestjs/common';
 import { CompanyDashboardService } from './company-dashboard.service';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
@@ -11,9 +18,7 @@ import { CompanyStoresResponseDto } from './dto/company-stores.dto';
 @Controller('companies/:companyId/dashboard')
 @Auth() // Requiere autenticación
 export class CompanyDashboardController {
-  constructor(
-    private readonly dashboardService: CompanyDashboardService,
-  ) {}
+  constructor(private readonly dashboardService: CompanyDashboardService) {}
 
   /**
    * GET /api/v1/companies/:companyId/dashboard/stats

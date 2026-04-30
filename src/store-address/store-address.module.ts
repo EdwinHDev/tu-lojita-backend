@@ -9,4 +9,4 @@ import { StoreAddress } from './entities/store-address.entity';
   controllers: [StoreAddressController],
   providers: [StoreAddressService],
 })
-export class StoreAddressModule { }
+export class StoreAddressModule {}

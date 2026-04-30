@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -13,7 +17,6 @@ import { PaymentPaginationDto } from './dto/payment-pagination.dto';
 
 @Injectable()
 export class PaymentService {
-
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
@@ -30,9 +33,18 @@ export class PaymentService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async verifyPayment(paymentId: string, newStatus: PaymentStatus, storeOwnerId: string) {
-    if (newStatus !== PaymentStatus.APPROVED && newStatus !== PaymentStatus.REJECTED) {
-      throw new BadRequestException('Estado de verificación no válido. Debe ser APPROVED o REJECTED');
+  async verifyPayment(
+    paymentId: string,
+    newStatus: PaymentStatus,
+    storeOwnerId: string,
+  ) {
+    if (
+      newStatus !== PaymentStatus.APPROVED &&
+      newStatus !== PaymentStatus.REJECTED
+    ) {
+      throw new BadRequestException(
+        'Estado de verificación no válido. Debe ser APPROVED o REJECTED',
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -42,17 +54,22 @@ export class PaymentService {
     try {
       const payment = await queryRunner.manager.findOne(Payment, {
         where: { id: paymentId },
-        relations: ['order', 'store', 'store.owner']
+        relations: ['order', 'store', 'store.owner'],
       });
 
-      if (!payment) throw new NotFoundException(`Pago #${paymentId} no encontrado`);
-      
+      if (!payment)
+        throw new NotFoundException(`Pago #${paymentId} no encontrado`);
+
       if (payment.status !== PaymentStatus.WAITING_VERIFICATION) {
-        throw new BadRequestException('Este pago ya ha sido procesado previamente');
+        throw new BadRequestException(
+          'Este pago ya ha sido procesado previamente',
+        );
       }
 
       if (!payment.store.owner || payment.store.owner.id !== storeOwnerId) {
-        throw new BadRequestException('No tienes permiso para verificar pagos de esta tienda');
+        throw new BadRequestException(
+          'No tienes permiso para verificar pagos de esta tienda',
+        );
       }
 
       const store = payment.store;
@@ -61,27 +78,32 @@ export class PaymentService {
         // Bloquear la orden primero
         await queryRunner.manager.findOne(Order, {
           where: { id: payment.order.id },
-          lock: { mode: 'pessimistic_write' }
+          lock: { mode: 'pessimistic_write' },
         });
 
         // Cargar con relaciones después
         const order = await queryRunner.manager.findOne(Order, {
           where: { id: payment.order.id },
-          relations: ['payments']
+          relations: ['payments'],
         });
 
-        if (!order) throw new NotFoundException(`Orden de la transacción no encontrada`);
+        if (!order)
+          throw new NotFoundException(`Orden de la transacción no encontrada`);
 
-        const approvedPayments = order.payments.filter(p => p.status === PaymentStatus.APPROVED);
-        
+        const approvedPayments = order.payments.filter(
+          (p) => p.status === PaymentStatus.APPROVED,
+        );
+
         if (order.isPartialPayment && approvedPayments.length === 0) {
-          const minPercentage = parseFloat(store.minInitialPaymentPercentage.toString());
+          const minPercentage = parseFloat(
+            store.minInitialPaymentPercentage.toString(),
+          );
           const minAmount = (order.finalAmount * minPercentage) / 100;
           const currentAmount = parseFloat(payment.amount.toString());
 
           if (currentAmount < minAmount) {
             throw new BadRequestException(
-              `El pago inicial ($${currentAmount}) es menor al mínimo requerido ($${minAmount.toFixed(2)})`
+              `El pago inicial ($${currentAmount}) es menor al mínimo requerido ($${minAmount.toFixed(2)})`,
             );
           }
         }
@@ -96,7 +118,7 @@ export class PaymentService {
           order.nextDueDate = null;
         } else {
           order.status = OrderStatus.PARTIALLY_PAID;
-          
+
           const now = new Date();
           if (approvedPayments.length === 0) {
             order.monthlyDueDay = now.getDate();
@@ -118,7 +140,6 @@ export class PaymentService {
 
       await queryRunner.commitTransaction();
       return savedPayment;
-
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -139,55 +160,73 @@ export class PaymentService {
       // Nota: No cargamos relaciones aquí para evitar error de Postgres con FOR UPDATE y OUTER JOINS
       const order = await queryRunner.manager.findOne(Order, {
         where: { id: orderId },
-        lock: { mode: 'pessimistic_write' }
+        lock: { mode: 'pessimistic_write' },
       });
 
-      if (!order) throw new NotFoundException(`Orden #${orderId} no encontrada`);
+      if (!order)
+        throw new NotFoundException(`Orden #${orderId} no encontrada`);
 
       // 2. Cargar relaciones necesarias por separado o recargar la entidad
       // Al estar en una transacción con bloqueo, los datos serán consistentes
       const orderWithRelations = await queryRunner.manager.findOne(Order, {
         where: { id: orderId },
-        relations: ['payments', 'user']
+        relations: ['payments', 'user'],
       });
 
-      if (!orderWithRelations) throw new NotFoundException(`Orden #${orderId} no encontrada`);
+      if (!orderWithRelations)
+        throw new NotFoundException(`Orden #${orderId} no encontrada`);
 
       if (orderWithRelations.user.id !== userId) {
-        throw new BadRequestException('No tienes permiso para realizar pagos a esta orden');
+        throw new BadRequestException(
+          'No tienes permiso para realizar pagos a esta orden',
+        );
       }
 
-      const user = await queryRunner.manager.findOne(User, { where: { id: userId } });
-      if (!user) throw new NotFoundException(`Usuario #${userId} no encontrado`);
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
+      if (!user)
+        throw new NotFoundException(`Usuario #${userId} no encontrado`);
 
-      const store = await queryRunner.manager.findOne(Store, { where: { id: storeId } });
-      if (!store) throw new NotFoundException(`Tienda #${storeId} no encontrada`);
+      const store = await queryRunner.manager.findOne(Store, {
+        where: { id: storeId },
+      });
+      if (!store)
+        throw new NotFoundException(`Tienda #${storeId} no encontrada`);
 
       if (orderWithRelations.isPartialPayment) {
-        const approvedPaymentsCount = orderWithRelations.payments.filter(p => p.status === PaymentStatus.APPROVED).length;
+        const approvedPaymentsCount = orderWithRelations.payments.filter(
+          (p) => p.status === PaymentStatus.APPROVED,
+        ).length;
         const maxAllowed = parseInt(store.maxInstallments?.toString() || '0');
 
         if (maxAllowed > 0 && approvedPaymentsCount >= maxAllowed) {
-          throw new BadRequestException(`Se ha alcanzado el límite de ${maxAllowed} cuotas para esta orden`);
+          throw new BadRequestException(
+            `Se ha alcanzado el límite de ${maxAllowed} cuotas para esta orden`,
+          );
         }
       }
 
       const currentBalance = parseFloat(orderWithRelations.balance.toString());
       const incomingAmount = parseFloat(amount.toString());
       if (incomingAmount > currentBalance + 0.01) {
-        throw new BadRequestException(`El monto excede el balance pendiente ($${currentBalance})`);
+        throw new BadRequestException(
+          `El monto excede el balance pendiente ($${currentBalance})`,
+        );
       }
 
       const { reference } = createPaymentDto;
       if (reference) {
         const existingPayment = await queryRunner.manager.findOne(Payment, {
-          where: { 
+          where: {
             reference,
-            store: { id: storeId }
-          }
+            store: { id: storeId },
+          },
         });
         if (existingPayment) {
-          throw new BadRequestException(`La referencia bancaria "${reference}" ya ha sido utilizada en esta tienda.`);
+          throw new BadRequestException(
+            `La referencia bancaria "${reference}" ya ha sido utilizada en esta tienda.`,
+          );
         }
       }
 
@@ -203,7 +242,6 @@ export class PaymentService {
 
       await queryRunner.commitTransaction();
       return savedPayment;
-
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -213,9 +251,21 @@ export class PaymentService {
   }
 
   async findAll(paginationDto: PaymentPaginationDto) {
-    const { status, paymentMethod, currency, reference, storeId, userId, limit, offset, sort, order } = paginationDto;
+    const {
+      status,
+      paymentMethod,
+      currency,
+      reference,
+      storeId,
+      userId,
+      limit,
+      offset,
+      sort,
+      order,
+    } = paginationDto;
 
-    const queryBuilder = this.paymentRepository.createQueryBuilder('payment')
+    const queryBuilder = this.paymentRepository
+      .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.order', 'order')
       .leftJoinAndSelect('payment.user', 'user')
       .leftJoinAndSelect('payment.store', 'store');
@@ -225,7 +275,9 @@ export class PaymentService {
     }
 
     if (paymentMethod) {
-      queryBuilder.andWhere('payment.paymentMethod = :paymentMethod', { paymentMethod });
+      queryBuilder.andWhere('payment.paymentMethod = :paymentMethod', {
+        paymentMethod,
+      });
     }
 
     if (currency) {
@@ -233,7 +285,9 @@ export class PaymentService {
     }
 
     if (reference) {
-      queryBuilder.andWhere('payment.reference LIKE :reference', { reference: `%${reference}%` });
+      queryBuilder.andWhere('payment.reference LIKE :reference', {
+        reference: `%${reference}%`,
+      });
     }
 
     if (storeId) {
@@ -246,7 +300,9 @@ export class PaymentService {
 
     // Ordenamiento
     const validSortFields = ['createdAt', 'amount', 'status'];
-    const sortField = validSortFields.includes(sort as string) ? `payment.${sort}` : 'payment.createdAt';
+    const sortField = validSortFields.includes(sort as string)
+      ? `payment.${sort}`
+      : 'payment.createdAt';
     queryBuilder.orderBy(sortField, order || 'DESC');
 
     queryBuilder.skip(offset).take(limit);
@@ -257,14 +313,14 @@ export class PaymentService {
       items,
       total,
       limit,
-      offset
+      offset,
     };
   }
 
   async findOne(id: string) {
     const payment = await this.paymentRepository.findOne({
       where: { id },
-      relations: ['order', 'user', 'store']
+      relations: ['order', 'user', 'store'],
     });
     if (!payment) throw new NotFoundException(`Pago #${id} no encontrado`);
     return payment;

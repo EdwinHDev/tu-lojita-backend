@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsUUID } from "class-validator";
+import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
 
 export class CreateSubcategoryDto {
   @IsString({ message: 'El nombre debe ser una cadena de texto' })

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsNumber, IsUUID, Min } from "class-validator";
+import { IsNotEmpty, IsNumber, IsUUID, Min } from 'class-validator';
 
 export class CreateOrderItemDto {
   @IsUUID('4', { message: 'El ID del item debe ser un UUID válido (v4)' })

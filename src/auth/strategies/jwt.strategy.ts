@@ -37,7 +37,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     // Fallback: Si no tiene la relación directa pero es dueño de una empresa, cargarla
     if (!user.company) {
       const ownedCompany = await this.companyRepository.findOne({
-        where: { owner: { id: user.id } }
+        where: { owner: { id: user.id } },
       });
       if (ownedCompany) {
         user.company = ownedCompany;
@@ -46,7 +46,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
     // Validar que el usuario no haya sido baneado o eliminado (Práctica Robusta)
     if (!user.isActive) {
-      throw new UnauthorizedException('El usuario está inactivo, hable con el administrador');
+      throw new UnauthorizedException(
+        'El usuario está inactivo, hable con el administrador',
+      );
     }
 
     // Lo que retornes aquí, NestJS lo inyectará en la 'Request' (req.user)
