@@ -3,6 +3,7 @@ import { StoreStatus } from 'src/store/types/status.enum';
 export class CompanyStoreDto {
   id: string;
   name: string;
+  branchName?: string;
   address?: string;
   logo: string;
   status: StoreStatus;

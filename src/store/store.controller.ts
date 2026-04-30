@@ -35,6 +35,11 @@ export class StoreController {
     return this.storeService.findOne(id);
   }
 
+  @Get(':id/dashboard')
+  getDashboard(@Param('id') id: string) {
+    return this.storeService.getStoreDashboardData(id);
+  }
+
   @Patch(':id')
   update(
     @Param('id') id: string,

@@ -24,4 +24,9 @@ export class UpdateStoreDto extends PartialType(CreateStoreDto) {
   @Min(0, { message: 'El número mínimo de cuotas es 0' })
   @IsOptional()
   maxInstallments?: number;
+
+  @IsString({ message: 'El nombre de la sucursal debe ser un texto' })
+  @IsNotEmpty({ message: 'El nombre de la sucursal no puede estar vacío' })
+  @IsOptional()
+  branchName?: string;
 }

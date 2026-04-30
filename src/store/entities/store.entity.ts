@@ -19,6 +19,9 @@ export class Store {
   @Column('text')
   name: string;
 
+  @Column('text', { nullable: true })
+  branchName?: string;
+
   @Column('text')
   description: string;
 
@@ -30,6 +33,9 @@ export class Store {
 
   @Column('text')
   logo: string;
+
+  @Column('text', { nullable: true })
+  coverImage?: string;
 
   // Relación con la empresa a la que pertenece la tienda (Opcional)
   @ManyToOne(() => Company, (company) => company.stores, { nullable: true })
@@ -91,7 +97,8 @@ export class Store {
 
   @BeforeInsert()
   checkSlugInsert() {
-    this.slug = slugify(this.name, {
+    const slugBase = this.branchName ? `${this.name} ${this.branchName}` : this.name;
+    this.slug = slugify(slugBase, {
       lower: true,
       trim: true,
       replacement: '-',
@@ -101,7 +108,8 @@ export class Store {
 
   @BeforeUpdate()
   checkSlugUpdate() {
-    this.slug = slugify(this.name, {
+    const slugBase = this.branchName ? `${this.name} ${this.branchName}` : this.name;
+    this.slug = slugify(slugBase, {
       lower: true,
       trim: true,
       replacement: '-',

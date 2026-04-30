@@ -11,6 +11,11 @@ import { Category } from 'src/category/entities/category.entity';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
 import { StorePaginationDto } from './dto/store-pagination.dto';
+import { Order } from 'src/order/entities/order.entity';
+import { Item } from 'src/item/entities/item.entity';
+import { StoreCategory } from 'src/store-category/entities/store-category.entity';
+import { OrderStatus } from 'src/order/types';
+import { StoreDashboardDto } from './dto/store-dashboard.dto';
 
 @Injectable()
 export class StoreService {
@@ -26,14 +31,37 @@ export class StoreService {
     private readonly subcategoryRepository: Repository<Subcategory>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    @InjectRepository(Item)
+    private readonly itemRepository: Repository<Item>,
+    @InjectRepository(StoreCategory)
+    private readonly storeCategoryRepository: Repository<StoreCategory>,
     private readonly dataSource: DataSource,
   ) { }
 
   async create(createStoreDto: CreateStoreDto, user: User) {
     const { companyId, subCategoryId, mainAddress, ...storeDetails } = createStoreDto;
 
+    const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
+    if (!subcategory) throw new NotFoundException(`Subcategoría no encontrada`);
+
+    let company: Company | undefined;
+    if (companyId) {
+      company = await this.companyRepository.findOneBy({ id: companyId }) ?? undefined;
+    } else if (user.company) {
+      company = user.company;
+    }
+
+    // Si pertenece a una empresa, heredamos su identidad (Nombre, RIF y Logo)
+    if (company) {
+      storeDetails.name = company.name;
+      storeDetails.rif = company.rif;
+      storeDetails.logo = company.logo;
+    }
+
     // Validar unicidad de RIF y teléfono
-    await this.checkUniqueness(storeDetails.rif, storeDetails.phone, user, companyId);
+    await this.checkUniqueness(storeDetails.rif, storeDetails.phone, user, company?.id);
 
     // Validación de rol VENDOR (una sola tienda)
     if (user.role === UserRole.VENDOR) {
@@ -43,14 +71,6 @@ export class StoreService {
       if (existingStore) {
         throw new ForbiddenException('Ya tienes una tienda registrada.');
       }
-    }
-
-    const subcategory = await this.subcategoryRepository.findOneBy({ id: subCategoryId });
-    if (!subcategory) throw new NotFoundException(`Subcategoría no encontrada`);
-
-    let company: Company | undefined;
-    if (companyId) {
-      company = await this.companyRepository.findOneBy({ id: companyId }) ?? undefined;
     }
 
     // Iniciar Transacción para Store + Address
@@ -213,6 +233,13 @@ export class StoreService {
     const { companyId, subCategoryId, ...updateDetails } = updateStoreDto;
     const store = await this.findOne(id);
 
+    // Si la tienda pertenece a una empresa, no se puede cambiar nombre, RIF ni Logo (se heredan)
+    if (store.company) {
+      delete (updateDetails as any).name;
+      delete (updateDetails as any).rif;
+      delete (updateDetails as any).logo;
+    }
+
     // Validar unicidad si se están actualizando rif o teléfono
     if (updateDetails.rif || updateDetails.phone) {
       await this.checkUniqueness(
@@ -252,6 +279,84 @@ export class StoreService {
     const store = await this.findOne(id);
     await this.storeRepository.remove(store);
     return { deleted: true };
+  }
+
+  async getStoreDashboardData(storeId: string): Promise<StoreDashboardDto> {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // 1. Sales today
+    const salesToday = await this.orderRepository
+      .createQueryBuilder('order')
+      .select('SUM(order.finalAmount)', 'total')
+      .where('order.storeId = :storeId', { storeId })
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]
+      })
+      .andWhere('order.createdAt >= :startOfToday', { startOfToday: startOfToday.toISOString() })
+      .getRawOne();
+
+    // 2. Total items
+    const totalItems = await this.itemRepository.count({
+      where: { store: { id: storeId } }
+    });
+
+    // 3. Total categories
+    const totalCategories = await this.storeCategoryRepository.count({
+      where: { store: { id: storeId } }
+    });
+
+    // 4. Total customers (unique users who purchased)
+    const totalCustomersQuery = await this.orderRepository
+      .createQueryBuilder('order')
+      .select('COUNT(DISTINCT order.userId)', 'total')
+      .where('order.storeId = :storeId', { storeId })
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]
+      })
+      .getRawOne();
+
+    // 5. Recent sales
+    const orders = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.store', 'store')
+      .where('order.storeId = :storeId', { storeId })
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]
+      })
+      .orderBy('order.createdAt', 'DESC')
+      .take(5)
+      .getMany();
+
+    const recentSales = orders.map(order => {
+      const orderDate = new Date(order.createdAt);
+      const minutes = orderDate.getMinutes().toString().padStart(2, '0');
+      const ampm = orderDate.getHours() >= 12 ? 'PM' : 'AM';
+      const displayHours = orderDate.getHours() % 12 || 12;
+
+      return {
+        id: order.id,
+        storeName: order.store.name,
+        amount: parseFloat(order.finalAmount.toString()),
+        currency: 'USD',
+        time: `${displayHours}:${minutes} ${ampm}`,
+        orderId: `#${order.id.substring(0, 8)}`,
+        status: order.status,
+      };
+    });
+
+    return {
+      stats: {
+        salesToday: {
+          amount: parseFloat(salesToday?.total || '0'),
+          currency: 'USD',
+        },
+        totalItems,
+        totalCategories,
+        totalCustomers: parseInt(totalCustomersQuery?.total || '0'),
+      },
+      recentSales,
+    };
   }
 
   private handleDBExceptions(error: any): never {

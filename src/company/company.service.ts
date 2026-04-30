@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -21,7 +21,16 @@ export class CompanyService {
   ) { }
 
   async create(createCompanyDto: CreateCompanyDto, user: User) {
-    // Verificar si el RIF ya está en uso
+    // 1. Verificar si el usuario ya tiene una empresa registrada
+    const existingUserCompany = await this.companyRepository.findOne({
+      where: { owner: { id: user.id } }
+    });
+
+    if (existingUserCompany) {
+      throw new ConflictException('El usuario ya tiene una empresa registrada');
+    }
+
+    // 2. Verificar si el RIF ya está en uso
     await this.checkRifUniqueness(createCompanyDto.rif);
 
     const company = this.companyRepository.create({
@@ -37,16 +46,21 @@ export class CompanyService {
       });
 
       if (userStore) {
-        // Asociar la tienda a la empresa
+        // Asociar la tienda a la empresa y sincronizar identidad
         userStore.company = savedCompany;
+        userStore.name = savedCompany.name;
+        userStore.rif = savedCompany.rif;
+        userStore.logo = savedCompany.logo;
         await this.storeRepository.save(userStore);
       }
     }
 
-    // Si el usuario era USER o VENDOR, lo promovemos a COMPANY
+    // 3. Vincular bidireccionalmente el usuario y la empresa
+    user.company = savedCompany;
     if (user.role === UserRole.USER || user.role === UserRole.VENDOR) {
-      await this.userRepository.update(user.id, { role: UserRole.COMPANY });
+      user.role = UserRole.COMPANY;
     }
+    await this.userRepository.save(user);
 
     return savedCompany;
   }
@@ -70,8 +84,13 @@ export class CompanyService {
     return company;
   }
 
-  async update(id: string, updateCompanyDto: UpdateCompanyDto) {
+  async update(id: string, updateCompanyDto: UpdateCompanyDto, user: User) {
     const company = await this.findOne(id);
+
+    // Validar propiedad (solo dueño o ADMIN pueden editar)
+    if (company.owner?.id !== user.id && user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('No tienes permiso para editar esta empresa');
+    }
     
     // Si se está actualizando el RIF, verificar unicidad
     if (updateCompanyDto.rif && updateCompanyDto.rif !== company.rif) {
@@ -79,7 +98,21 @@ export class CompanyService {
     }
     
     this.companyRepository.merge(company, updateCompanyDto);
-    return await this.companyRepository.save(company);
+    const updatedCompany = await this.companyRepository.save(company);
+
+    // Propagar cambios a las tiendas si cambió el nombre, rif o logo
+    if (updateCompanyDto.name || updateCompanyDto.rif || updateCompanyDto.logo) {
+      await this.storeRepository.update(
+        { company: { id: updatedCompany.id } },
+        {
+          ...(updateCompanyDto.name && { name: updatedCompany.name }),
+          ...(updateCompanyDto.rif && { rif: updatedCompany.rif }),
+          ...(updateCompanyDto.logo && { logo: updatedCompany.logo }),
+        }
+      );
+    }
+
+    return updatedCompany;
   }
 
   async remove(id: string) {

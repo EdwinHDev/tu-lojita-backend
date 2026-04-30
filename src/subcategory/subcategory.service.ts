@@ -34,7 +34,9 @@ export class SubcategoryService {
   }
 
   async findAll(queryDto: SubcategoryQueryDto) {
-    const { categoryId, inUse, isActive, q } = queryDto;
+    const { categoryId, inUse, isActive, q, search, page = 1, limit = 20 } = queryDto;
+
+    const searchTerm = search || q;
 
     const queryBuilder = this.subcategoryRepository.createQueryBuilder('subCategory')
       .leftJoinAndSelect('subCategory.category', 'category');
@@ -53,9 +55,12 @@ export class SubcategoryService {
       queryBuilder.andWhere('subCategory.isActive = :isActive', { isActive });
     }
 
-    if (q) {
-      queryBuilder.andWhere('subCategory.name ILIKE :q', { q: `%${q}%` });
+    if (searchTerm) {
+      queryBuilder.andWhere('subCategory.name ILIKE :searchTerm', { searchTerm: `%${searchTerm}%` });
     }
+
+    queryBuilder.skip((page - 1) * limit);
+    queryBuilder.take(limit);
 
     return await queryBuilder.getMany();
   }

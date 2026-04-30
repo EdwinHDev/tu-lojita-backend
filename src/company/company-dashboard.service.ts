@@ -269,6 +269,7 @@ export class CompanyDashboardService {
     const storesSummary: StoreSummaryDto[] = stores.map(store => ({
       id: store.id,
       name: store.name,
+      branchName: store.branchName,
       productsCount: store.items?.length || 0,
       address: store.addresses?.[0]?.address || undefined,
       logo: store.logo,
@@ -312,6 +313,7 @@ export class CompanyDashboardService {
         return {
           id: store.id,
           name: store.name,
+          branchName: store.branchName,
           address: store.addresses?.[0]?.address || undefined,
           logo: store.logo,
           status: store.status,

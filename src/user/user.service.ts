@@ -102,13 +102,15 @@ export class UserService {
 
     const store = await this.storeRepository.findOne({
       where: { owner: { id: userId } },
-      select: ['id', 'name'],
+      select: ['id', 'name', 'rif', 'logo'],
     });
 
     return {
       hasStore: !!store,
       storeId: store?.id || null,
       storeName: store?.name || null,
+      storeRif: store?.rif || null,
+      storeLogo: store?.logo || null,
     };
   }
 

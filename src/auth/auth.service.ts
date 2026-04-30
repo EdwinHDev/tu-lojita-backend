@@ -49,7 +49,10 @@ export class AuthService {
       });
 
       const payload = ticket.getPayload() as GooglePayload;
-      let user = await this.userRepository.findOneBy({ email: payload.email });
+      let user = await this.userRepository.findOne({
+        where: { email: payload.email },
+        relations: ['company', 'store'],
+      });
 
       if (!user) {
         user = this.userRepository.create({
@@ -59,11 +62,12 @@ export class AuthService {
           avatarUrl: payload.picture,
           googleId: payload.sub,
         });
-        await this.userRepository.save(user);
+        user = await this.userRepository.save(user);
+        // Para usuarios nuevos, company y store serán null por defecto.
       }
 
       // Quitamos datos sensibles
-      const { confirm, confirmToken, password, createdAt, updatedAt, googleId, isActive, role, ...restUser } = user;
+      const { confirm, confirmToken, password, createdAt, updatedAt, googleId, isActive, ...restUser } = user;
 
       // Generamos los tokens
       const tokens = this.getTokens(user.id);

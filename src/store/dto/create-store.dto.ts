@@ -25,6 +25,10 @@ export class CreateStoreDto {
   @MinLength(1, { message: 'El logo no puede estar vacío' })
   logo: string;
 
+  @IsString({ message: 'La imagen de portada debe ser una cadena de texto' })
+  @IsOptional()
+  coverImage?: string;
+
   @IsUUID('4', { message: 'El ID de la empresa debe ser un UUID válido' })
   @IsOptional()
   companyId?: string;
@@ -36,5 +40,10 @@ export class CreateStoreDto {
 
   @IsUUID('4', { message: 'El ID de la subcategoría debe ser un UUID válido' })
   subCategoryId: string;
+
+  @IsString({ message: 'El nombre de la sucursal debe ser una cadena de texto' })
+  @IsOptional()
+  @MaxLength(100, { message: 'El nombre de la sucursal debe tener menos de 100 caracteres' })
+  branchName?: string;
 
 }

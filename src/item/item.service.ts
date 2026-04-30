@@ -211,6 +211,17 @@ export class ItemService {
       updateItemDto.discountPrice = undefined;
     }
 
+    if (updateItemDto.categoryId) {
+      const category = await this.storeCategoryRepository.findOne({
+        where: { id: updateItemDto.categoryId, store: { id: item.store.id } }
+      });
+
+      if (!category) {
+        throw new NotFoundException(`Categoría con ID ${updateItemDto.categoryId} no encontrada en esta tienda`);
+      }
+      item.category = category;
+    }
+
     this.itemRepository.merge(item, updateItemDto);
     return await this.itemRepository.save(item);
   }

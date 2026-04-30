@@ -20,7 +20,7 @@ export class CategoryService {
   }
 
   async findAll(queryDto: CategoryQueryDto) {
-    const { inUse } = queryDto;
+    const { inUse, search, page = 1, limit = 20 } = queryDto;
 
     const queryBuilder = this.categoryRepository.createQueryBuilder('category')
       .leftJoinAndSelect('category.subcategories', 'subCategory');
@@ -30,6 +30,13 @@ export class CategoryService {
       queryBuilder.innerJoin('subCategory.stores', 'store');
       queryBuilder.distinct(true);
     }
+
+    if (search) {
+      queryBuilder.andWhere('category.name ILIKE :search', { search: `%${search}%` });
+    }
+
+    queryBuilder.skip((page - 1) * limit);
+    queryBuilder.take(limit);
 
     return await queryBuilder.getMany();
   }

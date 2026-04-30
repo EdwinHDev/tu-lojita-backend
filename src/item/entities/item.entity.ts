@@ -100,7 +100,11 @@ export class Item {
    */
   @Column('numeric', {
     default: 0,
-    nullable: true
+    nullable: true,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => value ? parseFloat(value) : 0,
+    }
   })
   stockQuantity?: number;
 
