@@ -4,7 +4,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, MoreThanOrEqual, In } from 'typeorm';
+import { Repository, MoreThanOrEqual } from 'typeorm';
 import { Company } from './entities/company.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Order } from 'src/order/entities/order.entity';
@@ -131,10 +131,7 @@ export class CompanyDashboardService {
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
-      .andWhere('order.createdAt >= :startOfToday', {
-        startOfToday: startOfToday.toISOString(),
-      })
-      .getRawOne();
+      .getRawOne<{ total: string | null }>();
 
     // Ventas de ayer para calcular porcentaje
     const salesYesterday = await this.orderRepository
@@ -147,10 +144,7 @@ export class CompanyDashboardService {
       .andWhere('order.createdAt >= :startOfYesterday', {
         startOfYesterday: startOfYesterday.toISOString(),
       })
-      .andWhere('order.createdAt < :startOfToday', {
-        startOfToday: startOfToday.toISOString(),
-      })
-      .getRawOne();
+      .getRawOne<{ total: string | null }>();
 
     const salesTodayAmount = parseFloat(salesToday?.total || '0');
     const salesYesterdayAmount = parseFloat(salesYesterday?.total || '0');
@@ -186,10 +180,7 @@ export class CompanyDashboardService {
       .createQueryBuilder('order')
       .select('COUNT(DISTINCT order.userId)', 'total')
       .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-      })
-      .getRawOne();
+      .getRawOne<{ total: string | null }>();
 
     const newCustomersThisMonth = await this.orderRepository
       .createQueryBuilder('order')
@@ -198,10 +189,7 @@ export class CompanyDashboardService {
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
-      .andWhere('order.createdAt >= :startOfMonth', {
-        startOfMonth: startOfMonth.toISOString(),
-      })
-      .getRawOne();
+      .getRawOne<{ total: string | null }>();
 
     return {
       salesToday: {
@@ -266,7 +254,6 @@ export class CompanyDashboardService {
 
     const recentSales: RecentSaleDto[] = orders.map((order) => {
       const orderDate = new Date(order.createdAt);
-      const hours = orderDate.getHours().toString().padStart(2, '0');
       const minutes = orderDate.getMinutes().toString().padStart(2, '0');
       const ampm = orderDate.getHours() >= 12 ? 'PM' : 'AM';
       const displayHours = orderDate.getHours() % 12 || 12;
@@ -354,7 +341,7 @@ export class CompanyDashboardService {
           .andWhere('order.createdAt >= :startOfToday', {
             startOfToday: startOfToday.toISOString(),
           })
-          .getRawOne();
+          .getRawOne<{ total: string | null }>();
 
         return {
           id: store.id,

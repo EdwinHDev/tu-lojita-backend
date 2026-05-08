@@ -16,6 +16,7 @@ import { Company } from 'src/company/entities/company.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { Payment } from 'src/payment/entities/payment.entity';
+import { Notification } from 'src/notification/entities/notification.entity';
 
 @Entity('users')
 export class User {
@@ -105,6 +106,9 @@ export class User {
 
   @OneToMany(() => Payment, (payment) => payment.user)
   payments: Payment[];
+
+  @OneToMany(() => Notification, (notification) => notification.user)
+  notifications: Notification[];
 
   @BeforeInsert()
   @BeforeUpdate()

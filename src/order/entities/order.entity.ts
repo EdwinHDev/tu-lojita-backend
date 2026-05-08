@@ -39,6 +39,9 @@ export class Order {
     default: OrderStatus.PENDING,
   })
   status: OrderStatus;
+  
+  @Column('text', { nullable: true })
+  rejectionReason?: string;
 
   @Column('int', { nullable: true })
   monthlyDueDay?: number | null;

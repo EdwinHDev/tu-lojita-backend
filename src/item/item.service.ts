@@ -16,7 +16,30 @@ import { Store } from 'src/store/entities/store.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { ItemPropertyTemplate } from './entities/item-property-template.entity';
 import { ItemAttributes } from './types/item-attributes.interface';
+interface AttributeProperty {
+  key: string;
+  type: string;
+  value: any;
+  templateId?: string;
+}
+
+interface CustomizationOptionInput {
+  name: string;
+  price?: number;
+}
+
+interface CustomizationGroupInput {
+  name: string;
+  minSelect?: number;
+  maxSelect?: number;
+  allowOptionQuantity?: boolean | string;
+  allow_option_quantity?: boolean | string;
+  options?: CustomizationOptionInput[];
+}
 import { PropertyType } from './types/property-type.enum';
+import { CustomizationGroup } from './entities/customization-group.entity';
+import { CustomizationOption } from './entities/customization-option.entity';
+import { ItemAttributeValue } from './entities/item-attribute-value.entity';
 
 @Injectable()
 export class ItemService {
@@ -29,10 +52,144 @@ export class ItemService {
     private readonly storeCategoryRepository: Repository<StoreCategory>,
     @InjectRepository(ItemPropertyTemplate)
     private readonly templateRepository: Repository<ItemPropertyTemplate>,
+    @InjectRepository(CustomizationGroup)
+    private readonly customizationGroupRepository: Repository<CustomizationGroup>,
+    @InjectRepository(CustomizationOption)
+    private readonly customizationOptionRepository: Repository<CustomizationOption>,
+    @InjectRepository(ItemAttributeValue)
+    private readonly attributeValueRepository: Repository<ItemAttributeValue>,
   ) {}
 
-  async validateAttributes(categoryId: string, attributes: any) {
-    if (!attributes || !attributes.properties || !Array.isArray(attributes.properties)) {
+  private async mapItemResponse(item: Item): Promise<any> {
+    if (!item) return item;
+
+    let groups = item.customizationGroupsRel;
+    if (!groups) {
+      groups = await this.customizationGroupRepository.find({
+        where: { item: { id: item.id } },
+        relations: ['options'],
+      });
+    }
+
+    let attrValues = item.attributesRel;
+    if (!attrValues) {
+      attrValues = await this.attributeValueRepository.find({
+        where: { item: { id: item.id } },
+      });
+    }
+
+    let attributesJson = item.attributes;
+    if (attrValues && attrValues.length > 0) {
+      attributesJson = {
+        properties: attrValues.map((v) => ({
+          key: v.key,
+          type: v.type,
+          value: v.value,
+        })),
+      } as any;
+    }
+
+    let customizationGroupsJson = item.customizationGroups;
+    if (groups && groups.length > 0) {
+      customizationGroupsJson = groups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        minSelect: g.minSelect,
+        maxSelect: g.maxSelect,
+        allowOptionQuantity: g.allowOptionQuantity,
+        options: (g.options || []).map((opt) => ({
+          id: opt.id,
+          name: opt.name,
+          price: parseFloat(opt.price?.toString() || '0'),
+        })),
+      }));
+    }
+
+    return {
+      ...item,
+      attributes: attributesJson,
+      customizationGroups: customizationGroupsJson,
+    };
+  }
+
+  private async saveCustomizationAndAttributes(
+    item: Item,
+    customizationGroups?: CustomizationGroupInput[],
+    attributes?: ItemAttributes,
+  ) {
+    if (
+      attributes &&
+      attributes.properties &&
+      Array.isArray(attributes.properties)
+    ) {
+      const oldAttrs = await this.attributeValueRepository.find({
+        where: { item: { id: item.id } },
+      });
+      if (oldAttrs.length > 0) {
+        await this.attributeValueRepository.remove(oldAttrs);
+      }
+
+      for (const prop of attributes.properties) {
+        if (prop.key && prop.value !== undefined) {
+          const attr = this.attributeValueRepository.create({
+            item,
+            key: prop.key,
+            type: prop.type,
+            value: prop.value,
+          });
+          await this.attributeValueRepository.save(attr);
+        }
+      }
+    }
+
+    if (customizationGroups && Array.isArray(customizationGroups)) {
+      const oldGroups = await this.customizationGroupRepository.find({
+        where: { item: { id: item.id } },
+      });
+      if (oldGroups.length > 0) {
+        await this.customizationGroupRepository.remove(oldGroups);
+      }
+
+      for (const g of customizationGroups) {
+        if (!g || !g.name) continue;
+        const group = this.customizationGroupRepository.create({
+          item,
+          name: g.name,
+          minSelect: g.minSelect || 0,
+          maxSelect: g.maxSelect || 0,
+          allowOptionQuantity:
+            g.allowOptionQuantity === true ||
+            g.allowOptionQuantity === 'true' ||
+            g.allow_option_quantity === true ||
+            g.allow_option_quantity === 'true' ||
+            false,
+        });
+        const savedGroup = await this.customizationGroupRepository.save(group);
+
+        if (g.options && Array.isArray(g.options)) {
+          for (const opt of g.options) {
+            if (!opt || !opt.name) continue;
+            const option = this.customizationOptionRepository.create({
+              group: savedGroup,
+              name: opt.name,
+              price: opt.price || 0,
+            });
+            await this.customizationOptionRepository.save(option);
+          }
+        }
+      }
+    }
+  }
+
+  async validateAttributes(
+    categoryId: string,
+    attributes?: ItemAttributes,
+  ) {
+    if (
+      !attributes ||
+      !attributes.properties ||
+      !Array.isArray(attributes.properties)
+    ) {
       return;
     }
 
@@ -42,11 +199,16 @@ export class ItemService {
 
     for (const template of templates) {
       const prop = attributes.properties.find(
-        (p: any) => p.templateId === template.id || p.key === template.name,
+        (p) => p.templateId === template.id || p.key === template.name,
       );
 
-      if (template.isRequired && (!prop || prop.value === undefined || prop.value === null)) {
-        throw new BadRequestException(`La propiedad "${template.name}" es obligatoria`);
+      if (
+        template.isRequired &&
+        (!prop || prop.value === undefined || prop.value === null)
+      ) {
+        throw new BadRequestException(
+          `La propiedad "${template.name}" es obligatoria`,
+        );
       }
 
       if (prop) {
@@ -59,25 +221,33 @@ export class ItemService {
     switch (template.type) {
       case PropertyType.NUMBER:
         if (typeof value !== 'number') {
-          throw new BadRequestException(`La propiedad "${template.name}" debe ser un número`);
+          throw new BadRequestException(
+            `La propiedad "${template.name}" debe ser un número`,
+          );
         }
         break;
       case PropertyType.LIST:
       case PropertyType.COLOR_LIST:
         if (!Array.isArray(value)) {
-          throw new BadRequestException(`La propiedad "${template.name}" debe ser una lista`);
+          throw new BadRequestException(
+            `La propiedad "${template.name}" debe ser una lista`,
+          );
         }
         break;
       case PropertyType.BOOLEAN:
         if (typeof value !== 'boolean') {
-          throw new BadRequestException(`La propiedad "${template.name}" debe ser un booleano`);
+          throw new BadRequestException(
+            `La propiedad "${template.name}" debe ser un booleano`,
+          );
         }
         break;
       case PropertyType.COLOR:
       case PropertyType.TEXT:
       case PropertyType.DROPDOWN:
         if (typeof value !== 'string') {
-          throw new BadRequestException(`La propiedad "${template.name}" debe ser un texto`);
+          throw new BadRequestException(
+            `La propiedad "${template.name}" debe ser un texto`,
+          );
         }
         break;
     }
@@ -117,7 +287,12 @@ export class ItemService {
       await this.validateAttributes(categoryId, itemData.attributes);
     }
 
-    let { price, discountPrice, priceType } = itemData;
+    const {
+      price: _price,
+      discountPrice: _discountPrice,
+      priceType,
+    } = itemData;
+    let { price, discountPrice } = itemData;
 
     // Lógica profesional para tipos de precio especiales
     if (priceType === PriceType.FREE || priceType === PriceType.ON_DEMAND) {
@@ -133,7 +308,14 @@ export class ItemService {
       category,
     });
 
-    return await this.itemRepository.save(item);
+    const savedItem = await this.itemRepository.save(item);
+    await this.saveCustomizationAndAttributes(
+      savedItem,
+      createItemDto.customizationGroups,
+      createItemDto.attributes,
+    );
+
+    return await this.mapItemResponse(savedItem);
   }
 
   async findAll(paginationDto: ItemPaginationDto) {
@@ -160,6 +342,12 @@ export class ItemService {
       .createQueryBuilder('item')
       .leftJoinAndSelect('item.store', 'store')
       .leftJoinAndSelect('item.category', 'category')
+      .leftJoinAndSelect(
+        'item.customizationGroupsRel',
+        'customizationGroupsRel',
+      )
+      .leftJoinAndSelect('customizationGroupsRel.options', 'options')
+      .leftJoinAndSelect('item.attributesRel', 'attributesRel')
       .leftJoin('store.subcategory', 'subCategory')
       .leftJoin('subCategory.category', 'globalCategory')
       .leftJoin('store.addresses', 'address')
@@ -250,8 +438,13 @@ export class ItemService {
 
     const [data, total] = await queryBuilder.getManyAndCount();
 
+    const mappedData: any[] = [];
+    for (const item of data) {
+      mappedData.push(await this.mapItemResponse(item));
+    }
+
     return {
-      data,
+      data: mappedData,
       total,
       limit,
       offset,
@@ -269,17 +462,31 @@ export class ItemService {
   async findOne(id: string) {
     const item = await this.itemRepository.findOne({
       where: { id },
+      relations: [
+        'store',
+        'store.owner',
+        'category',
+        'customizationGroupsRel',
+        'customizationGroupsRel.options',
+        'attributesRel',
+      ],
+    });
+
+    if (!item) {
+      throw new NotFoundException(`Item con ID ${id} no encontrado`);
+    }
+    return await this.mapItemResponse(item);
+  }
+
+  async update(id: string, updateItemDto: UpdateItemDto, user: User) {
+    const item = await this.itemRepository.findOne({
+      where: { id },
       relations: ['store', 'store.owner', 'category'],
     });
 
     if (!item) {
       throw new NotFoundException(`Item con ID ${id} no encontrado`);
     }
-    return item;
-  }
-
-  async update(id: string, updateItemDto: UpdateItemDto, user: User) {
-    const item = await this.findOne(id);
 
     if (item.store.owner?.id !== user.id) {
       throw new ForbiddenException(
@@ -287,7 +494,6 @@ export class ItemService {
       );
     }
 
-    // Aplicar lógica de tipos de precio en la actualización
     if (
       updateItemDto.priceType === PriceType.FREE ||
       updateItemDto.priceType === PriceType.ON_DEMAND
@@ -307,19 +513,35 @@ export class ItemService {
         );
       }
       item.category = category;
-      // Validar atributos contra plantillas de la nueva categoría
-      await this.validateAttributes(updateItemDto.categoryId, updateItemDto.attributes || item.attributes);
+      await this.validateAttributes(
+        updateItemDto.categoryId,
+        updateItemDto.attributes || item.attributes,
+      );
     } else if (updateItemDto.attributes && item.category) {
-      // Validar atributos contra plantillas de la categoría actual
       await this.validateAttributes(item.category.id, updateItemDto.attributes);
     }
 
     this.itemRepository.merge(item, updateItemDto);
-    return await this.itemRepository.save(item);
+    const savedItem = await this.itemRepository.save(item);
+
+    await this.saveCustomizationAndAttributes(
+      savedItem,
+      updateItemDto.customizationGroups,
+      updateItemDto.attributes,
+    );
+
+    return await this.mapItemResponse(savedItem);
   }
 
   async remove(id: string, user: User) {
-    const item = await this.findOne(id);
+    const item = await this.itemRepository.findOne({
+      where: { id },
+      relations: ['store', 'store.owner'],
+    });
+
+    if (!item) {
+      throw new NotFoundException(`Item con ID ${id} no encontrado`);
+    }
 
     if (item.store.owner?.id !== user.id) {
       throw new ForbiddenException(

@@ -15,6 +15,9 @@ import { StoreAddressModule } from './store-address/store-address.module';
 import { PaymentModule } from './payment/payment.module';
 import { OrderModule } from './order/order.module';
 import { OrderItemModule } from './order-item/order-item.module';
+import { NotificationModule } from './notification/notification.module';
+import { BankModule } from './bank/bank.module';
+import { StorePaymentMethodModule } from './store-payment-method/store-payment-method.module';
 
 @Module({
   imports: [
@@ -52,6 +55,9 @@ import { OrderItemModule } from './order-item/order-item.module';
     PaymentModule,
     OrderModule,
     OrderItemModule,
+    NotificationModule,
+    BankModule,
+    StorePaymentMethodModule,
   ],
   controllers: [],
   providers: [],

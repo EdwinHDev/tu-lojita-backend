@@ -6,9 +6,22 @@ import { Item } from './entities/item.entity';
 import { ItemPropertyTemplate } from './entities/item-property-template.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
+import { CustomizationGroup } from './entities/customization-group.entity';
+import { CustomizationOption } from './entities/customization-option.entity';
+import { ItemAttributeValue } from './entities/item-attribute-value.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Item, ItemPropertyTemplate, Store, StoreCategory])],
+  imports: [
+    TypeOrmModule.forFeature([
+      Item,
+      ItemPropertyTemplate,
+      Store,
+      StoreCategory,
+      CustomizationGroup,
+      CustomizationOption,
+      ItemAttributeValue,
+    ]),
+  ],
   controllers: [ItemController],
   providers: [ItemService],
 })

@@ -17,6 +17,7 @@ import { Item } from 'src/item/entities/item.entity';
 import { StoreAddress } from 'src/store-address/entities/store-address.entity';
 import { Payment } from 'src/payment/entities/payment.entity';
 import { Order } from 'src/order/entities/order.entity';
+import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
 import slugify from 'slugify';
 import { StoreStatus } from '../types/status.enum';
 
@@ -85,6 +86,9 @@ export class Store {
   @OneToMany(() => Order, (order) => order.store)
   orders: Order[];
 
+  @OneToMany(() => StorePaymentMethod, (method) => method.store)
+  paymentMethodConfigs: StorePaymentMethod[];
+
   // Configuración de Pagos Parciales
   @Column('boolean', { default: false })
   allowPartialPayments: boolean;
@@ -97,6 +101,12 @@ export class Store {
 
   @Column('int', { default: 0 })
   maxInstallments: number;
+
+  @Column('jsonb', {
+    nullable: true,
+    default: ['PAGO_MOVIL', 'ZELLE', 'TRANSFER', 'CASH'],
+  })
+  paymentMethods: string[];
 
   @CreateDateColumn()
   createdAt: string;

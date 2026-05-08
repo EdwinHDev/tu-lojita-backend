@@ -6,6 +6,7 @@ import {
   MaxLength,
   IsNotEmpty,
   ValidateNested,
+  IsArray,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateStoreAddressDto } from 'src/store-address/dto/create-store-address.dto';
@@ -56,4 +57,12 @@ export class CreateStoreDto {
     message: 'El nombre de la sucursal debe tener menos de 100 caracteres',
   })
   branchName?: string;
+
+  @IsArray({ message: 'Los métodos de pago deben ser una lista válida' })
+  @IsString({
+    each: true,
+    message: 'Cada método de pago debe ser una cadena de texto',
+  })
+  @IsOptional()
+  paymentMethods?: string[];
 }

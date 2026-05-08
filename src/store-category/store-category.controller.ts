@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
 } from '@nestjs/common';
 import { StoreCategoryService } from './store-category.service';
 import { CreateStoreCategoryDto } from './dto/create-store-category.dto';
@@ -30,6 +31,23 @@ export class StoreCategoryController {
   @Get('store/:storeId')
   findByStore(@Param('storeId') storeId: string) {
     return this.storeCategoryService.findByStore(storeId);
+  }
+
+  @Get('store/:storeId/paginated')
+  findByStorePaginated(
+    @Param('storeId') storeId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('q') q?: string,
+  ) {
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    const offsetNum = offset ? parseInt(offset, 10) : 0;
+    return this.storeCategoryService.findByStorePaginated(
+      storeId,
+      limitNum,
+      offsetNum,
+      q,
+    );
   }
 
   @Get(':id')

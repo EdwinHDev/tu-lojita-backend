@@ -1,19 +1,25 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Order } from './entities/order.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { StoreStatus } from 'src/store/types/status.enum';
 import { Item } from 'src/item/entities/item.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { User } from 'src/user/entities/user.entity';
+import { UserRole } from 'src/user/types/user-role.enum';
 import { OrderStatus } from './types';
 import { OrderPaginationDto } from './dto/order-pagination.dto';
+import { NotificationService } from 'src/notification/notification.service';
+import { NotificationType } from 'src/notification/entities/notification.entity';
 
 @Injectable()
 export class OrderService {
@@ -31,7 +37,10 @@ export class OrderService {
     private readonly userRepository: Repository<User>,
 
     private readonly dataSource: DataSource,
+    private readonly notificationService: NotificationService,
   ) {}
+
+  private readonly logger = new Logger(OrderService.name);
 
   async create(createOrderDto: CreateOrderDto, userId: string) {
     const {
@@ -44,6 +53,11 @@ export class OrderService {
     const store = await this.storeRepository.findOneBy({ id: storeId });
     if (!store)
       throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
+    if (store.status !== StoreStatus.ACTIVE) {
+      throw new BadRequestException(
+        `La tienda no está activa para recibir órdenes`,
+      );
+    }
 
     // 2. Validar Usuario (Cliente)
     const user = await this.userRepository.findOneBy({ id: userId });
@@ -72,7 +86,11 @@ export class OrderService {
       for (const itemDto of itemsDto) {
         const item = await queryRunner.manager.findOne(Item, {
           where: { id: itemDto.itemId },
-          relations: ['store'],
+          relations: [
+            'store',
+            'customizationGroupsRel',
+            'customizationGroupsRel.options',
+          ],
         });
         if (!item)
           throw new NotFoundException(
@@ -101,14 +119,74 @@ export class OrderService {
           await queryRunner.manager.save(item);
         }
 
-        // Determinar precio (prioridad a discountPrice si existe)
-        const priceAtOrder = item.discountPrice
+        // Validar opciones (minSelect y maxSelect)
+        if (item.customizationGroupsRel) {
+          for (const group of item.customizationGroupsRel) {
+            const selectedOptIds = itemDto.selectedOptions?.[group.id] || [];
+
+            if (group.allowOptionQuantity) {
+              const uniqueCount = new Set(selectedOptIds).size;
+              if (group.minSelect > 0 && uniqueCount < group.minSelect) {
+                throw new BadRequestException(
+                  `Debes seleccionar al menos ${group.minSelect} opciones únicas para "${group.name}"`,
+                );
+              }
+              if (group.maxSelect > 0 && uniqueCount > group.maxSelect) {
+                throw new BadRequestException(
+                  `Puedes seleccionar como máximo ${group.maxSelect} opciones únicas para "${group.name}"`,
+                );
+              }
+            } else {
+              const requiredMin = group.minSelect * itemDto.quantity;
+              const requiredMax = group.maxSelect * itemDto.quantity;
+
+              if (group.minSelect > 0 && selectedOptIds.length < requiredMin) {
+                throw new BadRequestException(
+                  `Debes seleccionar al menos ${requiredMin} opción(es) para "${group.name}"`,
+                );
+              }
+              if (group.maxSelect > 0 && selectedOptIds.length > requiredMax) {
+                throw new BadRequestException(
+                  `Puedes seleccionar como máximo ${requiredMax} opción(es) para "${group.name}"`,
+                );
+              }
+            }
+          }
+        }
+
+        let customizationExtra = 0;
+        if (itemDto.selectedOptions && item.customizationGroupsRel) {
+          for (const [groupId, optionIds] of Object.entries(
+            itemDto.selectedOptions,
+          )) {
+            const group = item.customizationGroupsRel.find(
+              (g) => g.id === groupId,
+            );
+            if (group && group.options) {
+              for (const optId of optionIds) {
+                const opt = group.options.find((o) => o.id === optId);
+                if (opt) {
+                  customizationExtra += parseFloat(opt.price.toString() || '0');
+                }
+              }
+            }
+          }
+        }
+
+        // Determinar precio base (prioridad a discountPrice si existe)
+        const basePrice = item.discountPrice
           ? parseFloat(item.discountPrice.toString())
           : parseFloat(item.price.toString());
 
+        const totalLinePrice =
+          basePrice * itemDto.quantity + customizationExtra;
+        const priceAtOrder =
+          itemDto.quantity > 0
+            ? totalLinePrice / itemDto.quantity
+            : totalLinePrice;
+
         // Usar redondeo a 2 decimales para evitar errores de coma flotante en el subtotal
-        subtotal =
-          Math.round((subtotal + priceAtOrder * itemDto.quantity) * 100) / 100;
+        subtotal = Math.round((subtotal + totalLinePrice) * 100) / 100;
 
         // Preparar OrderItem (Snapshot)
         const orderItem = queryRunner.manager.create(OrderItem, {
@@ -116,6 +194,7 @@ export class OrderService {
           title: item.title, // Snapshot del nombre
           quantity: itemDto.quantity,
           price: priceAtOrder,
+          selectedOptions: itemDto.selectedOptions,
         });
         orderItemsToSave.push(orderItem);
       }
@@ -158,8 +237,35 @@ export class OrderService {
 
       await queryRunner.commitTransaction();
 
+      // Trigger Notification to Store Owner
+      const orderWithRelations = await this.findOne(savedOrder.id);
+      const ownerId =
+        orderWithRelations.store.owner?.id ||
+        orderWithRelations.store.company?.owner?.id;
+
+      /* 
+      // Comentado para evitar ruido: El dueño solo recibirá notificación cuando se reporte el pago
+      if (ownerId) {
+        const firstItem = orderWithRelations.orderItems[0]?.title || 'un producto';
+        const storeName = orderWithRelations.store.name;
+
+        this.logger.log(
+          `Sending notification to owner ${ownerId} for order ${savedOrder.id}`,
+        );
+        await this.notificationService.create({
+          userId: ownerId,
+          title: `¡Nueva Orden Recibida!`,
+          body: `Compra de ${firstItem} en '${storeName}' por $${orderWithRelations.finalAmount}.`,
+          type: NotificationType.ORDER_CREATED,
+          targetId: savedOrder.id,
+        });
+      } else {
+        this.logger.warn(`No owner found for store ${orderWithRelations.store.id} (Order ${savedOrder.id})`);
+      }
+      */
+
       // Retornar la orden con sus items cargados
-      return await this.findOne(savedOrder.id);
+      return orderWithRelations;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -173,6 +279,9 @@ export class OrderService {
       where: { id },
       relations: [
         'store',
+        'store.owner',
+        'store.company',
+        'store.company.owner',
         'store.subcategory',
         'payments',
         'user',
@@ -181,13 +290,15 @@ export class OrderService {
         'orderItems.item',
         'orderItems.item.store',
         'orderItems.item.store.subcategory',
+        'orderItems.item.customizationGroupsRel',
+        'orderItems.item.customizationGroupsRel.options',
       ],
     });
     if (!order) throw new NotFoundException(`Orden #${id} no encontrada`);
     return order;
   }
 
-  async findAll(paginationDto: OrderPaginationDto) {
+  async findAll(paginationDto: OrderPaginationDto, requestingUser?: User) {
     const {
       status,
       userId,
@@ -210,6 +321,11 @@ export class OrderService {
       .leftJoinAndSelect('user.addresses', 'addresses')
       .leftJoinAndSelect('order.orderItems', 'orderItems')
       .leftJoinAndSelect('orderItems.item', 'item')
+      .leftJoinAndSelect(
+        'item.customizationGroupsRel',
+        'customizationGroupsRel',
+      )
+      .leftJoinAndSelect('customizationGroupsRel.options', 'options')
       .leftJoinAndSelect('order.payments', 'payments');
 
     if (status) {
@@ -258,10 +374,72 @@ export class OrderService {
       : 'order.createdAt';
     queryBuilder.orderBy(sortField, order || 'DESC');
 
+    // Authorization checks
+    if (requestingUser) {
+      if (requestingUser.role === UserRole.USER) {
+        // Users can only see their own orders
+        queryBuilder.andWhere('user.id = :authUserId', {
+          authUserId: requestingUser.id,
+        });
+      } else if (requestingUser.role === UserRole.VENDOR) {
+        // Vendors can only see orders from their own store
+        if (!requestingUser.store) {
+          throw new ForbiddenException('No tienes una tienda asignada');
+        }
+        queryBuilder.andWhere('store.id = :authStoreId', {
+          authStoreId: requestingUser.store.id,
+        });
+      } else if (requestingUser.role === UserRole.COMPANY) {
+        // Company can only see orders from stores that belong to their company
+        if (!requestingUser.company) {
+          throw new ForbiddenException('No tienes una empresa asignada');
+        }
+        queryBuilder.andWhere('store.companyId = :authCompanyId', {
+          authCompanyId: requestingUser.company.id,
+        });
+      }
+    }
+
     // Paginación
     queryBuilder.skip(offset).take(limit);
 
     const [items, total] = await queryBuilder.getManyAndCount();
+
+    const itemIds: string[] = [];
+    for (const order of items) {
+      if (order.orderItems) {
+        for (const oi of order.orderItems) {
+          if (oi.item && oi.item.id) {
+            itemIds.push(oi.item.id);
+          }
+        }
+      }
+    }
+
+    if (itemIds.length > 0) {
+      const fullItems = await this.itemRepository.find({
+        where: { id: In(itemIds) },
+        relations: ['customizationGroupsRel', 'customizationGroupsRel.options'],
+      });
+
+      const itemMap = new Map<string, Item>();
+      for (const item of fullItems) {
+        itemMap.set(item.id, item);
+      }
+
+      for (const order of items) {
+        if (order.orderItems) {
+          for (const oi of order.orderItems) {
+            if (oi.item && oi.item.id) {
+              const fullItem = itemMap.get(oi.item.id);
+              if (fullItem) {
+                oi.item.customizationGroupsRel = fullItem.customizationGroupsRel;
+              }
+            }
+          }
+        }
+      }
+    }
 
     return {
       items,
@@ -325,10 +503,78 @@ export class OrderService {
     }
   }
 
-  async update(id: string, updateOrderDto: UpdateOrderDto) {
+  async update(
+    id: string,
+    updateOrderDto: UpdateOrderDto,
+    requestingUser?: User,
+  ) {
     const order = await this.findOne(id);
+
+    // Verify ownership
+    if (requestingUser) {
+      if (
+        requestingUser.role === UserRole.USER &&
+        order.user.id !== requestingUser.id
+      ) {
+        throw new ForbiddenException(
+          'No tienes permiso para actualizar esta orden',
+        );
+      } else if (requestingUser.role === UserRole.VENDOR) {
+        if (
+          !requestingUser.store ||
+          order.store.id !== requestingUser.store.id
+        ) {
+          throw new ForbiddenException(
+            'No tienes permiso para actualizar órdenes de esta tienda',
+          );
+        }
+      } else if (requestingUser.role === UserRole.COMPANY) {
+        if (
+          !requestingUser.company ||
+          order.store.company?.id !== requestingUser.company.id
+        ) {
+          throw new ForbiddenException(
+            'No tienes permiso para actualizar órdenes de esta empresa',
+          );
+        }
+      }
+    }
+
+    const oldStatus = order.status;
     this.orderRepository.merge(order, updateOrderDto);
-    return await this.orderRepository.save(order);
+    const updatedOrder = await this.orderRepository.save(order);
+
+    // Trigger Notification to Customer if status changed
+    if (updateOrderDto.status && updateOrderDto.status !== oldStatus) {
+      let title = '';
+      let body = '';
+      let type = NotificationType.GENERAL;
+
+      if (updateOrderDto.status === OrderStatus.FULLY_PAID) {
+        title = '¡Tu pedido ha sido aprobado!';
+        body = `Tu pedido #${order.id.split('-')[0].toUpperCase()} en ${order.store.name} ha sido aprobado y está siendo procesado.`;
+        type = NotificationType.ORDER_APPROVED;
+      } else if (updateOrderDto.status === OrderStatus.CANCELLED) {
+        title = 'Pedido rechazado';
+        body = `Tu pedido #${order.id.split('-')[0].toUpperCase()} en ${order.store.name} ha sido rechazado o cancelado.`;
+        if (updateOrderDto.rejectionReason) {
+          body += ` Motivo: ${updateOrderDto.rejectionReason}`;
+        }
+        type = NotificationType.ORDER_REJECTED;
+      }
+
+      if (title) {
+        await this.notificationService.create({
+          userId: order.user.id,
+          title,
+          body,
+          type,
+          targetId: order.id,
+        });
+      }
+    }
+
+    return updatedOrder;
   }
 
   async remove(id: string) {

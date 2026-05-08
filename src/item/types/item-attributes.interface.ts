@@ -11,4 +11,3 @@ export interface ItemAttributes {
   properties: ItemProperty[];
   legacy?: Record<string, any>; // To support old flat attributes if needed
 }
-

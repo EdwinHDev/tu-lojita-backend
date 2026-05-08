@@ -1,0 +1,171 @@
+﻿
+> tu-lojita-backend@0.0.1 lint
+> eslint "{src,apps,libs,test}/**/*.ts" --fix
+
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\address\address.service.ts
+  38:13  error  'user' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\address\dto\create-address.dto.ts
+  2:3  error  'IsBoolean' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\auth\auth.controller.ts
+  6:3  error  'Patch' is defined but never used   @typescript-eslint/no-unused-vars
+  7:3  error  'Param' is defined but never used   @typescript-eslint/no-unused-vars
+  8:3  error  'Delete' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\auth\auth.module.ts
+  8:10  error  'envs' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\auth\auth.service.ts
+  128:9   error  The two values in this comparison do not have a shared enum type  @typescript-eslint/no-unsafe-enum-comparison
+  179:70  error  Unsafe member access .message on an `any` value                   @typescript-eslint/no-unsafe-member-access
+  221:16  error  '_confirm' is assigned a value but never used                     @typescript-eslint/no-unused-vars
+  222:21  error  '_confirmToken' is assigned a value but never used                @typescript-eslint/no-unused-vars
+  223:17  error  '_' is assigned a value but never used                            @typescript-eslint/no-unused-vars
+  224:18  error  '_createdAt' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+  225:18  error  '_updatedAt' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+  226:17  error  '_googleId' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  227:17  error  '_isActive' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  287:14  error  'error' is defined but never used                                 @typescript-eslint/no-unused-vars
+  324:18  error  '_confirm' is assigned a value but never used                     @typescript-eslint/no-unused-vars
+  325:23  error  '_confirmToken' is assigned a value but never used                @typescript-eslint/no-unused-vars
+  326:19  error  '_password' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  327:20  error  '_createdAt' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+  328:20  error  '_updatedAt' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+  329:19  error  '_googleId' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  330:19  error  '_isActive' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  403:16  error  '_confirm' is assigned a value but never used                     @typescript-eslint/no-unused-vars
+  404:21  error  '_confirmToken' is assigned a value but never used                @typescript-eslint/no-unused-vars
+  405:17  error  '_password' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  406:18  error  '_createdAt' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+  407:18  error  '_updatedAt' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+  408:17  error  '_googleId' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  409:17  error  '_isActive' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\auth\decorators\get-user.decorator.ts
+  10:11  error  Unsafe assignment of an `any` value            @typescript-eslint/no-unsafe-assignment
+  11:11  error  Unsafe assignment of an `any` value            @typescript-eslint/no-unsafe-assignment
+  11:22  error  Unsafe member access .user on an `any` value   @typescript-eslint/no-unsafe-member-access
+  22:5   error  Unsafe return of a value of type `any`         @typescript-eslint/no-unsafe-return
+  22:32  error  Unsafe member access [data] on an `any` value  @typescript-eslint/no-unsafe-member-access
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\auth\guards\user-role.guard.ts
+  32:11  error  Unsafe assignment of an `any` value                     @typescript-eslint/no-unsafe-assignment
+  33:22  error  Unsafe member access .user on an `any` value            @typescript-eslint/no-unsafe-member-access
+  51:69  error  Invalid type "string[]" of template literal expression  @typescript-eslint/restrict-template-expressions
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\category\entities\category.entity.ts
+  9:10  error  'Store' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\common\guards\platform-access.guard.ts
+  36:11  error    Unsafe assignment of an `any` value                                     @typescript-eslint/no-unsafe-assignment
+  37:11  error    Unsafe assignment of an `any` value                                     @typescript-eslint/no-unsafe-assignment
+  37:26  error    Unsafe member access .user on an `any` value                            @typescript-eslint/no-unsafe-member-access
+  48:13  error    Unsafe member access .platform on an `any` value                        @typescript-eslint/no-unsafe-member-access
+  51:14  error    Unsafe member access .role on an `any` value                            @typescript-eslint/no-unsafe-member-access
+  66:11  error    Unsafe assignment of an `any` value                                     @typescript-eslint/no-unsafe-assignment
+  66:28  error    Unsafe member access .headers on an `any` value                         @typescript-eslint/no-unsafe-member-access
+  67:39  error    Computed name [origin] resolves to an `any` value                       @typescript-eslint/no-unsafe-member-access
+  68:34  error    Computed name [origin] resolves to an `any` value                       @typescript-eslint/no-unsafe-member-access
+  72:11  error    Unsafe assignment of an `any` value                                     @typescript-eslint/no-unsafe-assignment
+  72:29  error    Unsafe member access .headers on an `any` value                         @typescript-eslint/no-unsafe-member-access
+  74:59  warning  Unsafe argument of type `any` assigned to a parameter of type `string`  @typescript-eslint/no-unsafe-argument
+  81:11  error    Unsafe assignment of an `any` value                                     @typescript-eslint/no-unsafe-assignment
+  81:31  error    Unsafe member access .headers on an `any` value                         @typescript-eslint/no-unsafe-member-access
+  83:9   error    Unsafe call of an `any` typed value                                     @typescript-eslint/no-unsafe-call
+  83:19  error    Unsafe member access .includes on an `any` value                        @typescript-eslint/no-unsafe-member-access
+  86:9   error    Unsafe call of an `any` typed value                                     @typescript-eslint/no-unsafe-call
+  86:19  error    Unsafe member access .includes on an `any` value                        @typescript-eslint/no-unsafe-member-access
+  89:9   error    Unsafe call of an `any` typed value                                     @typescript-eslint/no-unsafe-call
+  89:19  error    Unsafe member access .includes on an `any` value                        @typescript-eslint/no-unsafe-member-access
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\company\decorators\is-rif.decorator.ts
+  11:24  error  'args' is defined but never used  @typescript-eslint/no-unused-vars
+  50:18  error  'args' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\item\dto\create-item.dto.ts
+  10:3  error  'IsUrl' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\item\item.service.ts
+   18:10  error  'ItemAttributes' is defined but never used           @typescript-eslint/no-unused-vars
+   83:7   error  Unsafe assignment of an `any` value                  @typescript-eslint/no-unsafe-assignment
+   87:11  error  Unsafe assignment of an `any` value                  @typescript-eslint/no-unsafe-assignment
+  138:13  error  Unsafe assignment of an `any` value                  @typescript-eslint/no-unsafe-assignment
+  291:14  error  '_price' is assigned a value but never used          @typescript-eslint/no-unused-vars
+  292:22  error  '_discountPrice' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  318:5   error  Unsafe return of a value of type `any`               @typescript-eslint/no-unsafe-return
+  478:5   error  Unsafe return of a value of type `any`               @typescript-eslint/no-unsafe-return
+  533:5   error  Unsafe return of a value of type `any`               @typescript-eslint/no-unsafe-return
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\main.ts
+  44:1  warning  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\notification\notification.gateway.ts
+  41:13  error    Unsafe assignment of an `any` value                                                                                                                                 @typescript-eslint/no-unsafe-assignment
+  45:13  error    Unsafe assignment of an `any` value                                                                                                                                 @typescript-eslint/no-unsafe-assignment
+  45:30  error    Unsafe member access .sub on an `any` value                                                                                                                         @typescript-eslint/no-unsafe-member-access
+  46:7   warning  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+  52:76  error    Unsafe member access .message on an `any` value                                                                                                                     @typescript-eslint/no-unsafe-member-access
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\notification\notification.service.ts
+  38:65  error  Unsafe member access .message on an `any` value  @typescript-eslint/no-unsafe-member-access
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\order\dto\order-pagination.dto.ts
+  6:3  error  'IsString' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\payment\entities\payment.entity.ts
+  6:3  error  'OneToOne' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\store-address\dto\create-store-address.dto.ts
+  4:3  error  'IsOptional' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\store-address\store-address.service.ts
+   7:10  error  'createStoreAddressDto' is defined but never used  @typescript-eslint/no-unused-vars
+  19:22  error  'updateStoreAddressDto' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\store-category\store-category.service.spec.ts
+   21:34  error  Unsafe return of a value of type `any`          @typescript-eslint/no-unsafe-return
+   21:34  error  Unsafe call of an `any` typed value             @typescript-eslint/no-unsafe-call
+   89:64  error  Async arrow function has no 'await' expression  @typescript-eslint/require-await
+   89:67  error  Unsafe return of a value of type `any`          @typescript-eslint/no-unsafe-return
+  102:9   error  Unsafe return of a value of type `any`          @typescript-eslint/no-unsafe-return
+  104:72  error  Unsafe return of a value of type `any`          @typescript-eslint/no-unsafe-return
+  123:13  error  Unsafe assignment of an `any` value             @typescript-eslint/no-unsafe-assignment
+  123:71  error  Unsafe member access [0] on an `any` value      @typescript-eslint/no-unsafe-member-access
+  125:33  error  Unsafe member access [0] on an `any` value      @typescript-eslint/no-unsafe-member-access
+  126:33  error  Unsafe member access [1] on an `any` value      @typescript-eslint/no-unsafe-member-access
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\store-category\store-category.service.ts
+   30:53  warning  Unsafe argument of type `any` assigned to a parameter of type `DeepPartial<ItemPropertyTemplate>[]`  @typescript-eslint/no-unsafe-argument
+   66:41  error    Unsafe return of a value of type `any`                                                               @typescript-eslint/no-unsafe-return
+  148:54  error    Unsafe member access .id on an `any` value                                                           @typescript-eslint/no-unsafe-member-access
+  156:72  error    Unsafe member access .id on an `any` value                                                           @typescript-eslint/no-unsafe-member-access
+  158:13  error    Unsafe return of a value of type `any`                                                               @typescript-eslint/no-unsafe-return
+  168:11  error    Unsafe assignment of type `any[]` to a variable of type `ItemPropertyTemplate[]`                     @typescript-eslint/no-unsafe-assignment
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\store\decorators\is-rif.decorator.ts
+  11:24  error  'args' is defined but never used  @typescript-eslint/no-unused-vars
+  50:18  error  'args' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\store\dto\store-pagination.dto.ts
+  3:3  error  'IsNumber' is defined but never used  @typescript-eslint/no-unused-vars
+  7:3  error  'Max' is defined but never used       @typescript-eslint/no-unused-vars
+  8:3  error  'Min' is defined but never used       @typescript-eslint/no-unused-vars
+
+C:\Develop\tu-lojita\tu-lojita-backend\src\store\store.service.ts
+    9:22  error    'Like' is defined but never used                                        @typescript-eslint/no-unused-vars
+  221:36  warning  Unsafe argument of type `any` assigned to a parameter of type `string`  @typescript-eslint/no-unsafe-argument
+  221:43  error    Unsafe member access .count on an `any` value                           @typescript-eslint/no-unsafe-member-access
+  280:37  error    Unsafe member access .name on an `any` value                            @typescript-eslint/no-unsafe-member-access
+  281:37  error    Unsafe member access .rif on an `any` value                             @typescript-eslint/no-unsafe-member-access
+  282:37  error    Unsafe member access .logo on an `any` value                            @typescript-eslint/no-unsafe-member-access
+  345:11  error    Unsafe assignment of an `any` value                                     @typescript-eslint/no-unsafe-assignment
+  368:11  error    Unsafe assignment of an `any` value                                     @typescript-eslint/no-unsafe-assignment
+  409:30  warning  Unsafe argument of type `any` assigned to a parameter of type `string`  @typescript-eslint/no-unsafe-argument
+  409:42  error    Unsafe member access .total on an `any` value                           @typescript-eslint/no-unsafe-member-access
+  414:34  warning  Unsafe argument of type `any` assigned to a parameter of type `string`  @typescript-eslint/no-unsafe-argument
+  414:55  error    Unsafe member access .total on an `any` value                           @typescript-eslint/no-unsafe-member-access
+
+Ô£û 116 problems (109 errors, 7 warnings)
+

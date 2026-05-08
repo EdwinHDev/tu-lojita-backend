@@ -33,7 +33,10 @@ export class OrderController {
     @Query() paginationDto: OrderPaginationDto,
     @GetUser() requestingUser: User,
   ) {
-    const result = await this.orderService.findAll(paginationDto);
+    const result = await this.orderService.findAll(
+      paginationDto,
+      requestingUser,
+    );
 
     const transformedItems = result.items.map((order) => ({
       ...order,
@@ -65,8 +68,12 @@ export class OrderController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateOrderDto: UpdateOrderDto) {
-    return this.orderService.update(id, updateOrderDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateOrderDto: UpdateOrderDto,
+    @GetUser() requestingUser: User,
+  ) {
+    return this.orderService.update(id, updateOrderDto, requestingUser);
   }
 
   @Post(':id/cancel')

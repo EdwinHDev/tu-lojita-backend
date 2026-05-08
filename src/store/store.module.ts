@@ -28,5 +28,6 @@ import { StoreCategory } from 'src/store-category/entities/store-category.entity
   ],
   controllers: [StoreController],
   providers: [StoreService],
+  exports: [StoreService, TypeOrmModule],
 })
 export class StoreModule {}

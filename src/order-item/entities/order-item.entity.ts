@@ -23,6 +23,9 @@ export class OrderItem {
   })
   price: number; // Snapshot del precio al momento de la compra
 
+  @Column('jsonb', { nullable: true })
+  selectedOptions?: Record<string, string[]>;
+
   @ManyToOne(() => Order, (order) => order.orderItems, { onDelete: 'CASCADE' })
   order: Order;
 

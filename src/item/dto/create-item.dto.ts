@@ -99,4 +99,10 @@ export class CreateItemDto {
   @IsObject({ message: 'Los atributos deben ser un objeto válido' })
   @IsOptional()
   attributes?: ItemAttributes;
+
+  @IsArray({
+    message: 'Los grupos de personalización deben ser una lista (array)',
+  })
+  @IsOptional()
+  customizationGroups?: any[];
 }

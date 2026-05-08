@@ -23,6 +23,9 @@ export class Category {
   @Column('text')
   image: string;
 
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
+
   // Relación con Subcategorías
   @OneToMany(() => Subcategory, (subcategory) => subcategory.category)
   subcategories: Subcategory[];

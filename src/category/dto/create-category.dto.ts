@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateCategoryDto {
   @IsString({ message: 'El nombre debe ser una cadena de texto' })
@@ -18,4 +25,8 @@ export class CreateCategoryDto {
   @IsString({ message: 'La imagen debe ser una cadena de texto' })
   @MinLength(1, { message: 'La imagen no puede estar vacía' })
   image: string;
+
+  @IsBoolean({ message: 'El estado activo debe ser un valor booleano' })
+  @IsOptional()
+  isActive?: boolean;
 }

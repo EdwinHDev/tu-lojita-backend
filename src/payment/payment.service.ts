@@ -14,6 +14,8 @@ import { OrderStatus } from 'src/order/types';
 import { User } from 'src/user/entities/user.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { PaymentPaginationDto } from './dto/payment-pagination.dto';
+import { NotificationService } from 'src/notification/notification.service';
+import { NotificationType } from 'src/notification/entities/notification.entity';
 
 @Injectable()
 export class PaymentService {
@@ -31,6 +33,7 @@ export class PaymentService {
     private readonly storeRepository: Repository<Store>,
 
     private readonly dataSource: DataSource,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async verifyPayment(
@@ -54,7 +57,7 @@ export class PaymentService {
     try {
       const payment = await queryRunner.manager.findOne(Payment, {
         where: { id: paymentId },
-        relations: ['order', 'store', 'store.owner'],
+        relations: ['order', 'store', 'store.owner', 'user'],
       });
 
       if (!payment)
@@ -139,6 +142,25 @@ export class PaymentService {
       const savedPayment = await queryRunner.manager.save(payment);
 
       await queryRunner.commitTransaction();
+
+      // Notificar al cliente sobre el resultado de la verificación
+      try {
+        const statusText =
+          newStatus === PaymentStatus.APPROVED ? 'aprobado' : 'rechazado';
+        await this.notificationService.create({
+          userId: payment.user.id,
+          title: `Pago ${statusText}`,
+          body: `Tu pago de $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()} ha sido ${statusText}.`,
+          type:
+            newStatus === PaymentStatus.APPROVED
+              ? NotificationType.PAYMENT_APPROVED
+              : NotificationType.PAYMENT_REJECTED,
+          targetId: payment.order.id,
+        });
+      } catch (notifyError) {
+        // No bloqueamos
+      }
+
       return savedPayment;
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -156,8 +178,7 @@ export class PaymentService {
     await queryRunner.startTransaction();
 
     try {
-      // 1. Bloquear la orden para edición (Evita condiciones de carrera en el balance/pagos)
-      // Nota: No cargamos relaciones aquí para evitar error de Postgres con FOR UPDATE y OUTER JOINS
+      // 1. Bloquear la orden para edición
       const order = await queryRunner.manager.findOne(Order, {
         where: { id: orderId },
         lock: { mode: 'pessimistic_write' },
@@ -166,11 +187,9 @@ export class PaymentService {
       if (!order)
         throw new NotFoundException(`Orden #${orderId} no encontrada`);
 
-      // 2. Cargar relaciones necesarias por separado o recargar la entidad
-      // Al estar en una transacción con bloqueo, los datos serán consistentes
       const orderWithRelations = await queryRunner.manager.findOne(Order, {
         where: { id: orderId },
-        relations: ['payments', 'user'],
+        relations: ['payments', 'user', 'orderItems', 'orderItems.item'],
       });
 
       if (!orderWithRelations)
@@ -190,6 +209,7 @@ export class PaymentService {
 
       const store = await queryRunner.manager.findOne(Store, {
         where: { id: storeId },
+        relations: ['company', 'company.owner', 'owner'],
       });
       if (!store)
         throw new NotFoundException(`Tienda #${storeId} no encontrada`);
@@ -241,6 +261,27 @@ export class PaymentService {
       const savedPayment = await queryRunner.manager.save(payment);
 
       await queryRunner.commitTransaction();
+
+      // Notificar al dueño de la tienda que se reportó un pago
+      try {
+        const ownerId = store.owner?.id || store.company?.owner?.id;
+        if (ownerId) {
+          const firstItem =
+            orderWithRelations.orderItems[0]?.title || 'un producto';
+          const storeName = store.name;
+
+          await this.notificationService.create({
+            userId: ownerId,
+            title: `¡Nueva Orden: ${firstItem}!`,
+            body: `Se ha reportado un pago por '${firstItem}' en '${storeName}' por $${amount}.`,
+            type: NotificationType.PAYMENT_REPORTED,
+            targetId: order.id,
+          });
+        }
+      } catch (notifyError) {
+        // No bloqueamos
+      }
+
       return savedPayment;
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -320,7 +361,7 @@ export class PaymentService {
   async findOne(id: string) {
     const payment = await this.paymentRepository.findOne({
       where: { id },
-      relations: ['order', 'user', 'store'],
+      relations: ['order', 'user', 'store', 'store.company', 'store.company.owner'],
     });
     if (!payment) throw new NotFoundException(`Pago #${id} no encontrado`);
     return payment;

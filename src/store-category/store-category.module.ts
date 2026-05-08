@@ -7,7 +7,9 @@ import { Store } from 'src/store/entities/store.entity';
 import { ItemPropertyTemplate } from 'src/item/entities/item-property-template.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([StoreCategory, Store, ItemPropertyTemplate])],
+  imports: [
+    TypeOrmModule.forFeature([StoreCategory, Store, ItemPropertyTemplate]),
+  ],
   controllers: [StoreCategoryController],
   providers: [StoreCategoryService],
 })

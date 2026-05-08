@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsNumber, IsUUID, Min } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
 
 export class CreateOrderItemDto {
   @IsUUID('4', { message: 'El ID del item debe ser un UUID válido (v4)' })
@@ -8,4 +8,7 @@ export class CreateOrderItemDto {
   @IsNumber({}, { message: 'La cantidad debe ser un número válido' })
   @Min(1, { message: 'La cantidad mínima por item es 1' })
   quantity: number;
+
+  @IsOptional()
+  selectedOptions?: Record<string, string[]>;
 }

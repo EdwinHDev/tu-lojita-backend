@@ -3,6 +3,7 @@ import {
   CreateDateColumn,
   Entity,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -11,6 +12,8 @@ import { PriceType } from '../types/price-type.enum';
 import { ItemAttributes } from '../types/item-attributes.interface';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
+import { CustomizationGroup } from './customization-group.entity';
+import { ItemAttributeValue } from './item-attribute-value.entity';
 
 /**
  * Entidad núcleo de la plataforma comercial.
@@ -127,11 +130,21 @@ export class Item {
   @Column('jsonb', { nullable: true, default: {} })
   attributes: ItemAttributes;
 
+  @Column('jsonb', { nullable: true, default: [] })
+  customizationGroups: any[];
+
+  @OneToMany(() => CustomizationGroup, (group) => group.item, { cascade: true })
+  customizationGroupsRel: CustomizationGroup[];
+
+  @OneToMany(() => ItemAttributeValue, (attr) => attr.item, { cascade: true })
+  attributesRel: ItemAttributeValue[];
+
   @ManyToOne(() => Store, (store) => store.items)
   store: Store;
 
   @ManyToOne(() => StoreCategory, (category) => category.items, {
     nullable: true,
+    onDelete: 'SET NULL',
   })
   category: StoreCategory;
 

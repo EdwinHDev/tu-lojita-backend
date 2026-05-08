@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
+import {
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateSubcategoryDto {
   @IsString({ message: 'El nombre debe ser una cadena de texto' })
@@ -16,4 +22,8 @@ export class CreateSubcategoryDto {
   @IsUUID('4', { message: 'El ID de la categoría debe ser un UUID válido' })
   @IsNotEmpty({ message: 'El ID de la categoría es requerido' })
   categoryId: string;
+
+  @IsBoolean({ message: 'isActive debe ser un valor booleano' })
+  @IsOptional()
+  isActive?: boolean;
 }
