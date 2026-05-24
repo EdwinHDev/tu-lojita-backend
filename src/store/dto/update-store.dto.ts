@@ -6,9 +6,25 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsEnum,
   Max,
   Min,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { InstallmentPeriod } from '../types/installment-period.enum';
+
+export class InstallmentFrequencyOptionDto {
+  @IsNumber()
+  value: number;
+
+  @IsEnum(InstallmentPeriod)
+  unit: InstallmentPeriod;
+
+  @IsString()
+  label: string;
+}
 
 export class UpdateStoreDto extends PartialType(CreateStoreDto) {
   @IsBoolean({ message: 'El campo allowPartialPayments debe ser un booleano' })
@@ -32,8 +48,30 @@ export class UpdateStoreDto extends PartialType(CreateStoreDto) {
   @IsOptional()
   maxInstallments?: number;
 
+  @IsBoolean({ message: 'El campo allowChat debe ser un booleano' })
+  @IsOptional()
+  allowChat?: boolean;
+
   @IsString({ message: 'El nombre de la sucursal debe ser un texto' })
   @IsNotEmpty({ message: 'El nombre de la sucursal no puede estar vacío' })
   @IsOptional()
   branchName?: string;
+
+  @IsNumber({}, { message: 'El valor del intervalo debe ser un número' })
+  @IsOptional()
+  installmentIntervalValue?: number;
+
+  @IsEnum(InstallmentPeriod, { message: 'El periodo de cuotas debe ser DAYS, WEEKS o MONTHS' })
+  @IsOptional()
+  installmentIntervalUnit?: InstallmentPeriod;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InstallmentFrequencyOptionDto)
+  installmentFrequencyOptions?: InstallmentFrequencyOptionDto[];
+
+  @IsString({ message: 'La zona horaria debe ser una cadena de texto' })
+  @IsOptional()
+  timezone?: string;
 }

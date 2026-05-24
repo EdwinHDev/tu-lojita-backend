@@ -2,13 +2,12 @@ import {
   BeforeInsert,
   BeforeUpdate,
   Column,
-  CreateDateColumn,
   Entity,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import * as bcrypt from 'bcrypt';
 import { UserRole } from '../types';
 import { Address } from 'src/address/entities/address.entity';
@@ -19,7 +18,7 @@ import { Payment } from 'src/payment/entities/payment.entity';
 import { Notification } from 'src/notification/entities/notification.entity';
 
 @Entity('users')
-export class User {
+export class User extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -83,12 +82,6 @@ export class User {
     default: UserRole.USER,
   })
   role: UserRole;
-
-  @CreateDateColumn()
-  createdAt: string;
-
-  @UpdateDateColumn()
-  updatedAt: string;
 
   @OneToMany(() => Address, (address) => address.user)
   addresses: Address[];

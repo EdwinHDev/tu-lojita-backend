@@ -1,17 +1,16 @@
 import {
   Column,
-  CreateDateColumn,
   Entity,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Category } from 'src/category/entities/category.entity';
 import { Store } from 'src/store/entities/store.entity';
 
 @Entity('subcategories')
-export class Subcategory {
+export class Subcategory extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -35,9 +34,5 @@ export class Subcategory {
   @OneToMany(() => Store, (store) => store.subcategory)
   stores: Store[];
 
-  @CreateDateColumn()
-  createdAt: string;
 
-  @UpdateDateColumn()
-  updatedAt: string;
 }

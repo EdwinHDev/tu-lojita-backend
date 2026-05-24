@@ -3,15 +3,14 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
-  CreateDateColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Bank } from 'src/bank/entities/bank.entity';
 import { PaymentMethodType } from '../types';
 
 @Entity('store_payment_methods')
-export class StorePaymentMethod {
+export class StorePaymentMethod extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -48,11 +47,7 @@ export class StorePaymentMethod {
   @Column('boolean', { default: true })
   isActive: boolean;
 
-  @CreateDateColumn()
-  createdAt: Date;
 
-  @UpdateDateColumn()
-  updatedAt: Date;
 
   @ManyToOne(() => Store, (store) => store.paymentMethodConfigs, { onDelete: 'CASCADE' })
   store: Store;

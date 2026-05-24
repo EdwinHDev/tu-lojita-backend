@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { envs } from './config/envs';
@@ -18,9 +19,11 @@ import { OrderItemModule } from './order-item/order-item.module';
 import { NotificationModule } from './notification/notification.module';
 import { BankModule } from './bank/bank.module';
 import { StorePaymentMethodModule } from './store-payment-method/store-payment-method.module';
+import { MailModule } from './common/mail/mail.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     MailerModule.forRoot({
       transport: {
         host: envs.emailHost,
@@ -58,8 +61,9 @@ import { StorePaymentMethodModule } from './store-payment-method/store-payment-m
     NotificationModule,
     BankModule,
     StorePaymentMethodModule,
+    MailModule,
   ],
   controllers: [],
   providers: [],
 })
-export class AppModule {}
+export class AppModule { }

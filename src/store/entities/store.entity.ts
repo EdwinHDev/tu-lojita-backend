@@ -2,13 +2,12 @@ import {
   PrimaryGeneratedColumn,
   Column,
   Entity,
-  CreateDateColumn,
-  UpdateDateColumn,
   ManyToOne,
   OneToMany,
   BeforeInsert,
   BeforeUpdate,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 import { Company } from 'src/company/entities/company.entity';
@@ -20,9 +19,10 @@ import { Order } from 'src/order/entities/order.entity';
 import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
 import slugify from 'slugify';
 import { StoreStatus } from '../types/status.enum';
+import { InstallmentPeriod } from '../types/installment-period.enum';
 
 @Entity('stores')
-export class Store {
+export class Store extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -102,17 +102,30 @@ export class Store {
   @Column('int', { default: 0 })
   maxInstallments: number;
 
+  @Column('boolean', { default: true })
+  allowChat: boolean;
+
+  @Column('int', { default: 7, nullable: true })
+  installmentIntervalValue: number;
+
+  @Column('enum', {
+    enum: InstallmentPeriod,
+    default: InstallmentPeriod.DAYS,
+    nullable: true,
+  })
+  installmentIntervalUnit: InstallmentPeriod;
+
+  @Column('jsonb', { nullable: true })
+  installmentFrequencyOptions?: { value: number; unit: InstallmentPeriod; label: string }[];
+
   @Column('jsonb', {
     nullable: true,
-    default: ['PAGO_MOVIL', 'ZELLE', 'TRANSFER', 'CASH'],
+    default: ['PAGO_MOVIL', 'TRANSFER', 'BINANCE'],
   })
   paymentMethods: string[];
 
-  @CreateDateColumn()
-  createdAt: string;
-
-  @UpdateDateColumn()
-  updatedAt: string;
+  @Column('text', { default: 'America/Caracas' })
+  timezone: string;
 
   @BeforeInsert()
   checkSlugInsert() {

@@ -105,4 +105,13 @@ export class CreateItemDto {
   })
   @IsOptional()
   customizationGroups?: any[];
+
+  @IsBoolean({ message: 'allowInstallments debe ser un valor booleano' })
+  @IsOptional()
+  allowInstallments?: boolean;
+
+  @IsNumber({}, { message: 'El porcentaje de recargo por mora debe ser un número válido' })
+  @Min(0, { message: 'El porcentaje de recargo por mora no puede ser negativo' })
+  @IsOptional()
+  lateFeePercentage?: number;
 }

@@ -2,16 +2,15 @@ import {
   PrimaryGeneratedColumn,
   Column,
   Entity,
-  CreateDateColumn,
-  UpdateDateColumn,
   OneToMany,
   ManyToOne,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { User } from 'src/user/entities/user.entity';
 
 @Entity('companies')
-export class Company {
+export class Company extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -32,9 +31,5 @@ export class Company {
   @ManyToOne(() => User, { nullable: true })
   owner?: User;
 
-  @CreateDateColumn()
-  createdAt: string;
 
-  @UpdateDateColumn()
-  updatedAt: string;
 }

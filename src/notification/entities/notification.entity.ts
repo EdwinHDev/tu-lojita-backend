@@ -2,10 +2,10 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
-  CreateDateColumn,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { User } from '../../user/entities/user.entity';
 
 export enum NotificationType {
@@ -17,10 +17,11 @@ export enum NotificationType {
   PAYMENT_REJECTED = 'PAYMENT_REJECTED',
   PROMO = 'PROMO',
   GENERAL = 'GENERAL',
+  CHAT_MESSAGE = 'CHAT_MESSAGE',
 }
 
 @Entity('notifications')
-export class Notification {
+export class Notification extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -43,8 +44,7 @@ export class Notification {
   @Column({ default: false })
   isRead: boolean;
 
-  @CreateDateColumn()
-  createdAt: Date;
+
 
   @ManyToOne(() => User, (user) => user.notifications, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })

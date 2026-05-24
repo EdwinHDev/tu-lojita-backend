@@ -16,10 +16,13 @@ import { Item } from 'src/item/entities/item.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
-import { OrderStatus } from './types';
+import { OrderStatus, InstallmentStatus } from './types';
+import { Installment } from './entities/installment.entity';
 import { OrderPaginationDto } from './dto/order-pagination.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
+import { MailService } from 'src/common/mail/mail.service';
+import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
 
 @Injectable()
 export class OrderService {
@@ -38,6 +41,7 @@ export class OrderService {
 
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
+    private readonly mailService: MailService,
   ) {}
 
   private readonly logger = new Logger(OrderService.name);
@@ -207,6 +211,47 @@ export class OrderService {
             'Esta tienda no admite pagos parciales',
           );
         }
+
+        // Validar Frecuencia de Pago
+        const requestedValue = createOrderDto.installmentIntervalValue;
+        const requestedUnit = createOrderDto.installmentIntervalUnit;
+
+        if (store.installmentFrequencyOptions && store.installmentFrequencyOptions.length > 0) {
+          if (!requestedValue || !requestedUnit) {
+            throw new BadRequestException(
+              'Debes seleccionar una frecuencia de pago para el pago parcial',
+            );
+          }
+
+          const isValidFrequency = store.installmentFrequencyOptions.some(
+            (opt) => opt.value === requestedValue && opt.unit === requestedUnit,
+          );
+
+          if (!isValidFrequency) {
+            throw new BadRequestException(
+              'La frecuencia de pago seleccionada no está disponible para esta tienda',
+            );
+          }
+        } else {
+          // Fallback para tiendas antiguas con una sola frecuencia
+          if (
+            requestedValue !== undefined &&
+            requestedValue !== store.installmentIntervalValue
+          ) {
+            throw new BadRequestException(
+              'La frecuencia de pago seleccionada no coincide con la configuración de la tienda',
+            );
+          }
+          if (
+            requestedUnit !== undefined &&
+            requestedUnit !== store.installmentIntervalUnit
+          ) {
+            throw new BadRequestException(
+              'La frecuencia de pago seleccionada no coincide con la configuración de la tienda',
+            );
+          }
+        }
+
         const feePercent = parseFloat(
           store.partialPaymentsFeePercentage.toString(),
         );
@@ -227,12 +272,81 @@ export class OrderService {
         status: OrderStatus.PENDING,
       });
 
+      if (isPartialPayment) {
+        const intervalValue = createOrderDto.installmentIntervalValue || store.installmentIntervalValue || 7;
+        const intervalUnit = createOrderDto.installmentIntervalUnit || store.installmentIntervalUnit || InstallmentPeriod.DAYS;
+        
+        order.installmentIntervalValue = intervalValue;
+        order.installmentIntervalUnit = intervalUnit;
+        
+        const nextDate = new Date();
+        if (intervalUnit === InstallmentPeriod.DAYS) {
+          nextDate.setDate(nextDate.getDate() + intervalValue);
+        } else if (intervalUnit === InstallmentPeriod.WEEKS) {
+          nextDate.setDate(nextDate.getDate() + (intervalValue * 7));
+        } else if (intervalUnit === InstallmentPeriod.MONTHS) {
+          nextDate.setMonth(nextDate.getMonth() + intervalValue);
+        }
+        order.nextDueDate = nextDate;
+        order.remainingBalance = finalAmount;
+        order.totalPaidAmount = 0;
+        order.isFullyPaid = false;
+      }
+
       const savedOrder = await queryRunner.manager.save(order);
 
       // 7. Relacionar y guardar los items de la orden
       for (const oi of orderItemsToSave) {
         oi.order = savedOrder;
         await queryRunner.manager.save(oi);
+      }
+
+      // 8. Generar Cronograma de Cuotas si es pago parcial
+      if (isPartialPayment) {
+        const maxInstallments = parseInt(store.maxInstallments?.toString() || '1');
+        const minInitialPercent = parseFloat(store.minInitialPaymentPercentage?.toString() || '0');
+        
+        // La primera cuota es el pago inicial mínimo
+        const initialAmount = Math.round(((finalAmount * minInitialPercent) / 100) * 100) / 100;
+        const remainingAmount = finalAmount - initialAmount;
+        const otherInstallmentsCount = maxInstallments - 1;
+        const monthlyAmount = otherInstallmentsCount > 0 
+          ? Math.round((remainingAmount / otherInstallmentsCount) * 100) / 100 
+          : 0;
+
+        const installmentsToSave: Installment[] = [];
+        const now = new Date();
+
+        // Cuota 1: Inicial (Vence hoy)
+        installmentsToSave.push(queryRunner.manager.create(Installment, {
+          order: savedOrder,
+          amount: initialAmount,
+          dueDate: now,
+          status: InstallmentStatus.PENDING,
+        }));
+
+        // Cuotas restantes basadas en la frecuencia elegida
+        for (let i = 1; i < maxInstallments; i++) {
+          const dueDate = new Date();
+          const offset = i * (order.installmentIntervalValue || 1);
+          
+          if (order.installmentIntervalUnit === InstallmentPeriod.DAYS) {
+            dueDate.setDate(now.getDate() + offset);
+          } else if (order.installmentIntervalUnit === InstallmentPeriod.WEEKS) {
+            dueDate.setDate(now.getDate() + (offset * 7));
+          } else if (order.installmentIntervalUnit === InstallmentPeriod.MONTHS) {
+            dueDate.setMonth(now.getMonth() + offset);
+          }
+          
+          installmentsToSave.push(queryRunner.manager.create(Installment, {
+            order: savedOrder,
+            amount: monthlyAmount,
+            dueDate: dueDate,
+            status: InstallmentStatus.PENDING,
+          }));
+        }
+
+        await queryRunner.manager.save(installmentsToSave);
       }
 
       await queryRunner.commitTransaction();
@@ -265,7 +379,14 @@ export class OrderService {
       */
 
       // Retornar la orden con sus items cargados
-      return orderWithRelations;
+      const finalOrder = await this.findOne(savedOrder.id);
+      
+      // Enviar confirmación por email de forma asíncrona (sin bloquear la respuesta)
+      this.mailService.sendOrderConfirmation(finalOrder).catch(err => 
+        this.logger.error(`Error sending confirmation email: ${err.message}`)
+      );
+
+      return finalOrder;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -292,6 +413,7 @@ export class OrderService {
         'orderItems.item.store.subcategory',
         'orderItems.item.customizationGroupsRel',
         'orderItems.item.customizationGroupsRel.options',
+        'installments',
       ],
     });
     if (!order) throw new NotFoundException(`Orden #${id} no encontrada`);
@@ -307,6 +429,7 @@ export class OrderService {
       hasBalance,
       startDate,
       endDate,
+      search,
       limit,
       offset,
       sort,
@@ -326,7 +449,8 @@ export class OrderService {
         'customizationGroupsRel',
       )
       .leftJoinAndSelect('customizationGroupsRel.options', 'options')
-      .leftJoinAndSelect('order.payments', 'payments');
+      .leftJoinAndSelect('order.payments', 'payments')
+      .leftJoinAndSelect('order.installments', 'installments');
 
     if (status) {
       queryBuilder.andWhere('order.status = :status', { status });
@@ -360,6 +484,13 @@ export class OrderService {
 
     if (endDate) {
       queryBuilder.andWhere('order.createdAt <= :endDate', { endDate });
+    }
+
+    if (search && search.trim().length > 0) {
+      queryBuilder.andWhere(
+        '(CAST(order.id AS TEXT) ILIKE :search OR store.name ILIKE :search OR CAST(order.createdAt AS TEXT) ILIKE :search)',
+        { search: `%${search.trim()}%` },
+      );
     }
 
     // Ordenamiento Dinámico
@@ -572,6 +703,10 @@ export class OrderService {
           targetId: order.id,
         });
       }
+
+      if (updateOrderDto.status === OrderStatus.FULLY_PAID || updateOrderDto.status === OrderStatus.CANCELLED) {
+        await this.notificationService.closeChatRoom(order.id, updateOrderDto.status === OrderStatus.FULLY_PAID ? 'approved' : 'rejected');
+      }
     }
 
     return updatedOrder;
@@ -581,5 +716,19 @@ export class OrderService {
     const order = await this.findOne(id);
     await this.orderRepository.remove(order);
     return { deleted: true };
+  }
+
+  async findStoreInstallments(storeId: string) {
+    return await this.dataSource.getRepository(Installment).find({
+      where: {
+        order: {
+          store: { id: storeId }
+        }
+      },
+      relations: ['order', 'order.user', 'order.store'],
+      order: {
+        dueDate: 'ASC'
+      }
+    });
   }
 }

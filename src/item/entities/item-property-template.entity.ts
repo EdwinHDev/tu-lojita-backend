@@ -1,16 +1,15 @@
 import {
   Column,
-  CreateDateColumn,
   Entity,
   ManyToOne,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { PropertyType } from '../types/property-type.enum';
 
 @Entity('item_property_templates')
-export class ItemPropertyTemplate {
+export class ItemPropertyTemplate extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -35,9 +34,5 @@ export class ItemPropertyTemplate {
   @ManyToOne(() => StoreCategory, { onDelete: 'CASCADE' })
   category: StoreCategory;
 
-  @CreateDateColumn()
-  createdAt: string;
 
-  @UpdateDateColumn()
-  updatedAt: string;
 }

@@ -1,19 +1,18 @@
 import {
   Column,
-  CreateDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Item } from 'src/item/entities/item.entity';
 import { ItemPropertyTemplate } from 'src/item/entities/item-property-template.entity';
 
 @Entity('store_categories')
-export class StoreCategory {
+export class StoreCategory extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -33,9 +32,5 @@ export class StoreCategory {
   @OneToMany(() => ItemPropertyTemplate, (template) => template.category)
   propertyTemplates: ItemPropertyTemplate[];
 
-  @CreateDateColumn()
-  createdAt: string;
 
-  @UpdateDateColumn()
-  updatedAt: string;
 }

@@ -16,6 +16,7 @@ import { Store } from 'src/store/entities/store.entity';
 import { PaymentPaginationDto } from './dto/payment-pagination.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
+import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
 
 @Injectable()
 export class PaymentService {
@@ -111,26 +112,33 @@ export class PaymentService {
           }
         }
 
-        const currentBalance = parseFloat(order.balance.toString());
+        const currentBalance = parseFloat(order.remainingBalance?.toString() || order.balance.toString());
         const amount = parseFloat(payment.amount.toString());
+        
+        order.totalPaidAmount = parseFloat(order.totalPaidAmount?.toString() || '0') + amount;
         const newBalance = currentBalance - amount;
-        order.balance = newBalance < 0.01 ? 0 : newBalance;
+        order.remainingBalance = newBalance < 0.01 ? 0 : newBalance;
+        order.balance = order.remainingBalance;
 
-        if (order.balance === 0) {
+        if (order.remainingBalance === 0) {
           order.status = OrderStatus.FULLY_PAID;
           order.nextDueDate = null;
+          order.isFullyPaid = true;
         } else {
           order.status = OrderStatus.PARTIALLY_PAID;
+          order.isFullyPaid = false;
 
           const now = new Date();
-          if (approvedPayments.length === 0) {
-            order.monthlyDueDay = now.getDate();
-          }
-
           const nextDate = new Date();
-          nextDate.setMonth(now.getMonth() + 1);
-          if (order.monthlyDueDay) {
-            nextDate.setDate(order.monthlyDueDay);
+          const intervalValue = order.installmentIntervalValue || 1;
+          const intervalUnit = order.installmentIntervalUnit || InstallmentPeriod.DAYS;
+
+          if (intervalUnit === InstallmentPeriod.DAYS) {
+            nextDate.setDate(now.getDate() + intervalValue);
+          } else if (intervalUnit === InstallmentPeriod.WEEKS) {
+            nextDate.setDate(now.getDate() + (intervalValue * 7));
+          } else if (intervalUnit === InstallmentPeriod.MONTHS) {
+            nextDate.setMonth(now.getMonth() + intervalValue);
           }
           order.nextDueDate = nextDate;
         }

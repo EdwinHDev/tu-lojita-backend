@@ -1,19 +1,18 @@
 import {
   Column,
-  CreateDateColumn,
   Entity,
   ManyToOne,
   OneToOne,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { PaymentStatus } from '../types';
 
 @Entity({ name: 'payments' })
-export class Payment {
+export class Payment extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -39,11 +38,7 @@ export class Payment {
   @Column('text', { nullable: true })
   receiptImage: string;
 
-  @CreateDateColumn()
-  createdAt: string;
 
-  @UpdateDateColumn()
-  updatedAt: string;
 
   @ManyToOne(() => Store, (store) => store.payments)
   store: Store;

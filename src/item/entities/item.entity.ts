@@ -1,12 +1,11 @@
 import {
   Column,
-  CreateDateColumn,
   Entity,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { ItemType } from '../types/item-type.enum';
 import { PriceType } from '../types/price-type.enum';
 import { ItemAttributes } from '../types/item-attributes.interface';
@@ -22,7 +21,7 @@ import { ItemAttributeValue } from './item-attribute-value.entity';
  * como servicios (que se agendan o proveen de forma continua).
  */
 @Entity('items')
-export class Item {
+export class Item extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -130,6 +129,18 @@ export class Item {
   @Column('jsonb', { nullable: true, default: {} })
   attributes: ItemAttributes;
 
+  @Column('boolean', { default: true })
+  allowInstallments: boolean;
+
+  @Column('numeric', {
+    default: 0,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => (value ? parseFloat(value) : 0),
+    },
+  })
+  lateFeePercentage: number;
+
   @Column('jsonb', { nullable: true, default: [] })
   customizationGroups: any[];
 
@@ -148,9 +159,4 @@ export class Item {
   })
   category: StoreCategory;
 
-  @CreateDateColumn()
-  createdAt: string;
-
-  @UpdateDateColumn()
-  updatedAt: string;
 }

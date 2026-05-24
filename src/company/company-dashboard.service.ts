@@ -21,6 +21,7 @@ import {
   CompanyStoreDto,
 } from './dto/company-stores.dto';
 import { OrderStatus } from 'src/order/types';
+import { getStartOfTodayInTimezone, getStartOfMonthInTimezone, formatTimeInTimezone } from 'src/common/utils/timezone.utils';
 
 @Injectable()
 export class CompanyDashboardService {
@@ -108,20 +109,16 @@ export class CompanyDashboardService {
       };
     }
 
-    // Calcular fechas
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
+    // Calcular fechas según la zona horaria de la primera tienda o Caracas por defecto
+    const timezone = company.stores[0]?.timezone || 'America/Caracas';
+    const startOfToday = getStartOfTodayInTimezone(new Date(), timezone);
     const startOfYesterday = new Date(startOfToday);
     startOfYesterday.setDate(startOfYesterday.getDate() - 1);
 
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - 7);
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfToday.getDate() - 7);
 
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfMonth = getStartOfMonthInTimezone(new Date(), timezone);
 
     // 1. Ventas de hoy (incluye órdenes pagadas total o parcialmente)
     const salesToday = await this.orderRepository
@@ -130,6 +127,9 @@ export class CompanyDashboardService {
       .where('order.storeId IN (:...storeIds)', { storeIds })
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
+      })
+      .andWhere('order.createdAt >= :startOfToday', {
+        startOfToday: startOfToday.toISOString(),
       })
       .getRawOne<{ total: string | null }>();
 
@@ -141,8 +141,9 @@ export class CompanyDashboardService {
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
       })
-      .andWhere('order.createdAt >= :startOfYesterday', {
+      .andWhere('order.createdAt >= :startOfYesterday AND order.createdAt < :startOfToday', {
         startOfYesterday: startOfYesterday.toISOString(),
+        startOfToday: startOfToday.toISOString(),
       })
       .getRawOne<{ total: string | null }>();
 
@@ -159,7 +160,7 @@ export class CompanyDashboardService {
     const newStoresThisMonth = await this.storeRepository.count({
       where: {
         company: { id: companyId },
-        createdAt: MoreThanOrEqual(startOfMonth.toISOString()),
+        createdAt: MoreThanOrEqual(startOfMonth),
       },
     });
 
@@ -171,7 +172,7 @@ export class CompanyDashboardService {
     const newProductsThisWeek = await this.itemRepository.count({
       where: {
         store: { company: { id: companyId } },
-        createdAt: MoreThanOrEqual(startOfWeek.toISOString()),
+        createdAt: MoreThanOrEqual(startOfWeek),
       },
     });
 
@@ -253,17 +254,14 @@ export class CompanyDashboardService {
       .getMany();
 
     const recentSales: RecentSaleDto[] = orders.map((order) => {
-      const orderDate = new Date(order.createdAt);
-      const minutes = orderDate.getMinutes().toString().padStart(2, '0');
-      const ampm = orderDate.getHours() >= 12 ? 'PM' : 'AM';
-      const displayHours = orderDate.getHours() % 12 || 12;
+      const timezone = order.store?.timezone || 'America/Caracas';
 
       return {
         id: order.id,
         storeName: order.store.name,
         amount: parseFloat(order.finalAmount.toString()),
         currency: 'USD',
-        time: `${displayHours}:${minutes} ${ampm}`,
+        time: formatTimeInTimezone(new Date(order.createdAt), timezone),
         orderId: `#${order.id.substring(0, 8)}`,
         status: order.status,
       };
@@ -320,16 +318,11 @@ export class CompanyDashboardService {
       order: { createdAt: 'DESC' },
     });
 
-    // Calcular fecha de inicio del día
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-
     const companyStores: CompanyStoreDto[] = await Promise.all(
       stores.map(async (store) => {
+        const timezone = store.timezone || 'America/Caracas';
+        const storeStartOfToday = getStartOfTodayInTimezone(new Date(), timezone);
+
         // Calcular ventas de hoy para esta tienda
         const salesToday = await this.orderRepository
           .createQueryBuilder('order')
@@ -339,7 +332,7 @@ export class CompanyDashboardService {
             statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
           })
           .andWhere('order.createdAt >= :startOfToday', {
-            startOfToday: startOfToday.toISOString(),
+            startOfToday: storeStartOfToday.toISOString(),
           })
           .getRawOne<{ total: string | null }>();
 

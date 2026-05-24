@@ -22,6 +22,7 @@ import { Item } from 'src/item/entities/item.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { OrderStatus } from 'src/order/types';
 import { StoreDashboardDto } from './dto/store-dashboard.dto';
+import { getStartOfTodayInTimezone, formatTimeInTimezone } from 'src/common/utils/timezone.utils';
 
 @Injectable()
 export class StoreService {
@@ -43,7 +44,7 @@ export class StoreService {
     @InjectRepository(StoreCategory)
     private readonly storeCategoryRepository: Repository<StoreCategory>,
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   async create(createStoreDto: CreateStoreDto, user: User) {
     const { companyId, subCategoryId, mainAddress, ...storeDetails } =
@@ -334,12 +335,9 @@ export class StoreService {
   }
 
   async getStoreDashboardData(storeId: string): Promise<StoreDashboardDto> {
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
+    const store = await this.storeRepository.findOne({ where: { id: storeId } });
+    const timezone = store?.timezone || 'America/Caracas';
+    const startOfToday = getStartOfTodayInTimezone(new Date(), timezone);
 
     // 1. Sales today
     const salesToday = await this.orderRepository
@@ -387,17 +385,12 @@ export class StoreService {
       .getMany();
 
     const recentSales = orders.map((order) => {
-      const orderDate = new Date(order.createdAt);
-      const minutes = orderDate.getMinutes().toString().padStart(2, '0');
-      const ampm = orderDate.getHours() >= 12 ? 'PM' : 'AM';
-      const displayHours = orderDate.getHours() % 12 || 12;
-
       return {
         id: order.id,
         storeName: order.store.name,
         amount: parseFloat(order.finalAmount.toString()),
         currency: 'USD',
-        time: `${displayHours}:${minutes} ${ampm}`,
+        time: formatTimeInTimezone(new Date(order.createdAt), timezone),
         orderId: `#${order.id.substring(0, 8)}`,
         status: order.status,
       };

@@ -1,8 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
+import { ChatMessage } from './entities/chat-message.entity';
 import { NotificationGateway } from './notification.gateway';
+import { Order } from 'src/order/entities/order.entity';
+import { User } from 'src/user/entities/user.entity';
 
 @Injectable()
 export class NotificationService {
@@ -11,8 +14,30 @@ export class NotificationService {
   constructor(
     @InjectRepository(Notification)
     private readonly notificationRepository: Repository<Notification>,
+    @InjectRepository(ChatMessage)
+    private readonly chatMessageRepository: Repository<ChatMessage>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly notificationGateway: NotificationGateway,
   ) {}
+
+  async isOrderActiveForChat(orderId: string): Promise<boolean> {
+    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    if (!order) return false;
+    // Asumiendo que OrderStatus de tu-lojita-backend/src/order/types/order-status.enum.ts es:
+    // PENDING, PARTIALLY_PAID, FULLY_PAID, CANCELLED
+    // Las ordenes activas para chat son las que NO están FULLY_PAID ni CANCELLED (a menos que dependa del campo paymentStatus, veremos).
+    // Usaremos status por ahora.
+    return order.status !== 'FULLY_PAID' && order.status !== 'CANCELLED';
+  }
+
+  async closeChatRoom(orderId: string, reason: string) {
+    // Forzar la expulsión de clientes emitiendo el evento
+    this.notificationGateway.sendToOrderRoom(orderId, 'chat_closed', { orderId, reason });
+    // Opcional: También podríamos hacer que la pasarela expulse a los sockets (client.leave)
+    // pero si el cliente hace context.pop() y luego el screen hace leave_chat al desmontarse, 
+    // se manejará de forma limpia desde el cliente.
+  }
 
   async create(data: {
     userId: string;
@@ -22,9 +47,32 @@ export class NotificationService {
     targetId?: string;
   }) {
     try {
-      const notification = this.notificationRepository.create(data);
-      const savedNotification =
-        await this.notificationRepository.save(notification);
+      let notification: Notification;
+
+      // Si tiene targetId, intentamos buscar una existente para actualizarla (evitar duplicados de chat o pedidos)
+      if (data.targetId) {
+        const existing = await this.notificationRepository.findOne({
+          where: {
+            userId: data.userId,
+            type: data.type,
+            targetId: data.targetId,
+          },
+        });
+
+        if (existing) {
+          notification = existing;
+          notification.title = data.title;
+          notification.body = data.body;
+          notification.isRead = false; // Marcar como no leída al actualizar
+          notification.createdAt = new Date(); // Actualizar fecha para que suba en la lista
+        } else {
+          notification = this.notificationRepository.create(data);
+        }
+      } else {
+        notification = this.notificationRepository.create(data);
+      }
+
+      const savedNotification = await this.notificationRepository.save(notification);
 
       // Emit via WebSocket
       this.notificationGateway.sendToUser(
@@ -50,5 +98,112 @@ export class NotificationService {
 
   async markAsRead(id: string) {
     await this.notificationRepository.update(id, { isRead: true });
+  }
+
+  async saveMessage(orderId: string, senderId: string, content: string) {
+    const order = await this.orderRepository.findOne({ 
+      where: { id: orderId },
+      relations: ['store', 'store.owner', 'store.company', 'store.company.owner', 'user']
+    });
+    if (!order) return null;
+
+    const sender = await this.chatMessageRepository.manager.findOne(User, {
+      where: { id: senderId }
+    });
+
+    const message = this.chatMessageRepository.create({
+      order,
+      sender: sender || ({ id: senderId } as User),
+      content,
+    });
+
+    const savedMessage = await this.chatMessageRepository.save(message);
+
+    // Emitir a la sala de la orden
+    this.notificationGateway.sendToOrderRoom(orderId, 'new_chat_message', savedMessage);
+
+    // También notificar al destinatario si no está en la sala (notificación push simulada)
+    const recipientId = senderId === order.user.id 
+      ? (order.store.owner?.id || order.store.company?.owner?.id)
+      : order.user.id;
+
+    if (recipientId) {
+       const isToBusiness = senderId === order.user.id;
+       const senderName = isToBusiness ? `${order.user.firstName} ${order.user.lastName}` : order.store.name;
+       
+       const title = isToBusiness 
+         ? `Un cliente envió un mensaje a ${order.store.name}`
+         : `Nuevo mensaje de ${order.store.name}`;
+       
+       const shortOrderId = orderId.substring(0, 8).toUpperCase();
+       const body = isToBusiness
+         ? `Orden #${shortOrderId}: ${content.length > 80 ? content.substring(0, 77) + '...' : content}`
+         : content.length > 100 ? content.substring(0, 97) + '...' : content;
+
+       await this.create({
+         userId: recipientId,
+         title,
+         body,
+         type: NotificationType.CHAT_MESSAGE,
+         targetId: orderId,
+       });
+
+       this.notificationGateway.sendToUser(recipientId, 'chat_notification', {
+         orderId,
+         senderName: isToBusiness ? senderName : order.store.name,
+         content: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
+       });
+    }
+
+    return savedMessage;
+  }
+
+  async markMessagesRead(orderId: string, readerId: string) {
+    // Marcar como leídos los mensajes de la orden donde el remitente NO sea quien está leyendo
+    const updateResult = await this.chatMessageRepository.update(
+      { 
+        order: { id: orderId }, 
+        isRead: false, 
+        sender: { id: Not(readerId) } 
+      },
+      { isRead: true }
+    );
+
+    if (updateResult.affected && updateResult.affected > 0) {
+      // Notificar a la sala que los mensajes han sido leídos
+      this.notificationGateway.sendToOrderRoom(orderId, 'messages_read', {
+        orderId,
+        readBy: readerId,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  async markMessagesDelivered(orderId: string, recipientId: string) {
+    const updateResult = await this.chatMessageRepository.update(
+      { 
+        order: { id: orderId }, 
+        isDelivered: false, 
+        sender: { id: Not(recipientId) } 
+      },
+      { isDelivered: true }
+    );
+
+    if (updateResult.affected && updateResult.affected > 0) {
+      this.notificationGateway.sendToOrderRoom(orderId, 'messages_delivered', {
+        orderId,
+        deliveredTo: recipientId
+      });
+    }
+  }
+
+
+  async getChatHistory(orderId: string) {
+    return this.chatMessageRepository.find({
+      where: { order: { id: orderId } },
+      relations: ['sender'],
+      order: { createdAt: 'ASC' },
+      take: 100,
+    });
   }
 }

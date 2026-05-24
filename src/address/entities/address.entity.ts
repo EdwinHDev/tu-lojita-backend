@@ -1,12 +1,11 @@
 import {
   Column,
-  CreateDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { User } from 'src/user/entities/user.entity';
 
 const columnNumericTransformer = {
@@ -15,7 +14,7 @@ const columnNumericTransformer = {
 };
 
 @Entity('addresses')
-export class Address {
+export class Address extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -45,11 +44,7 @@ export class Address {
   })
   isActive: boolean;
 
-  @CreateDateColumn()
-  createdAt: string;
 
-  @UpdateDateColumn()
-  updatedAt: string;
 
   @ManyToOne(() => User, (user) => user.addresses)
   @JoinColumn({ name: 'user_id' })

@@ -1,15 +1,14 @@
 import { Store } from 'src/store/entities/store.entity';
 import {
   Column,
-  CreateDateColumn,
   Entity,
   ManyToOne,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
+import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 
 @Entity('store_addresses')
-export class StoreAddress {
+export class StoreAddress extends TimestampEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -52,9 +51,5 @@ export class StoreAddress {
   @ManyToOne(() => Store, (store) => store.addresses)
   store: Store;
 
-  @CreateDateColumn()
-  createdAt: string;
 
-  @UpdateDateColumn()
-  updatedAt: string;
 }

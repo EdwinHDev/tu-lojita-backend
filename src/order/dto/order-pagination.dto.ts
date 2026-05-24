@@ -46,4 +46,8 @@ export class OrderPaginationDto extends PaginationDto {
     { message: 'Fecha de fin no válida (formato ISO requerido)' },
   )
   endDate?: string;
+
+  @IsOptional()
+  @IsString({ message: 'El término de búsqueda debe ser un texto' })
+  search?: string;
 }

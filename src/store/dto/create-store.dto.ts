@@ -7,10 +7,24 @@ import {
   IsNotEmpty,
   ValidateNested,
   IsArray,
+  IsNumber,
+  IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateStoreAddressDto } from 'src/store-address/dto/create-store-address.dto';
 import { IsRif } from '../decorators/is-rif.decorator';
+import { InstallmentPeriod } from '../types/installment-period.enum';
+
+export class InstallmentFrequencyOptionDto {
+  @IsNumber()
+  value: number;
+
+  @IsEnum(InstallmentPeriod)
+  unit: InstallmentPeriod;
+
+  @IsString()
+  label: string;
+}
 
 export class CreateStoreDto {
   @IsString({ message: 'El nombre debe ser una cadena de texto' })
@@ -65,4 +79,14 @@ export class CreateStoreDto {
   })
   @IsOptional()
   paymentMethods?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InstallmentFrequencyOptionDto)
+  installmentFrequencyOptions?: InstallmentFrequencyOptionDto[];
+
+  @IsString({ message: 'La zona horaria debe ser una cadena de texto' })
+  @IsOptional()
+  timezone?: string;
 }

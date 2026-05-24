@@ -35,3 +35,104 @@ export function getLoginAlertTemplate(
     </div>
   `;
 }
+
+export function getInstallmentPlanTemplate(
+  customerName: string,
+  orderId: string,
+  totalAmount: number,
+  storeName: string,
+  installments: { amount: number; dueDate: string }[],
+  paidAmount: number,
+  remainingBalance: number,
+  nextPaymentDate?: string,
+): string {
+  const installmentsHtml = installments
+    .map(
+      (i, index) => `
+    <tr>
+      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #475569;">Cuota ${index + 1}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #1E293B; font-weight: 600;">$${i.amount}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #475569;">${i.dueDate}</td>
+    </tr>
+  `,
+    )
+    .join('');
+
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 600px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #F0FDF4; color: #16A34A; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600;">PLAN DE PAGOS APROBADO</span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; text-align: center;">Hola, ${customerName}</h2>
+      <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
+        Tu compra en <strong>${storeName}</strong> (#${orderId}) ha sido procesada con un plan de pagos parciales.
+      </p>
+
+      <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+        <div style="flex: 1; background-color: #F8FAFC; padding: 16px; border-radius: 12px; text-align: center;">
+          <p style="margin: 0; font-size: 12px; color: #64748B; text-transform: uppercase;">Pagado</p>
+          <p style="margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #16A34A;">$${paidAmount}</p>
+        </div>
+        <div style="flex: 1; background-color: #F8FAFC; padding: 16px; border-radius: 12px; text-align: center;">
+          <p style="margin: 0; font-size: 12px; color: #64748B; text-transform: uppercase;">Pendiente</p>
+          <p style="margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #DC2626;">$${remainingBalance}</p>
+        </div>
+      </div>
+
+      ${nextPaymentDate ? `
+      <div style="background-color: #EFF6FF; border: 1px solid #DBEAFE; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; color: #1E40AF; font-size: 14px;">
+          Próximo Pago: <strong>${nextPaymentDate}</strong>
+        </p>
+      </div>
+      ` : ''}
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+        <thead>
+          <tr style="background-color: #F8FAFC;">
+            <th style="text-align: left; padding: 12px; color: #64748B; font-size: 12px; text-transform: uppercase;">Detalle</th>
+            <th style="text-align: left; padding: 12px; color: #64748B; font-size: 12px; text-transform: uppercase;">Monto</th>
+            <th style="text-align: left; padding: 12px; color: #64748B; font-size: 12px; text-transform: uppercase;">Vencimiento</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${installmentsHtml}
+        </tbody>
+      </table>
+
+      <div style="background-color: #FFFBEB; border: 1px solid #FEF3C7; padding: 16px; border-radius: 12px; margin-bottom: 24px;">
+        <p style="margin: 0; color: #92400E; font-size: 14px; line-height: 1.5;">
+          <strong>Importante:</strong> Los pagos deben reportarse a través de la aplicación para ser validados por la tienda. El retraso en las cuotas puede generar multas automáticas.
+        </p>
+      </div>
+
+      <p style="color: #94A3B8; font-size: 12px; text-align: center;">Tu Lojita - Tu tienda de confianza</p>
+    </div>
+  `;
+}
+
+export function getPaymentReminderTemplate(
+  customerName: string,
+  amount: number,
+  dueDate: string,
+  orderId: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FEF2F2; color: #DC2626; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600;">RECORDATORIO DE PAGO</span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 20px; font-weight: 700; text-align: center;">Hola, ${customerName}</h2>
+      <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center;">
+        Te recordamos que tienes una cuota pendiente por un monto de <strong>$${amount}</strong> que vence el <strong>${dueDate}</strong>.
+      </p>
+      
+      <div style="text-align: center; margin: 32px 0;">
+        <p style="color: #64748B; font-size: 14px; margin-bottom: 16px;">Orden: #${orderId}</p>
+        <a href="#" style="display: inline-block; background-color: #4F46E5; color: #FFFFFF; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 28px; border-radius: 10px;">Pagar ahora en la App</a>
+      </div>
+
+      <p style="color: #94A3B8; font-size: 12px; text-align: center; margin: 0;">Evita cargos adicionales por mora pagando a tiempo.</p>
+    </div>
+  `;
+}

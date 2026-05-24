@@ -81,6 +81,11 @@ export class OrderController {
     return this.orderService.cancelOrder(id, user.id);
   }
 
+  @Get('store/:storeId/installments')
+  findStoreInstallments(@Param('storeId') storeId: string) {
+    return this.orderService.findStoreInstallments(storeId);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.orderService.remove(id);
