@@ -71,6 +71,20 @@ export class UpdateStoreDto extends PartialType(CreateStoreDto) {
   @Type(() => InstallmentFrequencyOptionDto)
   installmentFrequencyOptions?: InstallmentFrequencyOptionDto[];
 
+  @IsBoolean({ message: 'El campo allowInstallmentExtensions debe ser un booleano' })
+  @IsOptional()
+  allowInstallmentExtensions?: boolean;
+
+  @IsNumber({}, { message: 'Los días máximos de prórroga deben ser un número' })
+  @Min(1, { message: 'Los días máximos mínimos son 1' })
+  @IsOptional()
+  maxExtensionDays?: number;
+
+  @IsNumber({}, { message: 'El límite de crédito debe ser un número' })
+  @Min(0, { message: 'El límite de crédito mínimo es 0' })
+  @IsOptional()
+  maxCreditLimit?: number;
+
   @IsString({ message: 'La zona horaria debe ser una cadena de texto' })
   @IsOptional()
   timezone?: string;

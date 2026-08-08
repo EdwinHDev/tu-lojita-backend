@@ -33,8 +33,8 @@ export class CreatePaymentDto {
   receiptImage?: string;
 
   @IsUUID('4', { message: 'El ID de la orden debe ser un UUID válido (v4)' })
-  @IsNotEmpty({ message: 'El ID de la orden es obligatorio' })
-  orderId: string;
+  @IsOptional()
+  orderId?: string;
 
   @IsUUID('4', { message: 'El ID de la tienda debe ser un UUID válido (v4)' })
   @IsNotEmpty({ message: 'El ID de la tienda es obligatorio' })

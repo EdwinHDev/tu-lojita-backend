@@ -110,6 +110,10 @@ export class CreateItemDto {
   @IsOptional()
   allowInstallments?: boolean;
 
+  @IsBoolean({ message: 'isActive debe ser un valor booleano' })
+  @IsOptional()
+  isActive?: boolean;
+
   @IsNumber({}, { message: 'El porcentaje de recargo por mora debe ser un número válido' })
   @Min(0, { message: 'El porcentaje de recargo por mora no puede ser negativo' })
   @IsOptional()

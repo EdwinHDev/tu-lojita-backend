@@ -21,14 +21,51 @@ export class NotificationService {
     private readonly notificationGateway: NotificationGateway,
   ) {}
 
+  /**
+   * Sanitiza un ChatMessage de TypeORM en un DTO limpio para emitir por WebSocket.
+   * Evita enviar el objeto Order completo con todas sus relaciones anidadas.
+   */
+  private toChatMessageDto(message: ChatMessage, orderId: string) {
+    return {
+      id: message.id,
+      orderId,
+      sender: message.sender
+        ? {
+            id: message.sender.id,
+            firstName: message.sender.firstName,
+            lastName: message.sender.lastName,
+          }
+        : null,
+      content: message.content,
+      createdAt: message.createdAt,
+      isRead: message.isRead,
+      isDelivered: message.isDelivered,
+    };
+  }
+
+  async checkChatStatusForOrder(orderId: string): Promise<{
+    allowed: boolean;
+    reason?: 'NOT_FOUND' | 'CHAT_CLOSED' | 'CHAT_DISABLED';
+  }> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: ['store'],
+    });
+    if (!order) {
+      return { allowed: false, reason: 'NOT_FOUND' };
+    }
+    if (order.store && order.store.allowChat === false) {
+      return { allowed: false, reason: 'CHAT_DISABLED' };
+    }
+    if (order.status === 'FULLY_PAID' || order.status === 'CANCELLED') {
+      return { allowed: false, reason: 'CHAT_CLOSED' };
+    }
+    return { allowed: true };
+  }
+
   async isOrderActiveForChat(orderId: string): Promise<boolean> {
-    const order = await this.orderRepository.findOne({ where: { id: orderId } });
-    if (!order) return false;
-    // Asumiendo que OrderStatus de tu-lojita-backend/src/order/types/order-status.enum.ts es:
-    // PENDING, PARTIALLY_PAID, FULLY_PAID, CANCELLED
-    // Las ordenes activas para chat son las que NO están FULLY_PAID ni CANCELLED (a menos que dependa del campo paymentStatus, veremos).
-    // Usaremos status por ahora.
-    return order.status !== 'FULLY_PAID' && order.status !== 'CANCELLED';
+    const status = await this.checkChatStatusForOrder(orderId);
+    return status.allowed;
   }
 
   async closeChatRoom(orderId: string, reason: string) {
@@ -119,8 +156,9 @@ export class NotificationService {
 
     const savedMessage = await this.chatMessageRepository.save(message);
 
-    // Emitir a la sala de la orden
-    this.notificationGateway.sendToOrderRoom(orderId, 'new_chat_message', savedMessage);
+    // Emitir a la sala de la orden (DTO sanitizado, sin el objeto Order anidado)
+    const messageDto = this.toChatMessageDto(savedMessage, orderId);
+    this.notificationGateway.sendToOrderRoom(orderId, 'new_chat_message', messageDto);
 
     // También notificar al destinatario si no está en la sala (notificación push simulada)
     const recipientId = senderId === order.user.id 
@@ -199,11 +237,12 @@ export class NotificationService {
 
 
   async getChatHistory(orderId: string) {
-    return this.chatMessageRepository.find({
+    const messages = await this.chatMessageRepository.find({
       where: { order: { id: orderId } },
       relations: ['sender'],
       order: { createdAt: 'ASC' },
       take: 100,
     });
+    return messages.map((m) => this.toChatMessageDto(m, orderId));
   }
 }

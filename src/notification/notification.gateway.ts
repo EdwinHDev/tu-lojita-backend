@@ -65,12 +65,6 @@ export class NotificationGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { orderId: string },
   ) {
-    const isActive = await this.notificationService.isOrderActiveForChat(data.orderId);
-    if (!isActive) {
-      client.emit('chat_closed', { orderId: data.orderId, reason: 'resolved' });
-      return;
-    }
-
     const room = `order_chat_${data.orderId}`;
     client.join(room);
     this.logger.log(`Client ${client.id} joined ${room}`);
@@ -89,6 +83,17 @@ export class NotificationGateway
     } catch (e) {
       this.logger.error(`Error marking delivered on join: ${e.message}`);
     }
+
+    // 3. Notificar al cliente si el chat no está permitido o la orden está cerrada
+    const chatStatus = await this.notificationService.checkChatStatusForOrder(data.orderId);
+    if (!chatStatus.allowed) {
+      if (chatStatus.reason === 'CHAT_DISABLED') {
+        client.emit('chat_closed', { orderId: data.orderId, reason: 'chat_disabled' });
+        client.leave(room);
+      } else if (chatStatus.reason === 'CHAT_CLOSED') {
+        client.emit('chat_closed', { orderId: data.orderId, reason: 'resolved' });
+      }
+    }
   }
 
   @SubscribeMessage('leave_chat')
@@ -106,20 +111,43 @@ export class NotificationGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { orderId: string; content: string },
   ) {
-    const isActive = await this.notificationService.isOrderActiveForChat(data.orderId);
-    if (!isActive) {
-      client.emit('chat_closed', { orderId: data.orderId, reason: 'resolved' });
-      return;
+    const token = this.extractToken(client);
+    if (!token) {
+      return { success: false, error: 'INVALID_TOKEN' };
     }
 
-    const token = this.extractToken(client);
-    if (!token) return;
+    let userId: string;
     try {
       const payload = await this.jwtService.verifyAsync(token, { secret: envs.jwtSecret });
-      // saveMessage internamente llama a sendToOrderRoom('new_chat_message', ...)
-      await this.notificationService.saveMessage(data.orderId, payload.sub, data.content);
+      userId = payload.sub;
+    } catch (e) {
+      this.logger.error(`Error verifying token in send_message: ${e.message}`);
+      return { success: false, error: 'INVALID_TOKEN' };
+    }
+
+    const chatStatus = await this.notificationService.checkChatStatusForOrder(data.orderId);
+    if (!chatStatus.allowed) {
+      if (chatStatus.reason === 'CHAT_DISABLED') {
+        client.emit('chat_closed', { orderId: data.orderId, reason: 'chat_disabled' });
+        return { success: false, error: 'CHAT_DISABLED' };
+      }
+      client.emit('chat_closed', { orderId: data.orderId, reason: 'resolved' });
+      return { success: false, error: 'CHAT_CLOSED' };
+    }
+
+    try {
+      const savedMessage = await this.notificationService.saveMessage(data.orderId, userId, data.content);
+      if (!savedMessage) {
+        return { success: false, error: 'ORDER_NOT_FOUND' };
+      }
+      return {
+        success: true,
+        messageId: savedMessage.id,
+        createdAt: savedMessage.createdAt ? savedMessage.createdAt.toISOString() : new Date().toISOString(),
+      };
     } catch (e) {
       this.logger.error(`Error in send_message: ${e.message}`);
+      return { success: false, error: 'INTERNAL_ERROR' };
     }
   }
 

@@ -9,6 +9,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { envs } from 'src/config/envs';
 import { AuthGoogleLoginDto } from './dto/auth-google-login.dto';
 import { LoginDto } from './dto/login.dto';
+import { AppOrigin } from './types/app-origin.enum';
 import { GooglePayload } from './types';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from 'src/user/entities/user.entity';
@@ -35,7 +36,7 @@ export class AuthService {
     private readonly userRepository: Repository<User>,
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
-  ) {}
+  ) { }
 
   async seedAdmin() {
     // 2.3 Strict check to throw ForbiddenException immediately if process.env.NODE_ENV === 'production'
@@ -52,7 +53,7 @@ export class AuthService {
         const admin = this.userRepository.create({
           email,
           firstName: 'Admin',
-          lastName: 'Platform',
+          lastName: 'Lojita',
           role: UserRole.ADMIN,
           isActive: true,
           password: 'admin123', // Automatically hashed in beforeInsert hook
@@ -96,7 +97,7 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto, ip?: string, userAgent?: string) {
-    const { email, password } = loginDto;
+    const { email, password, appOrigin } = loginDto;
 
     const user = await this.userRepository
       .createQueryBuilder('user')
@@ -123,6 +124,27 @@ export class AuthService {
       throw new UnauthorizedException(
         'Las credenciales ingresadas no son válidas.',
       );
+    }
+
+    if (appOrigin === AppOrigin.CLIENT) {
+      if (user.role === UserRole.VENDOR || user.role === UserRole.COMPANY) {
+        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+      }
+    } else if (appOrigin === AppOrigin.SELLER) {
+      if (user.role === UserRole.USER) {
+        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+      }
+      if (user.role === UserRole.COMPANY) {
+        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+      }
+    } else if (appOrigin === AppOrigin.BUSINESS) {
+      if (user.role === UserRole.USER || user.role === UserRole.VENDOR) {
+        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+      }
+    } else if (appOrigin === AppOrigin.ADMIN) {
+      if (user.role !== UserRole.ADMIN) {
+        throw new ForbiddenException('No tienes permisos de administrador para iniciar sesión aquí.');
+      }
     }
 
     if (user.role === 'ADMIN') {
@@ -308,15 +330,45 @@ export class AuthService {
       });
 
       if (!user) {
+        let newRole = UserRole.USER;
+        if (authGoogleLoginDto.appOrigin === AppOrigin.SELLER) {
+          newRole = UserRole.VENDOR;
+        } else if (authGoogleLoginDto.appOrigin === AppOrigin.BUSINESS) {
+          newRole = UserRole.COMPANY;
+        }
+
         user = this.userRepository.create({
           email: payload.email,
           firstName: payload.given_name,
           lastName: payload.family_name,
           avatarUrl: payload.picture,
           googleId: payload.sub,
+          role: newRole,
         });
         user = await this.userRepository.save(user);
         // Para usuarios nuevos, company y store serán null por defecto.
+      } else {
+        if (authGoogleLoginDto.appOrigin === AppOrigin.CLIENT) {
+          if (user.role === UserRole.VENDOR || user.role === UserRole.COMPANY) {
+            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+          }
+        } else if (authGoogleLoginDto.appOrigin === AppOrigin.SELLER) {
+          if (user.role === UserRole.USER) {
+            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+          }
+          if (user.role === UserRole.COMPANY) {
+            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+          }
+        } else if (authGoogleLoginDto.appOrigin === AppOrigin.BUSINESS) {
+          if (user.role === UserRole.USER) {
+            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+          }
+          if (user.role === UserRole.VENDOR) {
+            // Upgrade to COMPANY
+            user.role = UserRole.COMPANY;
+            user = await this.userRepository.save(user);
+          }
+        }
       }
 
       // Quitamos datos sensibles
@@ -340,6 +392,9 @@ export class AuthService {
         ...tokens,
       };
     } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof UnauthorizedException) {
+        throw error;
+      }
       this.logger.error(
         `Error verifying Google token: ${(error as Error).message}`,
         (error as Error).stack,

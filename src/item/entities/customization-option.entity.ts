@@ -20,6 +20,15 @@ export class CustomizationOption {
   })
   price: number;
 
+  @Column('int', { default: 0, name: 'min_quantity' })
+  minQuantity: number;
+
+  @Column('int', { default: 1, name: 'max_quantity' })
+  maxQuantity: number;
+
+  @Column('int', { default: 0, name: 'default_quantity' })
+  defaultQuantity: number;
+
   @ManyToOne(() => CustomizationGroup, (group) => group.options, {
     onDelete: 'CASCADE',
   })

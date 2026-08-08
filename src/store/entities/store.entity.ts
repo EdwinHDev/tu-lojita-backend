@@ -102,6 +102,9 @@ export class Store extends TimestampEntity {
   @Column('int', { default: 0 })
   maxInstallments: number;
 
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  maxCreditLimit: number;
+
   @Column('boolean', { default: true })
   allowChat: boolean;
 
@@ -117,6 +120,12 @@ export class Store extends TimestampEntity {
 
   @Column('jsonb', { nullable: true })
   installmentFrequencyOptions?: { value: number; unit: InstallmentPeriod; label: string }[];
+
+  @Column('boolean', { default: false })
+  allowInstallmentExtensions: boolean;
+
+  @Column('int', { default: 7, nullable: true })
+  maxExtensionDays: number;
 
   @Column('jsonb', {
     nullable: true,

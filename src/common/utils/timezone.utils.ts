@@ -56,3 +56,14 @@ export function formatTimeInTimezone(date: Date, timezone: string = 'America/Car
   });
   return formatter.format(date); // E.g. "6:30 PM"
 }
+
+export function formatDateInTimezone(date: Date, timezone: string = 'America/Caracas'): string {
+  const formatter = new Intl.DateTimeFormat('es-VE', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(date); // E.g. "30/05/2026"
+}
+

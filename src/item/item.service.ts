@@ -26,6 +26,9 @@ interface AttributeProperty {
 interface CustomizationOptionInput {
   name: string;
   price?: number;
+  minQuantity?: number;
+  maxQuantity?: number;
+  defaultQuantity?: number;
 }
 
 interface CustomizationGroupInput {
@@ -96,11 +99,13 @@ export class ItemService {
         name: g.name,
         minSelect: g.minSelect,
         maxSelect: g.maxSelect,
-        allowOptionQuantity: g.allowOptionQuantity,
         options: (g.options || []).map((opt) => ({
           id: opt.id,
           name: opt.name,
           price: parseFloat(opt.price?.toString() || '0'),
+          minQuantity: opt.minQuantity ?? 0,
+          maxQuantity: opt.maxQuantity ?? 1,
+          defaultQuantity: opt.defaultQuantity ?? 0,
         })),
       }));
     }
@@ -157,12 +162,6 @@ export class ItemService {
           name: g.name,
           minSelect: g.minSelect || 0,
           maxSelect: g.maxSelect || 0,
-          allowOptionQuantity:
-            g.allowOptionQuantity === true ||
-            g.allowOptionQuantity === 'true' ||
-            g.allow_option_quantity === true ||
-            g.allow_option_quantity === 'true' ||
-            false,
         });
         const savedGroup = await this.customizationGroupRepository.save(group);
 
@@ -173,6 +172,9 @@ export class ItemService {
               group: savedGroup,
               name: opt.name,
               price: opt.price || 0,
+              minQuantity: opt.minQuantity !== undefined ? Number(opt.minQuantity) : 0,
+              maxQuantity: opt.maxQuantity !== undefined ? Number(opt.maxQuantity) : 1,
+              defaultQuantity: opt.defaultQuantity !== undefined ? Number(opt.defaultQuantity) : 0,
             });
             await this.customizationOptionRepository.save(option);
           }
@@ -300,6 +302,20 @@ export class ItemService {
       discountPrice = undefined; // Usamos undefined para que TypeORM no lo guarde o lo limpie según la entidad
     }
 
+    // Validar que si trackInventory es true, el stock inicial sea > 0
+    const trackInventory = itemData.trackInventory ?? true;
+    if (trackInventory) {
+      if (
+        itemData.stockQuantity === undefined ||
+        itemData.stockQuantity === null ||
+        Number(itemData.stockQuantity) <= 0
+      ) {
+        throw new BadRequestException(
+          'Debes especificar una cantidad de stock mayor a 0 al activar el control de inventario.',
+        );
+      }
+    }
+
     const item = this.itemRepository.create({
       ...itemData,
       price,
@@ -420,6 +436,25 @@ export class ItemService {
       queryBuilder.andWhere('item.discountPrice IS NOT NULL');
     }
 
+    // Filtro de Publicación e Inventario
+    const { isActive, includeInactive } = paginationDto;
+    if (includeInactive === true) {
+      if (isActive !== undefined) {
+        queryBuilder.andWhere('item.isActive = :isActive', { isActive });
+      }
+    } else {
+      // Para cliente público: solo publicados y en stock
+      if (isActive !== undefined) {
+        queryBuilder.andWhere('item.isActive = :isActive', { isActive });
+      } else {
+        queryBuilder.andWhere('item.isActive = true');
+      }
+
+      queryBuilder.andWhere(
+        '(item.trackInventory = false OR (item.trackInventory = true AND item.stockQuantity > 0))',
+      );
+    }
+
     if (onlyInStock) {
       // Filtrar items disponibles (ilimitados O limitados con stock > 0)
       queryBuilder.andWhere(
@@ -452,10 +487,15 @@ export class ItemService {
   }
 
   async findByStore(storeId: string, paginationDto: ItemPaginationDto) {
-    // Usar findAll con el filtro de storeId para aprovechar toda la lógica de paginación y búsqueda
+    const includeInactive =
+      paginationDto.includeInactive !== undefined
+        ? paginationDto.includeInactive
+        : true;
+
     return await this.findAll({
       ...paginationDto,
       storeId,
+      includeInactive,
     });
   }
 
@@ -519,6 +559,27 @@ export class ItemService {
       );
     } else if (updateItemDto.attributes && item.category) {
       await this.validateAttributes(item.category.id, updateItemDto.attributes);
+    }
+
+    const effectiveTrackInventory =
+      updateItemDto.trackInventory !== undefined
+        ? updateItemDto.trackInventory
+        : item.trackInventory;
+    const effectiveStockQuantity =
+      updateItemDto.stockQuantity !== undefined
+        ? updateItemDto.stockQuantity
+        : item.stockQuantity;
+
+    if (effectiveTrackInventory) {
+      if (
+        effectiveStockQuantity === undefined ||
+        effectiveStockQuantity === null ||
+        Number(effectiveStockQuantity) < 0
+      ) {
+        throw new BadRequestException(
+          'La cantidad en stock no puede ser negativa al controlar inventario.',
+        );
+      }
     }
 
     this.itemRepository.merge(item, updateItemDto);

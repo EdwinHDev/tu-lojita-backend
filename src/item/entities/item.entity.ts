@@ -132,6 +132,9 @@ export class Item extends TimestampEntity {
   @Column('boolean', { default: true })
   allowInstallments: boolean;
 
+  @Column('boolean', { default: true })
+  isActive: boolean;
+
   @Column('numeric', {
     default: 0,
     transformer: {

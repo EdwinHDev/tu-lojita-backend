@@ -10,6 +10,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { UserRole } from '../types';
+import { AppOrigin } from 'src/auth/types/app-origin.enum';
 
 export class CreateUserDto {
   @IsString({ message: 'El nombre debe de ser una cadena de texto' })
@@ -63,4 +64,8 @@ export class CreateUserDto {
   @IsUUID('4', { message: 'El ID de la tienda debe ser un UUID válido' })
   @IsOptional()
   storeId?: string;
+
+  @IsEnum(AppOrigin, { message: 'El origen de la aplicación no es válido' })
+  @IsNotEmpty({ message: 'El origen de la aplicación es obligatorio' })
+  appOrigin: AppOrigin;
 }

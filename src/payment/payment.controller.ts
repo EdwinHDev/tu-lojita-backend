@@ -11,6 +11,7 @@ import {
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { CreatePaymentWithOrderDto } from './dto/create-payment-with-order.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/user/entities/user.entity';
@@ -26,6 +27,14 @@ export class PaymentController {
   create(@Body() createPaymentDto: CreatePaymentDto, @GetUser() user: User) {
     // El userId se obtiene del usuario autenticado, no del body
     return this.paymentService.create(createPaymentDto, user.id);
+  }
+
+  @Post('with-order')
+  createWithOrder(
+    @Body() createPaymentWithOrderDto: CreatePaymentWithOrderDto,
+    @GetUser() user: User,
+  ) {
+    return this.paymentService.createWithOrder(createPaymentWithOrderDto, user.id);
   }
 
   @Post(':id/verify')

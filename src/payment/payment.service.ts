@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -17,9 +18,18 @@ import { PaymentPaginationDto } from './dto/payment-pagination.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
 import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
+import { MailService } from 'src/common/mail/mail.service';
+import { CreatePaymentWithOrderDto } from './dto/create-payment-with-order.dto';
+import { Item } from 'src/item/entities/item.entity';
+import { OrderItem } from 'src/order-item/entities/order-item.entity';
+import { Installment } from 'src/order/entities/installment.entity';
+import { InstallmentStatus } from 'src/order/types';
+import { StoreStatus } from 'src/store/types/status.enum';
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
@@ -35,6 +45,7 @@ export class PaymentService {
 
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
+    private readonly mailService: MailService,
   ) {}
 
   async verifyPayment(
@@ -98,17 +109,57 @@ export class PaymentService {
           (p) => p.status === PaymentStatus.APPROVED,
         );
 
+        // ── Cargar cuotas para validaciones y amortización ──────────────
+        let installmentsForValidation: Installment[] = [];
+        if (order.isPartialPayment) {
+          installmentsForValidation = await queryRunner.manager.find(Installment, {
+            where: { order: { id: order.id } },
+            order: { dueDate: 'ASC' },
+          });
+        }
+
         if (order.isPartialPayment && approvedPayments.length === 0) {
+          // Validación de cuota inicial (primer pago)
           const minPercentage = parseFloat(
             store.minInitialPaymentPercentage.toString(),
           );
           const minAmount = (order.finalAmount * minPercentage) / 100;
+          const minAmountCents = Math.round(minAmount * 100);
           const currentAmount = parseFloat(payment.amount.toString());
+          const currentCents = Math.round(currentAmount * 100);
 
-          if (currentAmount < minAmount) {
+          if (currentCents < minAmountCents - 1) {
             throw new BadRequestException(
-              `El pago inicial ($${currentAmount}) es menor al mínimo requerido ($${minAmount.toFixed(2)})`,
+              `El pago inicial ($${currentAmount.toFixed(2)}) es menor al mínimo requerido ($${(minAmountCents / 100).toFixed(2)})`,
             );
+          }
+        } else if (order.isPartialPayment && approvedPayments.length > 0) {
+          // Validación de cuotas 2+ — el pago debe cubrir íntegramente la próxima cuota pendiente
+          const nextPending = installmentsForValidation.find(
+            (inst) => inst.status !== InstallmentStatus.PAID,
+          );
+          if (nextPending) {
+            const instAmount = parseFloat(nextPending.amount.toString());
+            const instLateFee = parseFloat(nextPending.lateFeeApplied.toString());
+            const instPaid = parseFloat((nextPending.paidAmount || 0).toString());
+            let minRequired = instAmount + instLateFee - instPaid;
+            const currentBalance = parseFloat(order.remainingBalance?.toString() || order.balance.toString());
+            if (minRequired > currentBalance) {
+              minRequired = currentBalance;
+            }
+            const currentAmount = parseFloat(payment.amount.toString());
+
+            const currentCents = Math.round(currentAmount * 100);
+            const minRequiredCents = Math.round(minRequired * 100);
+
+            // Determinar el número de la cuota para el mensaje de error
+            const cuotaIndex = installmentsForValidation.indexOf(nextPending) + 1;
+
+            if (currentCents < minRequiredCents - 1) {
+              throw new BadRequestException(
+                `El pago ($${currentAmount.toFixed(2)}) es menor al mínimo requerido para la Cuota ${cuotaIndex} ($${minRequired.toFixed(2)}). No se permiten abonos parciales.`,
+              );
+            }
           }
         }
 
@@ -116,31 +167,108 @@ export class PaymentService {
         const amount = parseFloat(payment.amount.toString());
         
         order.totalPaidAmount = parseFloat(order.totalPaidAmount?.toString() || '0') + amount;
-        const newBalance = currentBalance - amount;
-        order.remainingBalance = newBalance < 0.01 ? 0 : newBalance;
+        const rawNewBalance = currentBalance - amount;
+        const newBalance = Math.round(rawNewBalance * 100) <= 1 ? 0 : Math.round(rawNewBalance * 100) / 100;
+        order.remainingBalance = newBalance;
         order.balance = order.remainingBalance;
+
+        // Amortización equitativa por cuota pagada
+        if (order.isPartialPayment) {
+          const installments = installmentsForValidation;
+
+          // Obtener pagos aprobados ordenados cronológicamente
+          const approvedPayments = order.payments
+            .filter((p) => p.status === PaymentStatus.APPROVED || p.id === paymentId)
+            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+          let totalApprovedCents = approvedPayments.reduce(
+            (sum, p) => sum + Math.round(parseFloat(p.amount.toString()) * 100),
+            0,
+          );
+
+          const isFullySettled = newBalance === 0;
+
+          if (isFullySettled) {
+            // Si el saldo restante es 0, todas las cuotas quedan marcadas como pagadas
+            for (const inst of installments) {
+              const currentAmount = parseFloat(inst.amount.toString());
+              inst.paidAmount = currentAmount;
+              inst.status = InstallmentStatus.PAID;
+              if (!inst.paymentDate && approvedPayments.length > 0) {
+                inst.paymentDate = new Date(approvedPayments[approvedPayments.length - 1].createdAt);
+              }
+              await queryRunner.manager.save(inst);
+            }
+          } else {
+            // Amortizar cuotas según el total acumulado de pagos aprobados
+            for (const installment of installments) {
+              const origAmountCents = Math.round(parseFloat(installment.amount.toString()) * 100);
+              const lateFeeCents = Math.round(parseFloat((installment.lateFeeApplied || 0).toString()) * 100);
+              const neededCents = origAmountCents + lateFeeCents;
+
+              if (totalApprovedCents >= neededCents - 1) {
+                totalApprovedCents -= neededCents;
+                installment.paidAmount = installment.amount;
+                installment.status = InstallmentStatus.PAID;
+                if (!installment.paymentDate && approvedPayments.length > 0) {
+                  installment.paymentDate = new Date(approvedPayments[0].createdAt);
+                }
+                await queryRunner.manager.save(installment);
+              } else {
+                const paidVal = Math.round(totalApprovedCents) / 100;
+                totalApprovedCents = 0;
+                installment.paidAmount = paidVal;
+                installment.status = InstallmentStatus.PENDING;
+                await queryRunner.manager.save(installment);
+              }
+            }
+          }
+
+          // Recalcular la próxima fecha de vencimiento dinámica
+          const nextUnpaid = installments.find((inst) => inst.status !== InstallmentStatus.PAID);
+          if (nextUnpaid && !isFullySettled) {
+            order.nextDueDate = nextUnpaid.dueDate;
+          } else {
+            order.nextDueDate = null;
+          }
+        }
 
         if (order.remainingBalance === 0) {
           order.status = OrderStatus.FULLY_PAID;
           order.nextDueDate = null;
           order.isFullyPaid = true;
+
+          if (order.isPartialPayment) {
+            const allInsts = await queryRunner.manager.find(Installment, {
+              where: { order: { id: order.id } },
+            });
+            for (const inst of allInsts) {
+              if (inst.status !== InstallmentStatus.PAID) {
+                inst.status = InstallmentStatus.PAID;
+                inst.paidAmount = inst.amount;
+                await queryRunner.manager.save(inst);
+              }
+            }
+          }
         } else {
           order.status = OrderStatus.PARTIALLY_PAID;
           order.isFullyPaid = false;
 
-          const now = new Date();
-          const nextDate = new Date();
-          const intervalValue = order.installmentIntervalValue || 1;
-          const intervalUnit = order.installmentIntervalUnit || InstallmentPeriod.DAYS;
+          if (!order.isPartialPayment) {
+            const now = new Date();
+            const nextDate = new Date();
+            const intervalValue = order.installmentIntervalValue || 1;
+            const intervalUnit = order.installmentIntervalUnit || InstallmentPeriod.DAYS;
 
-          if (intervalUnit === InstallmentPeriod.DAYS) {
-            nextDate.setDate(now.getDate() + intervalValue);
-          } else if (intervalUnit === InstallmentPeriod.WEEKS) {
-            nextDate.setDate(now.getDate() + (intervalValue * 7));
-          } else if (intervalUnit === InstallmentPeriod.MONTHS) {
-            nextDate.setMonth(now.getMonth() + intervalValue);
+            if (intervalUnit === InstallmentPeriod.DAYS) {
+              nextDate.setDate(now.getDate() + intervalValue);
+            } else if (intervalUnit === InstallmentPeriod.WEEKS) {
+              nextDate.setDate(now.getDate() + (intervalValue * 7));
+            } else if (intervalUnit === InstallmentPeriod.MONTHS) {
+              nextDate.setMonth(now.getMonth() + intervalValue);
+            }
+            order.nextDueDate = nextDate;
           }
-          order.nextDueDate = nextDate;
         }
 
         await queryRunner.manager.save(order);
@@ -148,8 +276,18 @@ export class PaymentService {
 
       payment.status = newStatus;
       const savedPayment = await queryRunner.manager.save(payment);
-
       await queryRunner.commitTransaction();
+
+      // Enviar correos de aprobación/rechazo de pagos
+      if (newStatus === PaymentStatus.APPROVED) {
+        this.mailService.sendPaymentApproved(payment).catch(err =>
+          this.logger.error(`Error sending payment approved email: ${err.message}`)
+        );
+      } else if (newStatus === PaymentStatus.REJECTED) {
+        this.mailService.sendPaymentRejected(payment).catch(err =>
+          this.logger.error(`Error sending payment rejected email: ${err.message}`)
+        );
+      }
 
       // Notificar al cliente sobre el resultado de la verificación
       try {
@@ -180,6 +318,9 @@ export class PaymentService {
 
   async create(createPaymentDto: CreatePaymentDto, userId: string) {
     const { orderId, amount, storeId } = createPaymentDto;
+    if (!orderId) {
+      throw new BadRequestException('El ID de la orden es obligatorio');
+    }
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -197,7 +338,7 @@ export class PaymentService {
 
       const orderWithRelations = await queryRunner.manager.findOne(Order, {
         where: { id: orderId },
-        relations: ['payments', 'user', 'orderItems', 'orderItems.item'],
+        relations: ['payments', 'user', 'orderItems', 'orderItems.item', 'store'],
       });
 
       if (!orderWithRelations)
@@ -243,6 +384,40 @@ export class PaymentService {
         );
       }
 
+      // Validación del monto mínimo requerido para cuotas 2+ al reportar pago
+      if (orderWithRelations.isPartialPayment) {
+        const approvedPayments = orderWithRelations.payments.filter(
+          (p) => p.status === PaymentStatus.APPROVED,
+        );
+        if (approvedPayments.length > 0) {
+          const installments = await queryRunner.manager.find(Installment, {
+            where: { order: { id: orderId } },
+            order: { dueDate: 'ASC' },
+          });
+          const nextPending = installments.find(
+            (inst) => inst.status !== InstallmentStatus.PAID,
+          );
+          if (nextPending) {
+            const instAmount = parseFloat(nextPending.amount.toString());
+            const instLateFee = parseFloat(nextPending.lateFeeApplied.toString());
+            const instPaid = parseFloat((nextPending.paidAmount || 0).toString());
+            let minRequired = instAmount + instLateFee - instPaid;
+            if (minRequired > currentBalance) {
+              minRequired = currentBalance;
+            }
+            const incomingCents = Math.round(incomingAmount * 100);
+            const minRequiredCents = Math.round(minRequired * 100);
+            const cuotaIndex = installments.indexOf(nextPending) + 1;
+
+            if (incomingCents < minRequiredCents - 1) {
+              throw new BadRequestException(
+                `El pago ($${incomingAmount.toFixed(2)}) es menor al mínimo requerido para la Cuota ${cuotaIndex} ($${minRequired.toFixed(2)}). No se permiten abonos parciales.`,
+              );
+            }
+          }
+        }
+      }
+
       const { reference } = createPaymentDto;
       if (reference) {
         const existingPayment = await queryRunner.manager.findOne(Payment, {
@@ -270,18 +445,30 @@ export class PaymentService {
 
       await queryRunner.commitTransaction();
 
+      // Enviar correo de "Pago Bajo Revisión" para compras de Pago Único
+      if (!orderWithRelations.isPartialPayment) {
+        this.mailService.sendSinglePaymentUnderReview(orderWithRelations, incomingAmount).catch(err =>
+          this.logger.error(`Error sending payment under review email: ${err.message}`)
+        );
+      }
+
       // Notificar al dueño de la tienda que se reportó un pago
       try {
         const ownerId = store.owner?.id || store.company?.owner?.id;
         if (ownerId) {
+          const totalItems = orderWithRelations.orderItems?.length || 0;
           const firstItem =
             orderWithRelations.orderItems[0]?.title || 'un producto';
+          const additionalCount = totalItems - 1;
+          const itemSuffix = additionalCount > 0
+            ? ` y ${additionalCount} artículo${additionalCount > 1 ? 's' : ''} más`
+            : '';
           const storeName = store.name;
 
           await this.notificationService.create({
             userId: ownerId,
-            title: `¡Nueva Orden: ${firstItem}!`,
-            body: `Se ha reportado un pago por '${firstItem}' en '${storeName}' por $${amount}.`,
+            title: `¡Nueva Orden: ${firstItem}${itemSuffix}!`,
+            body: `Se ha reportado un pago por '${firstItem}${itemSuffix}' en '${storeName}' por $${amount}.`,
             type: NotificationType.PAYMENT_REPORTED,
             targetId: order.id,
           });
@@ -385,5 +572,358 @@ export class PaymentService {
     const payment = await this.findOne(id);
     await this.paymentRepository.remove(payment);
     return { deleted: true };
+  }
+
+  async createWithOrder(
+    dto: CreatePaymentWithOrderDto,
+    userId: string,
+  ) {
+    const { order: orderDto, payment: paymentDto } = dto;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. Validar Tienda
+      const store = await queryRunner.manager.findOne(Store, {
+        where: { id: orderDto.storeId },
+        relations: ['owner', 'company', 'company.owner'],
+      });
+      if (!store) {
+        throw new NotFoundException(`Tienda con ID ${orderDto.storeId} no encontrada`);
+      }
+      if (store.status !== StoreStatus.ACTIVE) {
+        throw new BadRequestException(`La tienda no está activa para recibir órdenes`);
+      }
+
+      // 2. Validar Cliente
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
+      if (!user) {
+        throw new NotFoundException(`Usuario con ID ${userId} no encontrado`);
+      }
+
+      // 3. Validar items duplicados
+      const itemIds = orderDto.items.map((i) => i.itemId);
+      const uniqueItemIds = new Set(itemIds);
+      if (uniqueItemIds.size !== itemIds.length) {
+        throw new BadRequestException('La orden contiene items duplicados. Por favor, agrupa las cantidades.');
+      }
+
+      let subtotal = 0;
+      const orderItemsToSave: OrderItem[] = [];
+
+      // 4. Procesar items y validar stock
+      for (const itemDto of orderDto.items) {
+        const item = await queryRunner.manager.findOne(Item, {
+          where: { id: itemDto.itemId },
+          relations: [
+            'store',
+            'customizationGroupsRel',
+            'customizationGroupsRel.options',
+          ],
+        });
+        if (!item) {
+          throw new NotFoundException(`Item con ID ${itemDto.itemId} no encontrado`);
+        }
+
+        if (item.store.id !== orderDto.storeId) {
+          throw new BadRequestException(
+            `El item "${item.title}" no pertenece a la tienda seleccionada. Solo puedes ordenar items de una misma tienda.`,
+          );
+        }
+
+        if (item.trackInventory) {
+          const currentStock = parseFloat(item.stockQuantity?.toString() || '0');
+          if (currentStock < itemDto.quantity) {
+            throw new BadRequestException(
+              `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+            );
+          }
+          item.stockQuantity = currentStock - itemDto.quantity;
+          await queryRunner.manager.save(item);
+        }
+
+        if (item.customizationGroupsRel) {
+          for (const group of item.customizationGroupsRel) {
+            const selectedOptIds = itemDto.selectedOptions?.[group.id] || [];
+            const requiredMin = group.minSelect * itemDto.quantity;
+            const requiredMax = group.maxSelect * itemDto.quantity;
+
+            if (group.minSelect > 0 && selectedOptIds.length < requiredMin) {
+              throw new BadRequestException(`Debes seleccionar al menos ${requiredMin} opción(es) para "${group.name}"`);
+            }
+            if (group.maxSelect > 0 && selectedOptIds.length > requiredMax) {
+              throw new BadRequestException(`Puedes seleccionar como máximo ${requiredMax} opción(es) para "${group.name}"`);
+            }
+
+            if (group.options) {
+              for (const opt of group.options) {
+                const optCount = selectedOptIds.filter((id) => id === opt.id).length;
+                if (optCount > 0) {
+                  if (opt.minQuantity > 0 && optCount < opt.minQuantity) {
+                    throw new BadRequestException(`Debes seleccionar al menos ${opt.minQuantity} de "${opt.name}"`);
+                  }
+                  if (opt.maxQuantity > 0 && optCount > opt.maxQuantity) {
+                    throw new BadRequestException(`Puedes seleccionar como máximo ${opt.maxQuantity} de "${opt.name}"`);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        let customizationExtra = 0;
+        if (itemDto.selectedOptions && item.customizationGroupsRel) {
+          for (const [groupId, optionIds] of Object.entries(itemDto.selectedOptions)) {
+            const group = item.customizationGroupsRel.find((g) => g.id === groupId);
+            if (group && group.options) {
+              const optionCounts: Record<string, number> = {};
+              for (const optId of optionIds) {
+                optionCounts[optId] = (optionCounts[optId] || 0) + 1;
+              }
+
+              for (const [optId, selectedQty] of Object.entries(optionCounts)) {
+                const opt = group.options.find((o) => o.id === optId);
+                if (opt) {
+                  const defaultQty = opt.defaultQuantity || 0;
+                  const chargeableQty = Math.max(0, selectedQty - (defaultQty * itemDto.quantity));
+                  customizationExtra += chargeableQty * parseFloat(opt.price.toString() || '0');
+                }
+              }
+            }
+          }
+        }
+
+        const basePrice = item.discountPrice
+          ? parseFloat(item.discountPrice.toString())
+          : parseFloat(item.price.toString());
+
+        const totalLinePrice = basePrice * itemDto.quantity + customizationExtra;
+        const priceAtOrder = itemDto.quantity > 0 ? totalLinePrice / itemDto.quantity : totalLinePrice;
+
+        subtotal = Math.round((subtotal + totalLinePrice) * 100) / 100;
+
+        const orderItem = queryRunner.manager.create(OrderItem, {
+          item,
+          title: item.title,
+          quantity: itemDto.quantity,
+          price: priceAtOrder,
+          selectedOptions: itemDto.selectedOptions,
+        });
+        orderItemsToSave.push(orderItem);
+      }
+
+      // 5. Cargo por pagos parciales
+      let feeAmount = 0;
+      const isPartialPayment = orderDto.isPartialPayment || false;
+      if (isPartialPayment) {
+        if (!store.allowPartialPayments) {
+          throw new BadRequestException('Esta tienda no admite pagos parciales');
+        }
+
+        const requestedValue = orderDto.installmentIntervalValue;
+        const requestedUnit = orderDto.installmentIntervalUnit;
+
+        if (store.installmentFrequencyOptions && store.installmentFrequencyOptions.length > 0) {
+          if (!requestedValue || !requestedUnit) {
+            throw new BadRequestException('Debes seleccionar una frecuencia de pago para el pago parcial');
+          }
+
+          const isValidFrequency = store.installmentFrequencyOptions.some(
+            (opt) => opt.value === requestedValue && opt.unit === requestedUnit,
+          );
+
+          if (!isValidFrequency) {
+            throw new BadRequestException('La frecuencia de pago seleccionada no está disponible para esta tienda');
+          }
+        } else {
+          if (requestedValue !== undefined && requestedValue !== store.installmentIntervalValue) {
+            throw new BadRequestException('La frecuencia de pago seleccionada no coincide con la configuración de la tienda');
+          }
+          if (requestedUnit !== undefined && requestedUnit !== store.installmentIntervalUnit) {
+            throw new BadRequestException('La frecuencia de pago seleccionada no coincide con la configuración de la tienda');
+          }
+        }
+
+        const feePercent = parseFloat(store.partialPaymentsFeePercentage.toString());
+        feeAmount = Math.round(((subtotal * feePercent) / 100) * 100) / 100;
+      }
+
+      const finalAmount = Math.round((subtotal + feeAmount) * 100) / 100;
+
+      // 6. Crear Orden
+      const order = queryRunner.manager.create(Order, {
+        store,
+        user,
+        totalAmount: subtotal,
+        feeAmount,
+        finalAmount,
+        balance: finalAmount,
+        isPartialPayment,
+        status: OrderStatus.PENDING,
+      });
+
+      if (isPartialPayment) {
+        const intervalValue = orderDto.installmentIntervalValue || store.installmentIntervalValue || 7;
+        const intervalUnit = orderDto.installmentIntervalUnit || store.installmentIntervalUnit || InstallmentPeriod.DAYS;
+
+        order.installmentIntervalValue = intervalValue;
+        order.installmentIntervalUnit = intervalUnit;
+
+        const nextDate = new Date();
+        if (intervalUnit === InstallmentPeriod.DAYS) {
+          nextDate.setDate(nextDate.getDate() + intervalValue);
+        } else if (intervalUnit === InstallmentPeriod.WEEKS) {
+          nextDate.setDate(nextDate.getDate() + (intervalValue * 7));
+        } else if (intervalUnit === InstallmentPeriod.MONTHS) {
+          nextDate.setMonth(nextDate.getMonth() + intervalValue);
+        }
+        order.nextDueDate = nextDate;
+        order.remainingBalance = finalAmount;
+        order.totalPaidAmount = 0;
+        order.isFullyPaid = false;
+      }
+
+      const savedOrder = await queryRunner.manager.save(order);
+
+      // 7. Guardar ítems de orden
+      for (const oi of orderItemsToSave) {
+        oi.order = savedOrder;
+        await queryRunner.manager.save(oi);
+      }
+
+      // 8. Cuotas
+      if (isPartialPayment) {
+        const maxInstallments = parseInt(store.maxInstallments?.toString() || '1');
+        const minInitialPercent = parseFloat(store.minInitialPaymentPercentage?.toString() || '0');
+
+        const initialAmount = Math.round(((finalAmount * minInitialPercent) / 100) * 100) / 100;
+
+        // [Fix 1] Validar que el monto del pago inicial cubra el mínimo requerido por la tienda
+        const incomingAmountForValidation = parseFloat(paymentDto.amount.toString());
+        const incomingCents = Math.round(incomingAmountForValidation * 100);
+        const initialAmountCents = Math.round(initialAmount * 100);
+
+        if (incomingCents < initialAmountCents - 1) {
+          throw new BadRequestException(
+            `El pago inicial ($${incomingAmountForValidation.toFixed(2)}) es menor al mínimo requerido (${initialAmount.toFixed(2)}) — ${minInitialPercent}% de ${finalAmount.toFixed(2)}`,
+          );
+        }
+
+        const remainingAmount = finalAmount - initialAmount;
+        const otherInstallmentsCount = maxInstallments - 1;
+        const monthlyAmount = otherInstallmentsCount > 0
+          ? Math.round((remainingAmount / otherInstallmentsCount) * 100) / 100
+          : 0;
+
+        const installmentsToSave: Installment[] = [];
+        const now = new Date();
+
+        installmentsToSave.push(queryRunner.manager.create(Installment, {
+          order: savedOrder,
+          amount: initialAmount,
+          dueDate: now,
+          status: InstallmentStatus.PENDING,
+        }));
+
+        for (let i = 1; i < maxInstallments; i++) {
+          const dueDate = new Date();
+          const offset = i * (order.installmentIntervalValue || 1);
+
+          if (order.installmentIntervalUnit === InstallmentPeriod.DAYS) {
+            dueDate.setDate(now.getDate() + offset);
+          } else if (order.installmentIntervalUnit === InstallmentPeriod.WEEKS) {
+            dueDate.setDate(now.getDate() + (offset * 7));
+          } else if (order.installmentIntervalUnit === InstallmentPeriod.MONTHS) {
+            dueDate.setMonth(now.getMonth() + offset);
+          }
+
+          installmentsToSave.push(queryRunner.manager.create(Installment, {
+            order: savedOrder,
+            amount: monthlyAmount,
+            dueDate: dueDate,
+            status: InstallmentStatus.PENDING,
+          }));
+        }
+
+        await queryRunner.manager.save(installmentsToSave);
+      }
+
+      // 9. Validar y crear el Pago
+      const incomingAmount = parseFloat(paymentDto.amount.toString());
+      if (incomingAmount > finalAmount + 0.01) {
+        throw new BadRequestException(`El monto del pago excede el balance de la orden ($${finalAmount})`);
+      }
+
+      if (paymentDto.reference) {
+        const existingPayment = await queryRunner.manager.findOne(Payment, {
+          where: {
+            reference: paymentDto.reference,
+            store: { id: orderDto.storeId },
+          },
+        });
+        if (existingPayment) {
+          throw new BadRequestException(`La referencia bancaria "${paymentDto.reference}" ya ha sido utilizada en esta tienda.`);
+        }
+      }
+
+      const payment = queryRunner.manager.create(Payment, {
+        ...paymentDto,
+        order: savedOrder,
+        user,
+        store,
+        status: PaymentStatus.WAITING_VERIFICATION,
+      });
+
+      const savedPayment = await queryRunner.manager.save(payment);
+
+      // Confirmar transacción
+      await queryRunner.commitTransaction();
+
+      // Enviar correo de "Pago Bajo Revisión" de forma asíncrona
+      const fullOrder = await queryRunner.manager.findOne(Order, {
+        where: { id: savedOrder.id },
+        relations: ['user', 'store', 'orderItems'],
+      });
+      if (fullOrder) {
+        this.mailService.sendSinglePaymentUnderReview(fullOrder, incomingAmount).catch(err =>
+          this.logger.error(`Error sending payment under review email: ${err.message}`)
+        );
+      }
+
+      // Notificar al dueño del comercio que hay un reporte
+      try {
+        const ownerId = store.owner?.id || store.company?.owner?.id;
+        if (ownerId) {
+          const totalItems = orderItemsToSave.length;
+          const firstItem = orderItemsToSave[0]?.title || 'un producto';
+          const additionalCount = totalItems - 1;
+          const itemSuffix = additionalCount > 0
+            ? ` y ${additionalCount} artículo${additionalCount > 1 ? 's' : ''} más`
+            : '';
+          const storeName = store.name;
+
+          await this.notificationService.create({
+            userId: ownerId,
+            title: `¡Nueva Orden: ${firstItem}${itemSuffix}!`,
+            body: `Se ha reportado un pago por '${firstItem}${itemSuffix}' en '${storeName}' por $${paymentDto.amount}.`,
+            type: NotificationType.PAYMENT_REPORTED,
+            targetId: savedOrder.id,
+          });
+        }
+      } catch (notifyError) {
+        // Silencioso
+      }
+
+      return savedPayment;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }

@@ -136,3 +136,123 @@ export function getPaymentReminderTemplate(
     </div>
   `;
 }
+
+export function getSinglePaymentUnderReviewTemplate(
+  customerName: string,
+  orderId: string,
+  storeName: string,
+  items: { title: string; quantity: number; price: number }[],
+  amount: number,
+): string {
+  const itemsHtml = items.map(item => `
+    <tr>
+      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #475569; font-size: 14px;">${item.title} (x${item.quantity})</td>
+      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #1E293B; font-weight: 600; text-align: right; font-size: 14px;">$${(item.price * item.quantity).toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 600px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FFF3C7; color: #D97706; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600; text-transform: uppercase;">Pago Bajo Revisión ⌛</span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; text-align: center;">Hola, ${customerName}</h2>
+      <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
+        Hemos recibido tu reporte de pago por la compra en <strong>${storeName}</strong> (#${orderId}). Tu pago está en proceso de verificación por parte del comercio.
+      </p>
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 18px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; font-size: 12px; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em;">Monto Reportado</p>
+        <p style="margin: 4px 0 0; font-size: 24px; font-weight: 800; color: #4F46E5;">$${amount.toFixed(2)}</p>
+      </div>
+
+      <h3 style="color: #1E293B; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px;">Resumen del Pedido</h3>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+        <thead>
+          <tr style="background-color: #F8FAFC;">
+            <th style="text-align: left; padding: 12px; color: #64748B; font-size: 11px; text-transform: uppercase;">Producto</th>
+            <th style="text-align: right; padding: 12px; color: #64748B; font-size: 11px; text-transform: uppercase;">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml}
+        </tbody>
+      </table>
+
+      <div style="background-color: #EFF6FF; border: 1px solid #DBEAFE; padding: 16px; border-radius: 12px; margin-bottom: 24px;">
+        <p style="margin: 0; color: #1E40AF; font-size: 13px; line-height: 1.5; text-align: center;">
+          <strong>¿Qué pasa ahora?</strong> Tan pronto como la tienda valide la transferencia/pago móvil de tu banco, recibirás un correo de confirmación de aprobación.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+    </div>
+  `;
+}
+
+export function getPaymentApprovedTemplate(
+  customerName: string,
+  orderId: string,
+  storeName: string,
+  amount: number,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #DCFCE7; color: #15803D; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600; text-transform: uppercase;">¡Compra Aprobada! 🎉</span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; text-align: center;">¡Buenas noticias, ${customerName}!</h2>
+      <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
+        Tu pago de <strong>$${amount.toFixed(2)}</strong> para la orden #${orderId} en <strong>${storeName}</strong> ha sido aprobado y validado con éxito.
+      </p>
+
+      <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; padding: 18px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; font-size: 13px; color: #16A34A; font-weight: 600;">Estado de la orden: Procesando / Preparada</p>
+      </div>
+
+      <p style="color: #64748B; font-size: 14px; line-height: 1.5; text-align: center; margin-bottom: 28px;">
+        El comercio ya está trabajando en tu pedido. Puedes hacerle seguimiento directamente desde la sección "Mis Órdenes" en la aplicación móvil.
+      </p>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+    </div>
+  `;
+}
+
+export function getPaymentRejectedTemplate(
+  customerName: string,
+  orderId: string,
+  storeName: string,
+  amount: number,
+  rejectionReason?: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FEE2E2; color: #B91C1C; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600; text-transform: uppercase;">Pago Rechazado ⚠️</span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 20px; font-weight: 700; margin-top: 0; text-align: center;">Hola, ${customerName}</h2>
+      <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
+        El comercio de <strong>${storeName}</strong> ha rechazado tu reporte de pago por <strong>$${amount.toFixed(2)}</strong> de la orden #${orderId}.
+      </p>
+
+      ${rejectionReason ? `
+      <div style="background-color: #FFF1F2; border: 1px solid #FECDD3; padding: 18px; border-radius: 12px; margin-bottom: 24px;">
+        <p style="margin: 0 0 4px; font-size: 12px; color: #E11D48; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em;">Motivo del Rechazo:</p>
+        <p style="margin: 0; font-size: 14px; color: #9F1239; line-height: 1.5; font-weight: 500;">"${rejectionReason}"</p>
+      </div>
+      ` : ''}
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; color: #475569; font-size: 13px; line-height: 1.5;">
+          <strong>¿Qué debes hacer ahora?</strong> Por favor, ingresa a la aplicación móvil, ve a los detalles de tu orden y vuelve a reportar el pago con la referencia y el comprobante correctos.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+    </div>
+  `;
+}

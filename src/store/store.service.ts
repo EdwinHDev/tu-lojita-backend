@@ -294,6 +294,29 @@ export class StoreService {
       );
     }
 
+    // Validación de reglas de negocio para pagos parciales
+    const allowPartialPayments = updateDetails.allowPartialPayments !== undefined 
+      ? updateDetails.allowPartialPayments 
+      : store.allowPartialPayments;
+
+    if (allowPartialPayments) {
+      const maxInstallments = updateDetails.maxInstallments !== undefined
+        ? updateDetails.maxInstallments
+        : store.maxInstallments;
+
+      if (maxInstallments < 2 || maxInstallments > 12) {
+        throw new BadRequestException('El número de cuotas para pagos parciales debe estar entre 2 y 12');
+      }
+
+      const frequencyOptions = updateDetails.installmentFrequencyOptions !== undefined
+        ? updateDetails.installmentFrequencyOptions
+        : store.installmentFrequencyOptions;
+
+      if (!frequencyOptions || frequencyOptions.length === 0) {
+        throw new BadRequestException('Debe seleccionar al menos una frecuencia de cuotas para habilitar los pagos parciales');
+      }
+    }
+
     if (companyId !== undefined) {
       if (companyId) {
         const company = await this.companyRepository.findOneBy({

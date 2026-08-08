@@ -22,8 +22,6 @@ export class CustomizationGroup {
   @Column('int', { default: 0 })
   maxSelect: number;
 
-  @Column('boolean', { default: false })
-  allowOptionQuantity: boolean;
 
   @ManyToOne(() => Item, (item) => item.customizationGroupsRel, {
     onDelete: 'CASCADE',

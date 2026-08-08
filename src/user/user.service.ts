@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -7,6 +7,8 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from './entities/user.entity';
 import { Company } from 'src/company/entities/company.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { AppOrigin } from 'src/auth/types/app-origin.enum';
+import { UserRole } from './types/user-role.enum';
 
 @Injectable()
 export class UserService {
@@ -20,7 +22,30 @@ export class UserService {
   ) {}
 
   async create(createUserDto: CreateUserDto) {
-    const { companyId, storeId, ...userDetails } = createUserDto;
+    const { companyId, storeId, appOrigin, ...userDetails } = createUserDto;
+
+    const existingUser = await this.userRepository.findOne({ where: { email: userDetails.email } });
+
+    if (existingUser) {
+      if (appOrigin === AppOrigin.CLIENT || appOrigin === AppOrigin.SELLER) {
+        throw new BadRequestException('El correo ya está en uso.');
+      }
+      if (appOrigin === AppOrigin.BUSINESS) {
+        if (existingUser.role === UserRole.VENDOR) {
+          existingUser.role = UserRole.COMPANY;
+        } else {
+          throw new BadRequestException('El correo ya está registrado y no es elegible para esta aplicación.');
+        }
+      }
+    } else {
+      if (appOrigin === AppOrigin.BUSINESS) {
+        throw new BadRequestException('Debes registrarte primero en la aplicación de Sellers.');
+      }
+      if (!userDetails.role) {
+        if (appOrigin === AppOrigin.CLIENT) userDetails.role = UserRole.USER;
+        if (appOrigin === AppOrigin.SELLER) userDetails.role = UserRole.VENDOR;
+      }
+    }
 
     let company: Company | undefined;
     if (companyId) {
@@ -39,6 +64,13 @@ export class UserService {
         (await this.storeRepository.findOneBy({ id: storeId })) ?? undefined;
       if (!store)
         throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
+    }
+
+    if (existingUser) {
+      if (company) existingUser.company = company;
+      if (store) existingUser.store = store;
+      this.userRepository.merge(existingUser, userDetails);
+      return await this.userRepository.save(existingUser);
     }
 
     const user = this.userRepository.create({

@@ -1,13 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Repository } from 'typeorm';
+import { LessThan, Repository, Not } from 'typeorm';
 import { Installment } from '../entities/installment.entity';
-import { InstallmentStatus } from '../types';
+import { InstallmentStatus, ExtensionStatus, OrderStatus } from '../types';
 import { MailService } from 'src/common/mail/mail.service';
 import { Order } from '../entities/order.entity';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
+import { getStartOfTodayInTimezone } from 'src/common/utils/timezone.utils';
+
 
 @Injectable()
 export class DebtCollectionCron {
@@ -27,13 +29,16 @@ export class DebtCollectionCron {
   @Cron('0 0 * * *', { timeZone: 'America/Caracas' }) // Corre a la medianoche hora de Venezuela
   async handleLateFees() {
     this.logger.log('Running daily debt collection job...');
-    const now = new Date();
+    const startOfToday = getStartOfTodayInTimezone(new Date(), 'America/Caracas');
 
-    // 1. Encontrar cuotas vencidas que siguen pendientes
+    // 1. Encontrar cuotas vencidas que siguen pendientes (y no tienen prórroga pendiente)
     const overdueInstallments = await this.installmentRepository.find({
       where: {
-        dueDate: LessThan(now),
+        dueDate: LessThan(startOfToday),
         status: InstallmentStatus.PENDING,
+        extensionStatus: Not(ExtensionStatus.PENDING),
+        // [Fix 3] Solo aplicar moras a cuotas de órdenes activas (con al menos un pago aprobado)
+        order: { status: Not(OrderStatus.PENDING) },
       },
       relations: ['order', 'order.user', 'order.store', 'order.orderItems', 'order.orderItems.item'],
     });
@@ -44,9 +49,10 @@ export class DebtCollectionCron {
       // Calcular multa basada en el primer item de la orden (como referencia de configuración)
       // En una versión más compleja, se podría promediar o tomar el máximo lateFeePercentage
       const lateFeePercent = parseFloat(order.orderItems[0]?.item?.lateFeePercentage?.toString() || '0');
+      const unpaidPortion = parseFloat(installment.amount.toString()) - parseFloat((installment.paidAmount || 0).toString());
       
-      if (lateFeePercent > 0) {
-        const feeAmount = Math.round(((installment.amount * lateFeePercent) / 100) * 100) / 100;
+      if (lateFeePercent > 0 && unpaidPortion > 0) {
+        const feeAmount = Math.round(((unpaidPortion * lateFeePercent) / 100) * 100) / 100;
         
         installment.lateFeeApplied = parseFloat(installment.lateFeeApplied.toString()) + feeAmount;
         installment.status = InstallmentStatus.OVERDUE;
