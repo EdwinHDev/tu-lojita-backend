@@ -12,6 +12,7 @@ import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ValidateCartDto } from './dto/validate-cart.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { ManualPaymentDto } from './dto/manual-payment.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/user/entities/user.entity';
@@ -99,7 +100,12 @@ export class OrderController {
     @Body('reason') reason: string,
     @GetUser() user: User,
   ) {
-    return this.orderService.requestExtension(id, requestedDays, reason, user.id);
+    return this.orderService.requestExtension(
+      id,
+      requestedDays,
+      reason,
+      user.id,
+    );
   }
 
   @Post('installment/:id/verify-extension')
@@ -109,7 +115,12 @@ export class OrderController {
     @Body('merchantComment') merchantComment: string,
     @GetUser() user: User,
   ) {
-    return this.orderService.verifyExtension(id, status, merchantComment, user.id);
+    return this.orderService.verifyExtension(
+      id,
+      status,
+      merchantComment,
+      user.id,
+    );
   }
 
   @Get('user/installments/calendar')
@@ -126,11 +137,21 @@ export class OrderController {
   }
 
   @Get(':id/statement')
-  getOrderStatement(
+  getOrderStatement(@Param('id') id: string, @GetUser() user: User) {
+    return this.orderService.getOrderStatement(id, user.id, user.role);
+  }
+
+  @Post(':id/manual-payment')
+  registerManualPayment(
     @Param('id') id: string,
+    @Body() manualPaymentDto: ManualPaymentDto,
     @GetUser() user: User,
   ) {
-    return this.orderService.getOrderStatement(id, user.id, user.role);
+    return this.orderService.registerManualPayment(
+      id,
+      manualPaymentDto,
+      user.id,
+    );
   }
 
   @Delete(':id')

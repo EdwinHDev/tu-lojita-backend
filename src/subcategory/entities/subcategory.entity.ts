@@ -33,6 +33,4 @@ export class Subcategory extends TimestampEntity {
 
   @OneToMany(() => Store, (store) => store.subcategory)
   stores: Store[];
-
-
 }

@@ -20,6 +20,9 @@ import { NotificationModule } from './notification/notification.module';
 import { BankModule } from './bank/bank.module';
 import { StorePaymentMethodModule } from './store-payment-method/store-payment-method.module';
 import { MailModule } from './common/mail/mail.module';
+import { CommissionModule } from './commission/commission.module';
+import { SubscriptionModule } from './subscription/subscription.module';
+import { FinancialAuthModule } from './financial-auth/financial-auth.module';
 
 @Module({
   imports: [
@@ -33,6 +36,9 @@ import { MailModule } from './common/mail/mail.module';
           user: envs.emailUser,
           pass: envs.emailPass,
         },
+      },
+      defaults: {
+        from: envs.emailFrom,
       },
     }),
     TypeOrmModule.forRoot({
@@ -62,8 +68,11 @@ import { MailModule } from './common/mail/mail.module';
     BankModule,
     StorePaymentMethodModule,
     MailModule,
+    CommissionModule,
+    SubscriptionModule,
+    FinancialAuthModule,
   ],
   controllers: [],
   providers: [],
 })
-export class AppModule { }
+export class AppModule {}

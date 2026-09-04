@@ -40,16 +40,29 @@ export class NotificationGateway
     try {
       const token = this.extractToken(client);
       if (!token) {
-        this.logger.warn(`Client ${client.id} connected without token, disconnecting...`);
+        this.logger.warn(
+          `Client ${client.id} connected without token, disconnecting...`,
+        );
+        client.emit('auth_error', { reason: 'MISSING_TOKEN' });
         client.disconnect();
         return;
       }
-      const payload = await this.jwtService.verifyAsync(token, { secret: envs.jwtSecret });
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: envs.jwtSecret,
+      });
       const userId = payload.sub;
       client.join(`user_${userId}`);
-      this.logger.log(`Client ${client.id} (User: ${userId}) connected → room user_${userId}`);
+      this.logger.log(
+        `Client ${client.id} (User: ${userId}) connected → room user_${userId}`,
+      );
     } catch (error) {
-      this.logger.error(`Auth failed for client ${client.id}: ${error.message}`);
+      this.logger.error(
+        `Auth failed for client ${client.id}: ${error.message}`,
+      );
+      client.emit('auth_error', {
+        reason: 'JWT_EXPIRED',
+        message: error.message,
+      });
       client.disconnect();
     }
   }
@@ -77,21 +90,34 @@ export class NotificationGateway
     try {
       const token = this.extractToken(client);
       if (token) {
-        const payload = await this.jwtService.verifyAsync(token, { secret: envs.jwtSecret });
-        await this.notificationService.markMessagesDelivered(data.orderId, payload.sub);
+        const payload = await this.jwtService.verifyAsync(token, {
+          secret: envs.jwtSecret,
+        });
+        await this.notificationService.markMessagesDelivered(
+          data.orderId,
+          payload.sub,
+        );
       }
     } catch (e) {
       this.logger.error(`Error marking delivered on join: ${e.message}`);
     }
 
     // 3. Notificar al cliente si el chat no está permitido o la orden está cerrada
-    const chatStatus = await this.notificationService.checkChatStatusForOrder(data.orderId);
+    const chatStatus = await this.notificationService.checkChatStatusForOrder(
+      data.orderId,
+    );
     if (!chatStatus.allowed) {
       if (chatStatus.reason === 'CHAT_DISABLED') {
-        client.emit('chat_closed', { orderId: data.orderId, reason: 'chat_disabled' });
+        client.emit('chat_closed', {
+          orderId: data.orderId,
+          reason: 'chat_disabled',
+        });
         client.leave(room);
       } else if (chatStatus.reason === 'CHAT_CLOSED') {
-        client.emit('chat_closed', { orderId: data.orderId, reason: 'resolved' });
+        client.emit('chat_closed', {
+          orderId: data.orderId,
+          reason: 'resolved',
+        });
       }
     }
   }
@@ -109,26 +135,38 @@ export class NotificationGateway
   @SubscribeMessage('send_message')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { orderId: string; content: string },
+    @MessageBody()
+    data: { orderId: string; content?: string; imageUrl?: string },
   ) {
     const token = this.extractToken(client);
     if (!token) {
+      client.emit('auth_error', { reason: 'MISSING_TOKEN' });
+      client.disconnect();
       return { success: false, error: 'INVALID_TOKEN' };
     }
 
     let userId: string;
     try {
-      const payload = await this.jwtService.verifyAsync(token, { secret: envs.jwtSecret });
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: envs.jwtSecret,
+      });
       userId = payload.sub;
     } catch (e) {
       this.logger.error(`Error verifying token in send_message: ${e.message}`);
+      client.emit('auth_error', { reason: 'JWT_EXPIRED', message: e.message });
+      client.disconnect();
       return { success: false, error: 'INVALID_TOKEN' };
     }
 
-    const chatStatus = await this.notificationService.checkChatStatusForOrder(data.orderId);
+    const chatStatus = await this.notificationService.checkChatStatusForOrder(
+      data.orderId,
+    );
     if (!chatStatus.allowed) {
       if (chatStatus.reason === 'CHAT_DISABLED') {
-        client.emit('chat_closed', { orderId: data.orderId, reason: 'chat_disabled' });
+        client.emit('chat_closed', {
+          orderId: data.orderId,
+          reason: 'chat_disabled',
+        });
         return { success: false, error: 'CHAT_DISABLED' };
       }
       client.emit('chat_closed', { orderId: data.orderId, reason: 'resolved' });
@@ -136,14 +174,22 @@ export class NotificationGateway
     }
 
     try {
-      const savedMessage = await this.notificationService.saveMessage(data.orderId, userId, data.content);
+      const savedMessage = await this.notificationService.saveMessage(
+        data.orderId,
+        userId,
+        data.content || '',
+        data.imageUrl,
+      );
       if (!savedMessage) {
         return { success: false, error: 'ORDER_NOT_FOUND' };
       }
       return {
         success: true,
         messageId: savedMessage.id,
-        createdAt: savedMessage.createdAt ? savedMessage.createdAt.toISOString() : new Date().toISOString(),
+        imageUrl: savedMessage.imageUrl,
+        createdAt: savedMessage.createdAt
+          ? savedMessage.createdAt.toISOString()
+          : new Date().toISOString(),
       };
     } catch (e) {
       this.logger.error(`Error in send_message: ${e.message}`);
@@ -159,7 +205,9 @@ export class NotificationGateway
     try {
       const token = this.extractToken(client);
       if (!token) return;
-      const payload = await this.jwtService.verifyAsync(token, { secret: envs.jwtSecret });
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: envs.jwtSecret,
+      });
       const room = `order_chat_${data.orderId}`;
       // broadcast a todos en la sala EXCEPTO al emisor
       client.to(room).emit('typing', {
@@ -180,8 +228,13 @@ export class NotificationGateway
     const token = this.extractToken(client);
     if (!token) return;
     try {
-      const payload = await this.jwtService.verifyAsync(token, { secret: envs.jwtSecret });
-      await this.notificationService.markMessagesRead(data.orderId, payload.sub);
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: envs.jwtSecret,
+      });
+      await this.notificationService.markMessagesRead(
+        data.orderId,
+        payload.sub,
+      );
     } catch (e) {
       this.logger.error(`Error in mark_messages_read: ${e.message}`);
     }
@@ -195,11 +248,36 @@ export class NotificationGateway
     const token = this.extractToken(client);
     if (!token) return;
     try {
-      const payload = await this.jwtService.verifyAsync(token, { secret: envs.jwtSecret });
-      await this.notificationService.markMessagesDelivered(data.orderId, payload.sub);
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: envs.jwtSecret,
+      });
+      await this.notificationService.markMessagesDelivered(
+        data.orderId,
+        payload.sub,
+      );
     } catch (e) {
       this.logger.error(`Error in mark_messages_delivered: ${e.message}`);
     }
+  }
+
+  @SubscribeMessage('join_store')
+  async handleJoinStore(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { storeId: string },
+  ) {
+    const room = `store_${data.storeId}`;
+    client.join(room);
+    this.logger.log(`Client ${client.id} joined ${room}`);
+  }
+
+  @SubscribeMessage('leave_store')
+  async handleLeaveStore(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { storeId: string },
+  ) {
+    const room = `store_${data.storeId}`;
+    client.leave(room);
+    this.logger.log(`Client ${client.id} left ${room}`);
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -223,6 +301,11 @@ export class NotificationGateway
   sendToUser(userId: string, event: string, data: any) {
     this.server.to(`user_${userId}`).emit(event, data);
     this.logger.log(`Event '${event}' → user_${userId}`);
+  }
+
+  sendToStore(storeId: string, event: string, data: any) {
+    this.server.to(`store_${storeId}`).emit(event, data);
+    this.logger.log(`Event '${event}' → store_${storeId}`);
   }
 
   sendToOrderRoom(orderId: string, event: string, data: any) {

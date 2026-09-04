@@ -44,8 +44,6 @@ export class Address extends TimestampEntity {
   })
   isActive: boolean;
 
-
-
   @ManyToOne(() => User, (user) => user.addresses)
   @JoinColumn({ name: 'user_id' })
   user: User;

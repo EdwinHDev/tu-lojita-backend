@@ -36,7 +36,7 @@ export class AuthService {
     private readonly userRepository: Repository<User>,
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
-  ) { }
+  ) {}
 
   async seedAdmin() {
     // 2.3 Strict check to throw ForbiddenException immediately if process.env.NODE_ENV === 'production'
@@ -78,11 +78,11 @@ export class AuthService {
     return {
       accessToken: this.jwtService.sign(payload, {
         secret: envs.jwtSecret,
-        expiresIn: '15m', // Tiempo de vida corto
+        expiresIn: '30d', // Tiempo de vida extendido para sesiones móviles
       }),
       refreshToken: this.jwtService.sign(payload, {
         secret: envs.jwtRefreshSecret,
-        expiresIn: '7d', // Tiempo de vida largo
+        expiresIn: '90d', // Tiempo de vida largo para sesiones móviles
       }),
     };
   }
@@ -128,22 +128,32 @@ export class AuthService {
 
     if (appOrigin === AppOrigin.CLIENT) {
       if (user.role === UserRole.VENDOR || user.role === UserRole.COMPANY) {
-        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+        throw new ForbiddenException(
+          'No puedes iniciar sesión con esta cuenta.',
+        );
       }
     } else if (appOrigin === AppOrigin.SELLER) {
       if (user.role === UserRole.USER) {
-        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+        throw new ForbiddenException(
+          'No puedes iniciar sesión con esta cuenta.',
+        );
       }
       if (user.role === UserRole.COMPANY) {
-        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+        throw new ForbiddenException(
+          'No puedes iniciar sesión con esta cuenta.',
+        );
       }
     } else if (appOrigin === AppOrigin.BUSINESS) {
       if (user.role === UserRole.USER || user.role === UserRole.VENDOR) {
-        throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+        throw new ForbiddenException(
+          'No puedes iniciar sesión con esta cuenta.',
+        );
       }
     } else if (appOrigin === AppOrigin.ADMIN) {
       if (user.role !== UserRole.ADMIN) {
-        throw new ForbiddenException('No tienes permisos de administrador para iniciar sesión aquí.');
+        throw new ForbiddenException(
+          'No tienes permisos de administrador para iniciar sesión aquí.',
+        );
       }
     }
 
@@ -350,18 +360,26 @@ export class AuthService {
       } else {
         if (authGoogleLoginDto.appOrigin === AppOrigin.CLIENT) {
           if (user.role === UserRole.VENDOR || user.role === UserRole.COMPANY) {
-            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+            throw new ForbiddenException(
+              'No puedes iniciar sesión con esta cuenta.',
+            );
           }
         } else if (authGoogleLoginDto.appOrigin === AppOrigin.SELLER) {
           if (user.role === UserRole.USER) {
-            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+            throw new ForbiddenException(
+              'No puedes iniciar sesión con esta cuenta.',
+            );
           }
           if (user.role === UserRole.COMPANY) {
-            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+            throw new ForbiddenException(
+              'No puedes iniciar sesión con esta cuenta.',
+            );
           }
         } else if (authGoogleLoginDto.appOrigin === AppOrigin.BUSINESS) {
           if (user.role === UserRole.USER) {
-            throw new ForbiddenException('No puedes iniciar sesión con esta cuenta.');
+            throw new ForbiddenException(
+              'No puedes iniciar sesión con esta cuenta.',
+            );
           }
           if (user.role === UserRole.VENDOR) {
             // Upgrade to COMPANY
@@ -392,7 +410,10 @@ export class AuthService {
         ...tokens,
       };
     } catch (error) {
-      if (error instanceof ForbiddenException || error instanceof UnauthorizedException) {
+      if (
+        error instanceof ForbiddenException ||
+        error instanceof UnauthorizedException
+      ) {
         throw error;
       }
       this.logger.error(

@@ -1,9 +1,4 @@
-import {
-  PrimaryGeneratedColumn,
-  Column,
-  Entity,
-  OneToMany,
-} from 'typeorm';
+import { PrimaryGeneratedColumn, Column, Entity, OneToMany } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
@@ -28,6 +23,4 @@ export class Category extends TimestampEntity {
   // Relación con Subcategorías
   @OneToMany(() => Subcategory, (subcategory) => subcategory.category)
   subcategories: Subcategory[];
-
-
 }

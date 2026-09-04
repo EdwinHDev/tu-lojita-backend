@@ -23,6 +23,10 @@ export class ValidateCartItemDto {
   @Min(1, { message: 'La cantidad mínima por item es 1' })
   quantity: number;
 
+  @IsNumber({}, { message: 'El precio debe ser un número válido' })
+  @IsOptional()
+  priceAtCart?: number;
+
   @IsOptional()
   selectedOptions?: Record<string, string[]>;
 }
@@ -47,7 +51,9 @@ export class ValidateCartDto {
   @IsOptional()
   installmentIntervalValue?: number;
 
-  @IsEnum(InstallmentPeriod, { message: 'La unidad del intervalo no es válida' })
+  @IsEnum(InstallmentPeriod, {
+    message: 'La unidad del intervalo no es válida',
+  })
   @IsOptional()
   installmentIntervalUnit?: InstallmentPeriod;
 }

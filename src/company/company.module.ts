@@ -10,8 +10,21 @@ import { Store } from 'src/store/entities/store.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { Item } from 'src/item/entities/item.entity';
 
+import { Payment } from 'src/payment/entities/payment.entity';
+import { OrderItem } from 'src/order-item/entities/order-item.entity';
+
 @Module({
-  imports: [TypeOrmModule.forFeature([Company, User, Store, Order, Item])],
+  imports: [
+    TypeOrmModule.forFeature([
+      Company,
+      User,
+      Store,
+      Order,
+      Item,
+      Payment,
+      OrderItem,
+    ]),
+  ],
   controllers: [CompanyController, CompanyDashboardController],
   providers: [CompanyService, CompanyDashboardService],
 })

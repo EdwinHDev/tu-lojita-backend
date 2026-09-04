@@ -161,5 +161,4 @@ export class Item extends TimestampEntity {
     onDelete: 'SET NULL',
   })
   category: StoreCategory;
-
 }

@@ -119,10 +119,20 @@ export class Store extends TimestampEntity {
   installmentIntervalUnit: InstallmentPeriod;
 
   @Column('jsonb', { nullable: true })
-  installmentFrequencyOptions?: { value: number; unit: InstallmentPeriod; label: string }[];
+  installmentFrequencyOptions?: {
+    value: number;
+    unit: InstallmentPeriod;
+    label: string;
+  }[];
 
   @Column('boolean', { default: false })
   allowInstallmentExtensions: boolean;
+
+  @Column('boolean', { default: false })
+  isCommissionExempt: boolean;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  accumulatedCommissionDebt: number;
 
   @Column('int', { default: 7, nullable: true })
   maxExtensionDays: number;

@@ -8,7 +8,10 @@ import {
   Delete,
 } from '@nestjs/common';
 import { StorePaymentMethodService } from './store-payment-method.service';
-import { CreateStorePaymentMethodDto, UpdateStorePaymentMethodDto } from './dto/create-store-payment-method.dto';
+import {
+  CreateStorePaymentMethodDto,
+  UpdateStorePaymentMethodDto,
+} from './dto/create-store-payment-method.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/user/entities/user.entity';

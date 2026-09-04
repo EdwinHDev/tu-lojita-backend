@@ -114,8 +114,13 @@ export class CreateItemDto {
   @IsOptional()
   isActive?: boolean;
 
-  @IsNumber({}, { message: 'El porcentaje de recargo por mora debe ser un número válido' })
-  @Min(0, { message: 'El porcentaje de recargo por mora no puede ser negativo' })
+  @IsNumber(
+    {},
+    { message: 'El porcentaje de recargo por mora debe ser un número válido' },
+  )
+  @Min(0, {
+    message: 'El porcentaje de recargo por mora no puede ser negativo',
+  })
   @IsOptional()
   lateFeePercentage?: number;
 }

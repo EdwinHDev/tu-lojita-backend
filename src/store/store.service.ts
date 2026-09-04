@@ -6,10 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Like, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { Store } from './entities/store.entity';
+import { StoreStatus } from './types/status.enum';
 import { StoreAddress } from 'src/store-address/entities/store-address.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 import { Company } from 'src/company/entities/company.entity';
@@ -22,7 +23,10 @@ import { Item } from 'src/item/entities/item.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { OrderStatus } from 'src/order/types';
 import { StoreDashboardDto } from './dto/store-dashboard.dto';
-import { getStartOfTodayInTimezone, formatTimeInTimezone } from 'src/common/utils/timezone.utils';
+import {
+  getStartOfTodayInTimezone,
+  formatTimeInTimezone,
+} from 'src/common/utils/timezone.utils';
 
 @Injectable()
 export class StoreService {
@@ -44,7 +48,7 @@ export class StoreService {
     @InjectRepository(StoreCategory)
     private readonly storeCategoryRepository: Repository<StoreCategory>,
     private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   async create(createStoreDto: CreateStoreDto, user: User) {
     const { companyId, subCategoryId, mainAddress, ...storeDetails } =
@@ -165,6 +169,11 @@ export class StoreService {
         .addGroupBy('address.id');
     }
 
+    // Filtro estricto: Solo tiendas activas en consultas públicas de catálogo
+    queryBuilder.andWhere('store.status = :activeStatus', {
+      activeStatus: StoreStatus.ACTIVE,
+    });
+
     // Filtros
     if (subCategoryId)
       queryBuilder.andWhere('subCategory.id = :subCategoryId', {
@@ -196,7 +205,10 @@ export class StoreService {
         .innerJoin('store.items', 'item')
         .leftJoin('store.subcategory', 'subCategory')
         .leftJoin('subCategory.category', 'category')
-        .leftJoin('store.addresses', 'address');
+        .leftJoin('store.addresses', 'address')
+        .andWhere('store.status = :activeStatus', {
+          activeStatus: StoreStatus.ACTIVE,
+        });
 
       // Aplicamos los mismos filtros
       if (subCategoryId)
@@ -295,25 +307,32 @@ export class StoreService {
     }
 
     // Validación de reglas de negocio para pagos parciales
-    const allowPartialPayments = updateDetails.allowPartialPayments !== undefined 
-      ? updateDetails.allowPartialPayments 
-      : store.allowPartialPayments;
+    const allowPartialPayments =
+      updateDetails.allowPartialPayments !== undefined
+        ? updateDetails.allowPartialPayments
+        : store.allowPartialPayments;
 
     if (allowPartialPayments) {
-      const maxInstallments = updateDetails.maxInstallments !== undefined
-        ? updateDetails.maxInstallments
-        : store.maxInstallments;
+      const maxInstallments =
+        updateDetails.maxInstallments !== undefined
+          ? updateDetails.maxInstallments
+          : store.maxInstallments;
 
       if (maxInstallments < 2 || maxInstallments > 12) {
-        throw new BadRequestException('El número de cuotas para pagos parciales debe estar entre 2 y 12');
+        throw new BadRequestException(
+          'El número de cuotas para pagos parciales debe estar entre 2 y 12',
+        );
       }
 
-      const frequencyOptions = updateDetails.installmentFrequencyOptions !== undefined
-        ? updateDetails.installmentFrequencyOptions
-        : store.installmentFrequencyOptions;
+      const frequencyOptions =
+        updateDetails.installmentFrequencyOptions !== undefined
+          ? updateDetails.installmentFrequencyOptions
+          : store.installmentFrequencyOptions;
 
       if (!frequencyOptions || frequencyOptions.length === 0) {
-        throw new BadRequestException('Debe seleccionar al menos una frecuencia de cuotas para habilitar los pagos parciales');
+        throw new BadRequestException(
+          'Debe seleccionar al menos una frecuencia de cuotas para habilitar los pagos parciales',
+        );
       }
     }
 
@@ -358,7 +377,9 @@ export class StoreService {
   }
 
   async getStoreDashboardData(storeId: string): Promise<StoreDashboardDto> {
-    const store = await this.storeRepository.findOne({ where: { id: storeId } });
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+    });
     const timezone = store?.timezone || 'America/Caracas';
     const startOfToday = getStartOfTodayInTimezone(new Date(), timezone);
 

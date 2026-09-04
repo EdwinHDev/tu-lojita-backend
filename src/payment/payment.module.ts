@@ -7,11 +7,13 @@ import { Order } from 'src/order/entities/order.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { User } from 'src/user/entities/user.entity';
 import { NotificationModule } from 'src/notification/notification.module';
+import { CommissionModule } from 'src/commission/commission.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Payment, Order, Store, User]),
     NotificationModule,
+    CommissionModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService],

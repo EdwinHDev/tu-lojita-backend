@@ -1,9 +1,4 @@
-import {
-  Column,
-  Entity,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { PropertyType } from '../types/property-type.enum';
@@ -33,6 +28,4 @@ export class ItemPropertyTemplate extends TimestampEntity {
 
   @ManyToOne(() => StoreCategory, { onDelete: 'CASCADE' })
   category: StoreCategory;
-
-
 }

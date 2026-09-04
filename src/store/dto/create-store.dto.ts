@@ -88,7 +88,9 @@ export class CreateStoreDto {
   @Type(() => InstallmentFrequencyOptionDto)
   installmentFrequencyOptions?: InstallmentFrequencyOptionDto[];
 
-  @IsBoolean({ message: 'El campo allowInstallmentExtensions debe ser un booleano' })
+  @IsBoolean({
+    message: 'El campo allowInstallmentExtensions debe ser un booleano',
+  })
   @IsOptional()
   allowInstallmentExtensions?: boolean;
 

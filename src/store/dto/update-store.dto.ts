@@ -61,7 +61,9 @@ export class UpdateStoreDto extends PartialType(CreateStoreDto) {
   @IsOptional()
   installmentIntervalValue?: number;
 
-  @IsEnum(InstallmentPeriod, { message: 'El periodo de cuotas debe ser DAYS, WEEKS o MONTHS' })
+  @IsEnum(InstallmentPeriod, {
+    message: 'El periodo de cuotas debe ser DAYS, WEEKS o MONTHS',
+  })
   @IsOptional()
   installmentIntervalUnit?: InstallmentPeriod;
 
@@ -71,7 +73,9 @@ export class UpdateStoreDto extends PartialType(CreateStoreDto) {
   @Type(() => InstallmentFrequencyOptionDto)
   installmentFrequencyOptions?: InstallmentFrequencyOptionDto[];
 
-  @IsBoolean({ message: 'El campo allowInstallmentExtensions debe ser un booleano' })
+  @IsBoolean({
+    message: 'El campo allowInstallmentExtensions debe ser un booleano',
+  })
   @IsOptional()
   allowInstallmentExtensions?: boolean;
 

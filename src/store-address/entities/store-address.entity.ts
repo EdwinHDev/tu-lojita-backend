@@ -1,10 +1,5 @@
 import { Store } from 'src/store/entities/store.entity';
-import {
-  Column,
-  Entity,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 
 @Entity('store_addresses')
@@ -50,6 +45,4 @@ export class StoreAddress extends TimestampEntity {
 
   @ManyToOne(() => Store, (store) => store.addresses)
   store: Store;
-
-
 }

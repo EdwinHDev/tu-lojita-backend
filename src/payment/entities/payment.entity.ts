@@ -2,7 +2,6 @@ import {
   Column,
   Entity,
   ManyToOne,
-  OneToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
@@ -38,7 +37,11 @@ export class Payment extends TimestampEntity {
   @Column('text', { nullable: true })
   receiptImage: string;
 
+  @Column('text', { nullable: true })
+  rejectionReason: string | null;
 
+  @Column('int', { nullable: true })
+  installmentIndex: number | null;
 
   @ManyToOne(() => Store, (store) => store.payments)
   store: Store;

@@ -1,9 +1,4 @@
-import {
-  Column,
-  Entity,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Order } from 'src/order/entities/order.entity';
@@ -22,7 +17,8 @@ export class ChatMessage extends TimestampEntity {
   @Column('boolean', { default: false })
   isDelivered: boolean;
 
-
+  @Column('text', { nullable: true })
+  imageUrl?: string;
 
   @ManyToOne(() => User)
   sender: User;

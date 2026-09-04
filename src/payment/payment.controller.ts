@@ -17,6 +17,7 @@ import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/user/entities/user.entity';
 import { PaymentStatus } from './types';
 import { PaymentPaginationDto } from './dto/payment-pagination.dto';
+import { VerifyPaymentDto } from './dto/verify-payment.dto';
 
 @Auth()
 @Controller('payment')
@@ -34,16 +35,24 @@ export class PaymentController {
     @Body() createPaymentWithOrderDto: CreatePaymentWithOrderDto,
     @GetUser() user: User,
   ) {
-    return this.paymentService.createWithOrder(createPaymentWithOrderDto, user.id);
+    return this.paymentService.createWithOrder(
+      createPaymentWithOrderDto,
+      user.id,
+    );
   }
 
   @Post(':id/verify')
   verify(
     @Param('id') id: string,
-    @Body('status') status: PaymentStatus,
+    @Body() verifyPaymentDto: VerifyPaymentDto,
     @GetUser() user: User,
   ) {
-    return this.paymentService.verifyPayment(id, status, user.id);
+    return this.paymentService.verifyPayment(
+      id,
+      verifyPaymentDto.status,
+      user.id,
+      verifyPaymentDto.rejectionReason,
+    );
   }
 
   @Get()

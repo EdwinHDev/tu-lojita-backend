@@ -1,9 +1,4 @@
-import {
-  Column,
-  Entity,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Order } from './order.entity';
 import { InstallmentStatus, ExtensionStatus } from '../types';
@@ -17,13 +12,19 @@ export class Installment extends TimestampEntity {
   amount: number;
 
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  storePrincipalAmount: number;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  platformCommissionPortion: number;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
   paidAmount: number;
 
   @Column({ type: 'timestamptz', nullable: true })
   paymentDate?: Date | null;
 
-  @Column({ type: 'timestamptz' })
-  dueDate: Date;
+  @Column({ type: 'timestamptz', nullable: true })
+  dueDate?: Date | null;
 
   @Column({
     type: 'enum',
@@ -51,6 +52,8 @@ export class Installment extends TimestampEntity {
   @Column('text', { nullable: true })
   extensionMerchantComment?: string | null;
 
-  @ManyToOne(() => Order, (order) => order.installments, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Order, (order) => order.installments, {
+    onDelete: 'CASCADE',
+  })
   order: Order;
 }

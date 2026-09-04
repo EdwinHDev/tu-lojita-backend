@@ -31,6 +31,4 @@ export class StoreCategory extends TimestampEntity {
 
   @OneToMany(() => ItemPropertyTemplate, (template) => template.category)
   propertyTemplates: ItemPropertyTemplate[];
-
-
 }

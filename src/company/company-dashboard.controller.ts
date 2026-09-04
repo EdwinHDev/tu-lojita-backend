@@ -14,11 +14,28 @@ import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 import { RecentSalesResponseDto } from './dto/recent-sales.dto';
 import { StoresSummaryResponseDto } from './dto/stores-summary.dto';
 import { CompanyStoresResponseDto } from './dto/company-stores.dto';
+import {
+  DashboardAnalyticsQueryDto,
+  DashboardAnalyticsResponseDto,
+} from './dto/dashboard-analytics.dto';
 
 @Controller('companies/:companyId/dashboard')
 @Auth() // Requiere autenticación
 export class CompanyDashboardController {
   constructor(private readonly dashboardService: CompanyDashboardService) {}
+
+  /**
+   * GET /api/v1/companies/:companyId/dashboard/analytics
+   * Obtener analítica integral en tiempo real con filtros de período y sucursal
+   */
+  @Get('analytics')
+  async getAnalytics(
+    @Param('companyId') companyId: string,
+    @GetUser() user: User,
+    @Query() queryDto: DashboardAnalyticsQueryDto,
+  ): Promise<DashboardAnalyticsResponseDto> {
+    return this.dashboardService.getAnalytics(companyId, user.id, queryDto);
+  }
 
   /**
    * GET /api/v1/companies/:companyId/dashboard/stats

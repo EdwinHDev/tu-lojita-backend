@@ -33,7 +33,9 @@ export class CreateOrderDto {
   @IsOptional()
   installmentIntervalValue?: number;
 
-  @IsEnum(InstallmentPeriod, { message: 'La unidad del intervalo no es válida' })
+  @IsEnum(InstallmentPeriod, {
+    message: 'La unidad del intervalo no es válida',
+  })
   @IsOptional()
   installmentIntervalUnit?: InstallmentPeriod;
 }

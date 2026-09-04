@@ -13,7 +13,9 @@ import { PriceType } from './types/price-type.enum';
 import { ItemPaginationDto } from './dto/item-pagination.dto';
 import { User } from 'src/user/entities/user.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { StoreStatus } from 'src/store/types/status.enum';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
+import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
 import { ItemPropertyTemplate } from './entities/item-property-template.entity';
 import { ItemAttributes } from './types/item-attributes.interface';
 interface AttributeProperty {
@@ -53,6 +55,8 @@ export class ItemService {
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(StoreCategory)
     private readonly storeCategoryRepository: Repository<StoreCategory>,
+    @InjectRepository(StorePaymentMethod)
+    private readonly storePaymentMethodRepository: Repository<StorePaymentMethod>,
     @InjectRepository(ItemPropertyTemplate)
     private readonly templateRepository: Repository<ItemPropertyTemplate>,
     @InjectRepository(CustomizationGroup)
@@ -172,9 +176,14 @@ export class ItemService {
               group: savedGroup,
               name: opt.name,
               price: opt.price || 0,
-              minQuantity: opt.minQuantity !== undefined ? Number(opt.minQuantity) : 0,
-              maxQuantity: opt.maxQuantity !== undefined ? Number(opt.maxQuantity) : 1,
-              defaultQuantity: opt.defaultQuantity !== undefined ? Number(opt.defaultQuantity) : 0,
+              minQuantity:
+                opt.minQuantity !== undefined ? Number(opt.minQuantity) : 0,
+              maxQuantity:
+                opt.maxQuantity !== undefined ? Number(opt.maxQuantity) : 1,
+              defaultQuantity:
+                opt.defaultQuantity !== undefined
+                  ? Number(opt.defaultQuantity)
+                  : 0,
             });
             await this.customizationOptionRepository.save(option);
           }
@@ -183,10 +192,7 @@ export class ItemService {
     }
   }
 
-  async validateAttributes(
-    categoryId: string,
-    attributes?: ItemAttributes,
-  ) {
+  async validateAttributes(categoryId: string, attributes?: ItemAttributes) {
     if (
       !attributes ||
       !attributes.properties ||
@@ -270,6 +276,27 @@ export class ItemService {
     if (store.owner?.id !== user.id) {
       throw new ForbiddenException(
         'No tienes permiso para agregar productos a esta tienda',
+      );
+    }
+
+    // 1. Validar que la tienda tenga al menos una categoría registrada
+    const categoryCount = await this.storeCategoryRepository.count({
+      where: { store: { id: storeId } },
+    });
+    if (categoryCount === 0) {
+      throw new BadRequestException(
+        'No puedes publicar artículos porque la tienda aún no tiene categorías registradas. Crea al menos una categoría primero.',
+      );
+    }
+
+    // 2. Validar que la tienda tenga al menos un método de pago activo
+    const activePaymentMethodsCount =
+      await this.storePaymentMethodRepository.count({
+        where: { store: { id: storeId }, isActive: true },
+      });
+    if (activePaymentMethodsCount === 0) {
+      throw new BadRequestException(
+        'No puedes publicar artículos porque la tienda no tiene ningún método de pago activo configurado. Configura al menos un método de pago activo primero.',
       );
     }
 
@@ -369,6 +396,11 @@ export class ItemService {
       .leftJoin('store.addresses', 'address')
       .limit(limit)
       .offset(offset);
+
+    // Filtro estricto: Solo mostrar items pertenecientes a tiendas ACTIVAS
+    queryBuilder.andWhere('store.status = :activeStatus', {
+      activeStatus: StoreStatus.ACTIVE,
+    });
 
     // Filtros de Precio
     if (minPrice !== undefined) {

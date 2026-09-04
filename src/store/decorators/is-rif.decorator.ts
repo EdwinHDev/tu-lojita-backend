@@ -8,7 +8,7 @@ import {
 
 @ValidatorConstraint({ name: 'isRif', async: false })
 export class IsRifConstraint implements ValidatorConstraintInterface {
-  validate(value: any, args: ValidationArguments) {
+  validate(value: any, _args?: ValidationArguments) {
     if (typeof value !== 'string') return false;
 
     // Letras válidas: V, E, J, C, P, G
@@ -47,7 +47,7 @@ export class IsRifConstraint implements ValidatorConstraintInterface {
     return expectedDigit === verificator;
   }
 
-  defaultMessage(args: ValidationArguments) {
+  defaultMessage(_args?: ValidationArguments) {
     return 'El RIF debe tener el formato X-XXXXXXXX-X (ej: J-21235064-4) y ser un RIF venezolano válido';
   }
 }

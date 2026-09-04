@@ -1,15 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Repository, Not } from 'typeorm';
+import { LessThan, Repository, Not, IsNull } from 'typeorm';
 import { Installment } from '../entities/installment.entity';
 import { InstallmentStatus, ExtensionStatus, OrderStatus } from '../types';
 import { MailService } from 'src/common/mail/mail.service';
 import { Order } from '../entities/order.entity';
+import { Payment } from 'src/payment/entities/payment.entity';
+import { PaymentStatus } from 'src/payment/types/payment-status.enum';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
 import { getStartOfTodayInTimezone } from 'src/common/utils/timezone.utils';
 
+import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
 
 @Injectable()
 export class DebtCollectionCron {
@@ -18,9 +21,12 @@ export class DebtCollectionCron {
   constructor(
     @InjectRepository(Installment)
     private readonly installmentRepository: Repository<Installment>,
-    
+
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+
+    @InjectRepository(Payment)
+    private readonly paymentRepository: Repository<Payment>,
 
     private readonly mailService: MailService,
     private readonly notificationService: NotificationService,
@@ -29,42 +35,77 @@ export class DebtCollectionCron {
   @Cron('0 0 * * *', { timeZone: 'America/Caracas' }) // Corre a la medianoche hora de Venezuela
   async handleLateFees() {
     this.logger.log('Running daily debt collection job...');
-    const startOfToday = getStartOfTodayInTimezone(new Date(), 'America/Caracas');
+    const startOfToday = getStartOfTodayInTimezone(
+      new Date(),
+      'America/Caracas',
+    );
 
-    // 1. Encontrar cuotas vencidas que siguen pendientes (y no tienen prórroga pendiente)
+    // 1. Encontrar cuotas con fecha asignada vencida que siguen pendientes (y no tienen prórroga pendiente)
+    // Solo se aplican multas a órdenes en PARTIALLY_PAID (donde la 1ra cuota ya fue aprobada)
     const overdueInstallments = await this.installmentRepository.find({
       where: {
         dueDate: LessThan(startOfToday),
         status: InstallmentStatus.PENDING,
         extensionStatus: Not(ExtensionStatus.PENDING),
-        // [Fix 3] Solo aplicar moras a cuotas de órdenes activas (con al menos un pago aprobado)
-        order: { status: Not(OrderStatus.PENDING) },
+        order: { status: OrderStatus.PARTIALLY_PAID },
       },
-      relations: ['order', 'order.user', 'order.store', 'order.orderItems', 'order.orderItems.item'],
+      relations: [
+        'order',
+        'order.user',
+        'order.store',
+        'order.orderItems',
+        'order.orderItems.item',
+      ],
     });
 
     for (const installment of overdueInstallments) {
       const order = installment.order;
-      
-      // Calcular multa basada en el primer item de la orden (como referencia de configuración)
-      // En una versión más compleja, se podría promediar o tomar el máximo lateFeePercentage
-      const lateFeePercent = parseFloat(order.orderItems[0]?.item?.lateFeePercentage?.toString() || '0');
-      const unpaidPortion = parseFloat(installment.amount.toString()) - parseFloat((installment.paidAmount || 0).toString());
-      
+
+      // [Regla 3.4] Período de gracia de 24 horas si hubo un pago rechazado reciente para esta cuota
+      const latestRejectedPayment = await this.paymentRepository.findOne({
+        where: { order: { id: order.id }, status: PaymentStatus.REJECTED },
+        order: { updatedAt: 'DESC' },
+      });
+
+      if (latestRejectedPayment) {
+        const hoursSinceRejection =
+          (Date.now() - new Date(latestRejectedPayment.updatedAt).getTime()) /
+          (1000 * 60 * 60);
+        if (hoursSinceRejection < 24) {
+          this.logger.log(
+            `Skipping late fee for order ${order.id} installment ${installment.id} due to 24h grace period post-rejection`,
+          );
+          continue;
+        }
+      }
+
+      // Calcular multa basada en el primer item de la orden
+      const lateFeePercent = parseFloat(
+        order.orderItems[0]?.item?.lateFeePercentage?.toString() || '0',
+      );
+      const unpaidPortion =
+        parseFloat(installment.amount.toString()) -
+        parseFloat((installment.paidAmount || 0).toString());
+
       if (lateFeePercent > 0 && unpaidPortion > 0) {
-        const feeAmount = Math.round(((unpaidPortion * lateFeePercent) / 100) * 100) / 100;
-        
-        installment.lateFeeApplied = parseFloat(installment.lateFeeApplied.toString()) + feeAmount;
+        const feeAmount =
+          Math.round(((unpaidPortion * lateFeePercent) / 100) * 100) / 100;
+
+        installment.lateFeeApplied =
+          parseFloat(installment.lateFeeApplied.toString()) + feeAmount;
         installment.status = InstallmentStatus.OVERDUE;
-        
+
         // Actualizar balance de la orden
         order.balance = parseFloat(order.balance.toString()) + feeAmount;
-        order.remainingBalance = parseFloat(order.remainingBalance.toString()) + feeAmount;
-        
+        order.remainingBalance =
+          parseFloat(order.remainingBalance.toString()) + feeAmount;
+
         await this.orderRepository.save(order);
         await this.installmentRepository.save(installment);
 
-        this.logger.log(`Applied late fee of ${feeAmount} to order ${order.id}`);
+        this.logger.log(
+          `Applied late fee of ${feeAmount} to order ${order.id}`,
+        );
 
         // Notificar al cliente por email y push
         await this.notificationService.create({
@@ -84,6 +125,7 @@ export class DebtCollectionCron {
     const upcomingInstallments = await this.installmentRepository.find({
       where: {
         status: InstallmentStatus.PENDING,
+        dueDate: Not(IsNull()),
       },
       relations: ['order', 'order.user'],
     });
@@ -92,26 +134,26 @@ export class DebtCollectionCron {
     now.setHours(0, 0, 0, 0);
 
     for (const installment of upcomingInstallments) {
+      if (!installment.dueDate) continue;
+
       const order = installment.order;
       const dueDate = new Date(installment.dueDate);
       dueDate.setHours(0, 0, 0, 0);
 
-      const diffDays = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      const diffDays = Math.ceil(
+        (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+      );
 
       let shouldRemind = false;
       const unit = order.installmentIntervalUnit;
 
-      if (unit === 'DAYS') {
-        // Para pagos diarios, recordar 1 día antes
+      if (unit === InstallmentPeriod.DAYS) {
         if (diffDays === 1) shouldRemind = true;
-      } else if (unit === 'WEEKS') {
-        // Para pagos semanales, recordar 2 días antes
+      } else if (unit === InstallmentPeriod.WEEKS) {
         if (diffDays === 2) shouldRemind = true;
-      } else if (unit === 'MONTHS') {
-        // Para pagos mensuales, recordar 3 días antes
+      } else if (unit === InstallmentPeriod.MONTHS) {
         if (diffDays === 3) shouldRemind = true;
       } else {
-        // Default: 2 días antes
         if (diffDays === 2) shouldRemind = true;
       }
 
@@ -123,7 +165,9 @@ export class DebtCollectionCron {
           installment.dueDate,
           order.id,
         );
-        this.logger.log(`Sent payment reminder for order ${order.id} (Due in ${diffDays} days)`);
+        this.logger.log(
+          `Sent payment reminder for order ${order.id} (Due in ${diffDays} days)`,
+        );
       }
     }
   }

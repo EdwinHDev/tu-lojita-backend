@@ -1,0 +1,27 @@
+export enum FineType {
+  PERCENTAGE = 'PERCENTAGE',
+  FIXED_USD = 'FIXED_USD',
+}
+
+export enum BillingStatus {
+  PENDING = 'PENDING',
+  PAYMENT_REPORTED = 'PAYMENT_REPORTED',
+  PAID = 'PAID',
+  OVERDUE = 'OVERDUE',
+  SUSPENDED = 'SUSPENDED',
+  VOIDED = 'VOIDED',
+}
+
+export enum PlatformPaymentType {
+  PAGO_MOVIL = 'PAGO_MOVIL',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+  BINANCE_PAY = 'BINANCE_PAY',
+  CASH_USD = 'CASH_USD',
+  CASH_BS = 'CASH_BS',
+}
+
+export enum PaymentReportStatus {
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}

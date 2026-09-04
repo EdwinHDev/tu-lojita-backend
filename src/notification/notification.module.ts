@@ -14,7 +14,7 @@ import { envs } from '../config/envs';
     TypeOrmModule.forFeature([Notification, ChatMessage, Order]),
     JwtModule.register({
       secret: envs.jwtSecret,
-      signOptions: { expiresIn: '1h' },
+      signOptions: { expiresIn: '15m' },
     }),
   ],
   controllers: [NotificationController],

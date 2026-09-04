@@ -79,13 +79,17 @@ export function getInstallmentPlanTemplate(
         </div>
       </div>
 
-      ${nextPaymentDate ? `
+      ${
+        nextPaymentDate
+          ? `
       <div style="background-color: #EFF6FF; border: 1px solid #DBEAFE; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
         <p style="margin: 0; color: #1E40AF; font-size: 14px;">
           Próximo Pago: <strong>${nextPaymentDate}</strong>
         </p>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
 
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
         <thead>
@@ -144,12 +148,16 @@ export function getSinglePaymentUnderReviewTemplate(
   items: { title: string; quantity: number; price: number }[],
   amount: number,
 ): string {
-  const itemsHtml = items.map(item => `
+  const itemsHtml = items
+    .map(
+      (item) => `
     <tr>
       <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #475569; font-size: 14px;">${item.title} (x${item.quantity})</td>
       <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #1E293B; font-weight: 600; text-align: right; font-size: 14px;">$${(item.price * item.quantity).toFixed(2)}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 
   return `
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 600px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
@@ -191,29 +199,79 @@ export function getSinglePaymentUnderReviewTemplate(
   `;
 }
 
+export interface NextInstallmentScheduleInfo {
+  index: number;
+  amount: number;
+  dueDate: string;
+}
+
 export function getPaymentApprovedTemplate(
   customerName: string,
   orderId: string,
   storeName: string,
   amount: number,
+  nextInstallment?: NextInstallmentScheduleInfo | null,
+  remainingBalance?: number | null,
 ): string {
   return `
-    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 560px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
       <div style="text-align: center; margin-bottom: 24px;">
-        <span style="background-color: #DCFCE7; color: #15803D; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600; text-transform: uppercase;">¡Compra Aprobada! 🎉</span>
+        <span style="background-color: #DCFCE7; color: #15803D; padding: 8px 18px; border-radius: 9999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">¡Pago Aprobado! 🎉</span>
       </div>
       <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; text-align: center;">¡Buenas noticias, ${customerName}!</h2>
-      <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
-        Tu pago de <strong>$${amount.toFixed(2)}</strong> para la orden #${orderId} en <strong>${storeName}</strong> ha sido aprobado y validado con éxito.
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
+        Tu pago de <strong>$${amount.toFixed(2)}</strong> para la orden <strong>#${orderId}</strong> en <strong>${storeName}</strong> ha sido verificado y aprobado con éxito.
       </p>
 
-      <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; padding: 18px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
-        <p style="margin: 0; font-size: 13px; color: #16A34A; font-weight: 600;">Estado de la orden: Procesando / Preparada</p>
+      <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+        <div style="flex: 1; background-color: #F0FDF4; border: 1px solid #BBF7D0; padding: 14px; border-radius: 12px; text-align: center;">
+          <p style="margin: 0; font-size: 11px; color: #15803D; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Monto Aprobado</p>
+          <p style="margin: 4px 0 0; font-size: 20px; font-weight: 800; color: #15803D;">$${amount.toFixed(2)}</p>
+        </div>
+        ${
+          typeof remainingBalance === 'number' && remainingBalance > 0.01
+            ? `
+        <div style="flex: 1; background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 14px; border-radius: 12px; text-align: center;">
+          <p style="margin: 0; font-size: 11px; color: #64748B; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Saldo Pendiente</p>
+          <p style="margin: 4px 0 0; font-size: 20px; font-weight: 800; color: #0F172A;">$${remainingBalance.toFixed(2)}</p>
+        </div>
+        `
+            : ''
+        }
       </div>
 
-      <p style="color: #64748B; font-size: 14px; line-height: 1.5; text-align: center; margin-bottom: 28px;">
-        El comercio ya está trabajando en tu pedido. Puedes hacerle seguimiento directamente desde la sección "Mis Órdenes" en la aplicación móvil.
-      </p>
+      ${
+        nextInstallment
+          ? `
+      <div style="background-color: #EFF6FF; border: 1.5px solid #BFDBFE; padding: 18px 20px; border-radius: 14px; margin-bottom: 24px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+          <span style="font-size: 13px; font-weight: 800; color: #1E40AF; text-transform: uppercase; letter-spacing: 0.05em;">📅 Próxima Cuota Programada</span>
+          <span style="background-color: #DBEAFE; color: #1D4ED8; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px;">Cuota #${nextInstallment.index}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px dashed #BFDBFE;">
+          <div>
+            <p style="margin: 0; font-size: 12px; color: #64748B;">Monto a pagar:</p>
+            <p style="margin: 2px 0 0; font-size: 18px; font-weight: 800; color: #1E293B;">$${nextInstallment.amount.toFixed(2)}</p>
+          </div>
+          <div style="text-align: right;">
+            <p style="margin: 0; font-size: 12px; color: #64748B;">Fecha límite:</p>
+            <p style="margin: 2px 0 0; font-size: 15px; font-weight: 700; color: #2563EB;">${nextInstallment.dueDate}</p>
+          </div>
+        </div>
+      </div>
+      `
+          : `
+      <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; font-size: 14px; color: #16A34A; font-weight: 700;">✨ ¡Has completado la totalidad de los pagos de tu orden!</p>
+      </div>
+      `
+      }
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; color: #475569; font-size: 13px; line-height: 1.5;">
+          Puedes consultar el cronograma y realizar tus próximos pagos directamente desde la aplicación móvil en <strong>Mis Órdenes</strong>.
+        </p>
+      </div>
 
       <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
       <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
@@ -238,12 +296,16 @@ export function getPaymentRejectedTemplate(
         El comercio de <strong>${storeName}</strong> ha rechazado tu reporte de pago por <strong>$${amount.toFixed(2)}</strong> de la orden #${orderId}.
       </p>
 
-      ${rejectionReason ? `
+      ${
+        rejectionReason
+          ? `
       <div style="background-color: #FFF1F2; border: 1px solid #FECDD3; padding: 18px; border-radius: 12px; margin-bottom: 24px;">
         <p style="margin: 0 0 4px; font-size: 12px; color: #E11D48; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em;">Motivo del Rechazo:</p>
         <p style="margin: 0; font-size: 14px; color: #9F1239; line-height: 1.5; font-weight: 500;">"${rejectionReason}"</p>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
 
       <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
         <p style="margin: 0; color: #475569; font-size: 13px; line-height: 1.5;">
@@ -256,3 +318,36 @@ export function getPaymentRejectedTemplate(
     </div>
   `;
 }
+
+export function getOrderAutoCancelledTemplate(
+  customerName: string,
+  orderId: string,
+  storeName: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FEE2E2; color: #B91C1C; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600; text-transform: uppercase;">Orden Cancelada ⌛</span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 20px; font-weight: 700; margin-top: 0; text-align: center;">Hola, ${customerName}</h2>
+      <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
+        Tu orden <strong>#${orderId}</strong> en <strong>${storeName}</strong> ha sido cancelada automáticamente tras 24 horas de inactividad luego del rechazo del comprobante de pago.
+      </p>
+
+      <div style="background-color: #FFF1F2; border: 1px solid #FECDD3; padding: 18px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0 0 4px; font-size: 12px; color: #E11D48; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em;">Motivo de Cancelación</p>
+        <p style="margin: 0; font-size: 14px; color: #9F1239; line-height: 1.5; font-weight: 500;">Tiempo de espera agotado (24 horas sin registrar un nuevo comprobante)</p>
+      </div>
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; color: #475569; font-size: 13px; line-height: 1.5;">
+          <strong>¿Aún deseas realizar tu compra?</strong> Puedes ingresar a la aplicación móvil cuando lo desees para generar una nueva orden.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+    </div>
+  `;
+}
+

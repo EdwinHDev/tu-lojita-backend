@@ -30,6 +30,4 @@ export class Company extends TimestampEntity {
   // Propietario de la empresa (usuario que la creó)
   @ManyToOne(() => User, { nullable: true })
   owner?: User;
-
-
 }

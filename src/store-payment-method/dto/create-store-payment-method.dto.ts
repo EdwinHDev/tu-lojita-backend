@@ -1,4 +1,10 @@
-import { IsEnum, IsString, IsOptional, IsBoolean, IsUUID } from 'class-validator';
+import {
+  IsEnum,
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsUUID,
+} from 'class-validator';
 import { PaymentMethodType } from '../types';
 import { PartialType } from '@nestjs/mapped-types';
 
@@ -49,4 +55,6 @@ export class CreateStorePaymentMethodDto {
   storeId: string;
 }
 
-export class UpdateStorePaymentMethodDto extends PartialType(CreateStorePaymentMethodDto) {}
+export class UpdateStorePaymentMethodDto extends PartialType(
+  CreateStorePaymentMethodDto,
+) {}

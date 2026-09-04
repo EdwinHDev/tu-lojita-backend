@@ -28,6 +28,15 @@ export class Order extends TimestampEntity {
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
   finalAmount: number;
 
+  @Column('decimal', { precision: 5, scale: 2, default: 0 })
+  platformCommissionRate: number;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  platformCommissionAmount: number;
+
+  @Column('boolean', { default: false })
+  isCommissionVoided: boolean;
+
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
   balance: number;
 
@@ -40,7 +49,7 @@ export class Order extends TimestampEntity {
     default: OrderStatus.PENDING,
   })
   status: OrderStatus;
-  
+
   @Column('text', { nullable: true })
   rejectionReason?: string;
 
@@ -68,8 +77,6 @@ export class Order extends TimestampEntity {
   @Column('boolean', { default: false })
   isFullyPaid: boolean;
 
-
-
   // Relación con la tienda
   @ManyToOne(() => Store, (store) => store.orders)
   store: Store;
@@ -85,6 +92,8 @@ export class Order extends TimestampEntity {
   @OneToMany(() => Payment, (payment) => payment.order)
   payments: Payment[];
 
-  @OneToMany(() => Installment, (installment) => installment.order, { cascade: true })
+  @OneToMany(() => Installment, (installment) => installment.order, {
+    cascade: true,
+  })
   installments: Installment[];
 }

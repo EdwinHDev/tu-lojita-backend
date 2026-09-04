@@ -16,6 +16,7 @@ interface EnvVars {
   EMAIL_SECURE: boolean;
   EMAIL_USER: string;
   EMAIL_PASS: string;
+  EMAIL_FROM?: string;
   GOOGLE_CLIENT_ID: string;
   JWT_REFRESH_SECRET: string;
 
@@ -44,6 +45,7 @@ const envsSchema = joi
     EMAIL_SECURE: joi.boolean().required(),
     EMAIL_USER: joi.string().required(),
     EMAIL_PASS: joi.string().required(),
+    EMAIL_FROM: joi.string().default('"Tu Lojita" <no-reply@tulojita.com>'),
     GOOGLE_CLIENT_ID: joi.string().required(),
     JWT_REFRESH_SECRET: joi.string().required(),
 
@@ -82,6 +84,7 @@ export const envs = {
   emailSecure: envVars.EMAIL_SECURE,
   emailUser: envVars.EMAIL_USER,
   emailPass: envVars.EMAIL_PASS,
+  emailFrom: envVars.EMAIL_FROM || '"Tu Lojita" <no-reply@tulojita.com>',
   googleClientId: envVars.GOOGLE_CLIENT_ID,
   jwtRefreshSecret: envVars.JWT_REFRESH_SECRET,
 

@@ -5,7 +5,7 @@ import { Auth } from 'src/auth/decorators/auth.decorator';
 @Auth()
 @Controller('banks')
 export class BankController {
-  constructor(private readonly bankService: BankService) { }
+  constructor(private readonly bankService: BankService) {}
 
   @Get()
   findAll() {

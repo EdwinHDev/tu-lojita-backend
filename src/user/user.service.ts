@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -24,7 +28,9 @@ export class UserService {
   async create(createUserDto: CreateUserDto) {
     const { companyId, storeId, appOrigin, ...userDetails } = createUserDto;
 
-    const existingUser = await this.userRepository.findOne({ where: { email: userDetails.email } });
+    const existingUser = await this.userRepository.findOne({
+      where: { email: userDetails.email },
+    });
 
     if (existingUser) {
       if (appOrigin === AppOrigin.CLIENT || appOrigin === AppOrigin.SELLER) {
@@ -34,12 +40,16 @@ export class UserService {
         if (existingUser.role === UserRole.VENDOR) {
           existingUser.role = UserRole.COMPANY;
         } else {
-          throw new BadRequestException('El correo ya está registrado y no es elegible para esta aplicación.');
+          throw new BadRequestException(
+            'El correo ya está registrado y no es elegible para esta aplicación.',
+          );
         }
       }
     } else {
       if (appOrigin === AppOrigin.BUSINESS) {
-        throw new BadRequestException('Debes registrarte primero en la aplicación de Sellers.');
+        throw new BadRequestException(
+          'Debes registrarte primero en la aplicación de Sellers.',
+        );
       }
       if (!userDetails.role) {
         if (appOrigin === AppOrigin.CLIENT) userDetails.role = UserRole.USER;
