@@ -17,6 +17,7 @@ import { Order } from 'src/order/entities/order.entity';
 import { OrderStatus } from 'src/order/types';
 import { BillingStatus, PaymentReportStatus, FineType } from './types';
 import { MailService } from 'src/common/mail/mail.service';
+import { NotificationService } from 'src/notification/notification.service';
 import { User } from 'src/user/entities/user.entity';
 
 @Injectable()
@@ -39,6 +40,7 @@ export class StoreCommissionBillingService {
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly mailService: MailService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ----------------------------------------------------
@@ -140,7 +142,9 @@ export class StoreCommissionBillingService {
     const store = await this.storeRepository.findOne({ where: { id: storeId } });
     if (!store) throw new NotFoundException('Tienda no encontrada');
     store.status = suspend ? StoreStatus.SUSPENDED : StoreStatus.ACTIVE;
-    return this.storeRepository.save(store);
+    const savedStore = await this.storeRepository.save(store);
+    this.notificationService.notifyAdminBadgesChanged().catch(() => {});
+    return savedStore;
   }
 
   // ----------------------------------------------------
@@ -233,6 +237,8 @@ export class StoreCommissionBillingService {
     billing.status = BillingStatus.PAYMENT_REPORTED;
     await this.billingRepository.save(billing);
 
+    this.notificationService.notifyAdminBadgesChanged().catch(() => {});
+
     return savedReport;
   }
 
@@ -281,6 +287,8 @@ export class StoreCommissionBillingService {
       billing.status = BillingStatus.PENDING;
       await this.billingRepository.save(billing);
     }
+
+    this.notificationService.notifyAdminBadgesChanged().catch(() => {});
 
     return report;
   }

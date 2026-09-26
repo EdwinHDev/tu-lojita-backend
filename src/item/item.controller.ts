@@ -27,16 +27,20 @@ export class ItemController {
   }
 
   @Get()
-  findAll(@Query() paginationDto: ItemPaginationDto) {
-    return this.itemService.findAll(paginationDto);
+  findAll(
+    @Query() paginationDto: ItemPaginationDto,
+    @GetUser() user: User,
+  ) {
+    return this.itemService.findAll(paginationDto, user);
   }
 
   @Get('store/:storeId')
   findByStore(
     @Param('storeId') storeId: string,
     @Query() paginationDto: ItemPaginationDto,
+    @GetUser() user: User,
   ) {
-    return this.itemService.findByStore(storeId, paginationDto);
+    return this.itemService.findByStore(storeId, paginationDto, user);
   }
 
   @Get(':id')

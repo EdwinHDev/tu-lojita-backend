@@ -14,6 +14,7 @@ import { PlatformPaymentMethodController } from './platform-payment-method.contr
 import { FinancialAuthModule } from 'src/financial-auth/financial-auth.module';
 import { MailModule } from 'src/common/mail/mail.module';
 import { CommissionBillingCron } from './cron/commission-billing.cron';
+import { NotificationModule } from 'src/notification/notification.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CommissionBillingCron } from './cron/commission-billing.cron';
     ]),
     FinancialAuthModule,
     MailModule,
+    NotificationModule,
   ],
   controllers: [CommissionController, PlatformPaymentMethodController],
   providers: [

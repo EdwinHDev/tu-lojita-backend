@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
@@ -14,6 +15,7 @@ import { Order } from 'src/order/entities/order.entity';
 import { OrderStatus } from 'src/order/types';
 import { User } from 'src/user/entities/user.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { StoreCustomerBlock } from 'src/store/entities/store-customer-block.entity';
 import { PaymentPaginationDto } from './dto/payment-pagination.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
@@ -382,7 +384,7 @@ export class PaymentService {
         // Si la orden no tiene ningún pago aprobado previo, marcar la orden en estado REJECTED.
         const orderForRejection = await queryRunner.manager.findOne(Order, {
           where: { id: payment.order.id },
-          relations: ['payments'],
+          relations: ['payments', 'store'],
         });
         if (orderForRejection) {
           const approvedCount = (orderForRejection.payments || []).filter(
@@ -479,12 +481,43 @@ export class PaymentService {
           });
         }
 
-        // Si la orden pasa a FULLY_PAID, cerrar sala de chat
+        // Si la orden pasa a FULLY_PAID, cerrar sala de chat y notificar para calificación
         if (payment.order.status === OrderStatus.FULLY_PAID) {
           this.notificationService.closeChatRoom(
             payment.order.id,
             'approved',
           );
+          // Disparar notificaciones de calificación
+          const orderWithOwner = await this.orderRepository.findOne({
+            where: { id: payment.order.id },
+            relations: ['user', 'store', 'store.owner'],
+          });
+          if (orderWithOwner) {
+            try {
+              if (orderWithOwner.user?.id) {
+                this.notificationService.create({
+                  userId: orderWithOwner.user.id,
+                  title: '\u2B50 \u00bfC\u00f3mo estuvo tu compra?',
+                  body: 'Tu orden ha sido completada. \u00a1Deja tu calificaci\u00f3n!',
+                  type: NotificationType.ORDER_REVIEW_PROMPT,
+                  orderId: orderWithOwner.id,
+                  targetId: orderWithOwner.id,
+                });
+              }
+              if (orderWithOwner.store?.owner?.id) {
+                this.notificationService.create({
+                  userId: orderWithOwner.store.owner.id,
+                  title: '\u{1F464} Califica a tu comprador',
+                  body: 'Una orden fue completada. Puedes calificar al cliente.',
+                  type: NotificationType.BUYER_REVIEW_PROMPT,
+                  orderId: orderWithOwner.id,
+                  targetId: orderWithOwner.id,
+                });
+              }
+            } catch (reviewErr) {
+              this.logger.error(`Error sending review prompt notifications: ${reviewErr}`);
+            }
+          }
         }
       } catch (notifyErr: unknown) {
         const msg =
@@ -860,6 +893,16 @@ export class PaymentService {
       });
       if (!user) {
         throw new NotFoundException(`Usuario con ID ${userId} no encontrado`);
+      }
+
+      // Validar si el cliente está bloqueado por la tienda
+      const isBlocked = await queryRunner.manager.findOne(StoreCustomerBlock, {
+        where: { storeId: orderDto.storeId, customerId: userId },
+      });
+      if (isBlocked) {
+        throw new ForbiddenException(
+          'La tienda ha restringido las compras para tu cuenta. Puedes enviar una solicitud de mediación desde el perfil de la tienda.',
+        );
       }
 
       // 3. Validar items duplicados

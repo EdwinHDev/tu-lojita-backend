@@ -23,6 +23,11 @@ import { MailModule } from './common/mail/mail.module';
 import { CommissionModule } from './commission/commission.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { FinancialAuthModule } from './financial-auth/financial-auth.module';
+import { ReportModule } from './report/report.module';
+import { OrderDisputeModule } from './order-dispute/order-dispute.module';
+import { ReviewModule } from './review/review.module';
+import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
+import { RankingModule } from './ranking/ranking.module';
 
 @Module({
   imports: [
@@ -71,6 +76,11 @@ import { FinancialAuthModule } from './financial-auth/financial-auth.module';
     CommissionModule,
     SubscriptionModule,
     FinancialAuthModule,
+    ReportModule,
+    OrderDisputeModule,
+    ReviewModule,
+    PlatformSettingsModule,
+    RankingModule,
   ],
   controllers: [],
   providers: [],

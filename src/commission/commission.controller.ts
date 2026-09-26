@@ -34,7 +34,6 @@ export class CommissionController {
   // RUTAS ADMINISTRATIVAS (PROTEGIDAS CON FINANCIAL OTP)
   // ----------------------------------------------------
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('settings')
   getSettingsAndRanges() {
     return this.billingService.getSettingsAndRanges();
@@ -69,7 +68,6 @@ export class CommissionController {
   }
 
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('stores')
   getStoresSummary() {
     return this.billingService.getStoresSummary();
@@ -107,7 +105,6 @@ export class CommissionController {
   }
 
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('metrics')
   getCommissionMetrics() {
     return this.billingService.getCommissionMetrics();

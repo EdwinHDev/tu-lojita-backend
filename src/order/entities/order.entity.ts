@@ -13,6 +13,7 @@ import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { OrderStatus } from '../types';
 import { Installment } from './installment.entity';
 import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
+import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
 
 @Entity({ name: 'orders' })
 export class Order extends TimestampEntity {
@@ -96,4 +97,7 @@ export class Order extends TimestampEntity {
     cascade: true,
   })
   installments: Installment[];
+
+  @OneToMany(() => OrderDispute, (dispute) => dispute.order)
+  disputes: OrderDispute[];
 }

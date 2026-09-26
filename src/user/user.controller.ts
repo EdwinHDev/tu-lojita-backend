@@ -6,16 +6,18 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
 } from '@nestjs/common';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UserPaginationDto } from './dto/user-pagination.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { UserRole } from './types/user-role.enum';
 
-@Controller('users')
+@Controller(['users', 'user'])
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
@@ -26,8 +28,14 @@ export class UserController {
 
   @Get()
   @Auth(UserRole.ADMIN) // <-- Solo ADMIN y SUPER pueden entrar
-  findAll() {
-    return this.userService.findAll();
+  findAll(@Query() paginationDto: UserPaginationDto) {
+    return this.userService.findAll(paginationDto);
+  }
+
+  @Get('metrics/summary')
+  @Auth(UserRole.ADMIN)
+  getMetricsSummary() {
+    return this.userService.getPlatformMetrics();
   }
 
   @Auth()
@@ -49,6 +57,15 @@ export class UserController {
     @Body() updateProfileDto: UpdateProfileDto,
   ) {
     return this.userService.updateProfile(userId, updateProfileDto);
+  }
+
+  @Auth()
+  @Get('me/mediations')
+  getMyMediations(
+    @GetUser('id') userId: string,
+    @Query('storeId') storeId?: string,
+  ) {
+    return this.userService.getMyMediations(userId, storeId);
   }
 
   @Get(':id')

@@ -14,6 +14,7 @@ import { ManualPaymentDto } from './dto/manual-payment.dto';
 import { Order } from './entities/order.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreStatus } from 'src/store/types/status.enum';
+import { StoreCustomerBlock } from 'src/store/entities/store-customer-block.entity';
 import { Item } from 'src/item/entities/item.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { User } from 'src/user/entities/user.entity';
@@ -28,6 +29,10 @@ import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
 import { Payment } from 'src/payment/entities/payment.entity';
 import { PaymentStatus } from 'src/payment/types/payment-status.enum';
 import { CommissionService } from 'src/commission/commission.service';
+import { OrderReview } from 'src/review/entities/order-review.entity';
+import { BuyerReview } from 'src/review/entities/buyer-review.entity';
+import { RankingService } from 'src/ranking/services/ranking.service';
+import { RankingEventType } from 'src/ranking/types';
 
 @Injectable()
 export class OrderService {
@@ -44,10 +49,17 @@ export class OrderService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
 
+    @InjectRepository(OrderReview)
+    private readonly orderReviewRepository: Repository<OrderReview>,
+
+    @InjectRepository(BuyerReview)
+    private readonly buyerReviewRepository: Repository<BuyerReview>,
+
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
     private readonly mailService: MailService,
     private readonly commissionService: CommissionService,
+    private readonly rankingService: RankingService,
   ) {}
 
   private readonly logger = new Logger(OrderService.name);
@@ -83,6 +95,16 @@ export class OrderService {
     await queryRunner.startTransaction();
 
     try {
+      // Validar si el cliente está bloqueado por la tienda
+      const isBlocked = await queryRunner.manager.findOne(StoreCustomerBlock, {
+        where: { storeId, customerId: userId },
+      });
+      if (isBlocked) {
+        throw new ForbiddenException(
+          'La tienda ha restringido las compras para tu cuenta. Puedes enviar una solicitud de mediación desde el perfil de la tienda.',
+        );
+      }
+
       // Bloqueo por morosidad (Delinquent Lockout) inter-tienda
       if (isPartialPayment) {
         const hasOverdueInstallment = await queryRunner.manager.findOne(
@@ -556,6 +578,8 @@ export class OrderService {
         'orderItems.item.customizationGroupsRel',
         'orderItems.item.customizationGroupsRel.options',
         'installments',
+        'disputes',
+        'disputes.requestedBy',
       ],
       order: {
         installments: {
@@ -563,7 +587,25 @@ export class OrderService {
         },
       },
     });
-    if (!order) throw new NotFoundException(`Orden #${id} no encontrada`);
+
+    if (!order) {
+      // Fallback retrocompatible: si id corresponde a una reseña, devolver la orden asociada
+      const orderReview = await this.orderReviewRepository.findOne({
+        where: { id },
+      });
+      if (orderReview) {
+        return this.findOne(orderReview.orderId);
+      }
+      const buyerReview = await this.buyerReviewRepository.findOne({
+        where: { id },
+      });
+      if (buyerReview) {
+        return this.findOne(buyerReview.orderId);
+      }
+
+      throw new NotFoundException(`Orden #${id} no encontrada`);
+    }
+
     return order;
   }
 
@@ -581,6 +623,7 @@ export class OrderService {
       offset,
       sort,
       order,
+      hasDispute,
     } = paginationDto;
 
     const queryBuilder = this.orderRepository
@@ -597,7 +640,8 @@ export class OrderService {
       )
       .leftJoinAndSelect('customizationGroupsRel.options', 'options')
       .leftJoinAndSelect('order.payments', 'payments')
-      .leftJoinAndSelect('order.installments', 'installments');
+      .leftJoinAndSelect('order.installments', 'installments')
+      .leftJoinAndSelect('order.disputes', 'disputes');
 
     if (status) {
       queryBuilder.andWhere('order.status = :status', { status });
@@ -638,6 +682,14 @@ export class OrderService {
         '(CAST(order.id AS TEXT) ILIKE :search OR store.name ILIKE :search OR CAST(order.createdAt AS TEXT) ILIKE :search)',
         { search: `%${search.trim()}%` },
       );
+    }
+
+    if (hasDispute !== undefined) {
+      if (hasDispute) {
+        queryBuilder.andWhere('disputes.id IS NOT NULL');
+      } else {
+        queryBuilder.andWhere('disputes.id IS NULL');
+      }
     }
 
     // Ordenamiento Dinámico
@@ -953,6 +1005,62 @@ export class OrderService {
             ? 'approved'
             : 'rejected',
         );
+
+        // Disparar notificaciones de calificación y ranking al completar la orden
+        if (updateOrderDto.status === OrderStatus.FULLY_PAID) {
+          try {
+            if (order.store?.id) {
+              await this.rankingService.processEvent(
+                order.store.id,
+                RankingEventType.ORDER_COMPLETED,
+                order.id,
+                order.user?.id,
+              );
+            }
+          } catch (rankErr) {
+            this.logger.error(`Error processing ranking completed order event: ${rankErr.message}`);
+          }
+
+          try {
+            if (order.user?.id) {
+              await this.notificationService.create({
+                userId: order.user.id,
+                title: '⭐ ¿Cómo estuvo tu compra?',
+                body: 'Tu orden ha sido completada. ¡Deja tu calificación!',
+                type: NotificationType.ORDER_REVIEW_PROMPT,
+                orderId: order.id,
+                targetId: order.id,
+              });
+            }
+            if (order.store?.owner?.id) {
+              await this.notificationService.create({
+                userId: order.store.owner.id,
+                title: '👤 Califica a tu comprador',
+                body: 'Una orden fue completada. Puedes calificar al cliente.',
+                type: NotificationType.BUYER_REVIEW_PROMPT,
+                orderId: order.id,
+                targetId: order.id,
+              });
+            }
+          } catch (err) {
+            this.logger.error(`Error sending review prompt notifications: ${err.message}`);
+          }
+        }
+
+        // Penalización de ranking al cancelar la orden por parte del comercio
+        if (updateOrderDto.status === OrderStatus.CANCELLED) {
+          try {
+            if (order.store?.id) {
+              await this.rankingService.processEvent(
+                order.store.id,
+                RankingEventType.ORDER_CANCELLED_BY_SELLER,
+                order.id,
+              );
+            }
+          } catch (rankErr) {
+            this.logger.error(`Error processing ranking cancellation event: ${rankErr.message}`);
+          }
+        }
       }
     }
 
@@ -1692,6 +1800,19 @@ export class OrderService {
 
       await queryRunner.manager.save(order);
       await queryRunner.commitTransaction();
+
+      try {
+        if (newBalance === 0 && order.store?.id) {
+          await this.rankingService.processEvent(
+            order.store.id,
+            RankingEventType.ORDER_COMPLETED,
+            order.id,
+            order.user?.id,
+          );
+        }
+      } catch (rankErr) {
+        this.logger.error(`Error processing ranking on manual payment completion: ${rankErr.message}`);
+      }
 
       try {
         this.notificationService.notifyStoreInstallmentsUpdated(order.store.id, {

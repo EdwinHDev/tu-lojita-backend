@@ -94,8 +94,16 @@ export class CommissionService {
       order.isCommissionVoided = true;
     }
 
+    const storeId = order.store?.id || (order as any).storeId;
+    if (!storeId) {
+      this.logger.warn(
+        `Cannot void commission for order ${order.id}: missing store relationship`,
+      );
+      return;
+    }
+
     const storeRepo = manager ? manager.getRepository(Store) : this.storeRepository;
-    const store = await storeRepo.findOne({ where: { id: order.store.id } });
+    const store = await storeRepo.findOne({ where: { id: storeId } });
     if (store) {
       const currentDebt = parseFloat(store.accumulatedCommissionDebt?.toString() || '0');
       const newDebt = Math.max(0, currentDebt - commission);
@@ -106,7 +114,7 @@ export class CommissionService {
     const billingRepo = manager ? manager.getRepository(StoreCommissionBilling) : this.billingRepository;
     const pendingBilling = await billingRepo.findOne({
       where: {
-        store: { id: order.store.id },
+        store: { id: storeId },
         status: BillingStatus.PENDING,
       },
     });

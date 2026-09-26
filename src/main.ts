@@ -4,11 +4,15 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { envs } from './config/envs';
+import * as express from 'express';
+import * as path from 'path';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   const app = await NestFactory.create(AppModule);
+
+  app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
   app.useGlobalPipes(
     new ValidationPipe({

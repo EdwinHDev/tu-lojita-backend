@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="goldGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFD700" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#7B5E00" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="goldPlate" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF275"/>
+      <stop offset="40%" stop-color="#FFD700"/>
+      <stop offset="80%" stop-color="#C69214"/>
+      <stop offset="100%" stop-color="#805B00"/>
+    </linearGradient>
+    <linearGradient id="goldBorder" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFF9C4"/>
+      <stop offset="50%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#5C4200"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="92" fill="url(#goldGlow)"/>
+  <!-- Golden Wings Extended -->
+  <path d="M15,50 Q45,25 70,60 L50,110 Q20,80 15,50 Z" fill="url(#goldPlate)" stroke="#FFF9C4" stroke-width="2"/>
+  <path d="M185,50 Q155,25 130,60 L150,110 Q180,80 185,50 Z" fill="url(#goldPlate)" stroke="#FFF9C4" stroke-width="2"/>
+  <!-- Golden Crown Points -->
+  <polygon points="100,8 115,35 135,20 128,45 100,32 72,45 65,20 85,35" fill="url(#goldPlate)" stroke="#FFF9C4" stroke-width="2"/>
+  <!-- Main Shield -->
+  <polygon points="100,25 168,60 150,150 100,190 50,150 32,60" fill="url(#goldPlate)" stroke="url(#goldBorder)" stroke-width="6"/>
+  <!-- Inner Royal Velvet -->
+  <polygon points="100,42 148,70 135,138 100,172 65,138 52,70" fill="#3D2B00" stroke="#C69214" stroke-width="3"/>
+  <!-- Star / Royal Cross -->
+  <polygon points="100,55 112,85 142,95 118,115 125,145 100,130 75,145 82,115 58,95 88,85" fill="url(#goldPlate)" stroke="#FFF" stroke-width="2"/>
+  <circle cx="100" cy="105" r="10" fill="#FFFDE7" stroke="#FFD700" stroke-width="2"/>
+</svg>

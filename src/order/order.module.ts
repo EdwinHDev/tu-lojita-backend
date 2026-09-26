@@ -10,9 +10,12 @@ import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { User } from 'src/user/entities/user.entity';
 import { NotificationModule } from 'src/notification/notification.module';
 import { Payment } from 'src/payment/entities/payment.entity';
+import { OrderReview } from 'src/review/entities/order-review.entity';
+import { BuyerReview } from 'src/review/entities/buyer-review.entity';
 import { DebtCollectionCron } from './cron/debt-collection.cron';
 import { OrderAutoCancellationCron } from './cron/order-auto-cancellation.cron';
 import { CommissionModule } from 'src/commission/commission.module';
+import { RankingModule } from 'src/ranking/ranking.module';
 
 @Module({
   imports: [
@@ -24,9 +27,12 @@ import { CommissionModule } from 'src/commission/commission.module';
       OrderItem,
       User,
       Payment,
+      OrderReview,
+      BuyerReview,
     ]),
     NotificationModule,
     CommissionModule,
+    RankingModule,
   ],
   controllers: [OrderController],
   providers: [OrderService, DebtCollectionCron, OrderAutoCancellationCron],

@@ -480,6 +480,7 @@ export class NotificationService {
       type: string;
       orderId?: string;
       targetId?: string;
+      storeId?: string;
     },
   ) {
     if (!this.firebaseApp) return;
@@ -503,6 +504,7 @@ export class NotificationService {
         data: {
           notificationId: payload.notificationId,
           type: payload.type,
+          storeId: payload.storeId || '',
           orderId: payload.orderId || '',
           targetId: payload.targetId || payload.orderId || '',
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
@@ -564,6 +566,7 @@ export class NotificationService {
       body: string;
       type: string;
       orderId?: string;
+      targetId?: string;
     },
   ) {
     if (!this.firebaseApp || !storeId) return;
@@ -596,7 +599,13 @@ export class NotificationService {
         data: {
           notificationId: payload.notificationId,
           type: payload.type,
+          storeId: storeId || '',
           orderId: payload.orderId || '',
+          targetId: payload.targetId || payload.orderId || '',
+          mediationId:
+            payload.type === NotificationType.MEDIATION_REQUEST && !payload.orderId
+              ? payload.targetId || ''
+              : '',
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         android: {
@@ -697,24 +706,41 @@ export class NotificationService {
       );
 
       // 2. Dispatch FCM push notification to user's devices
+      const isStoreMediation =
+        (data.type === NotificationType.MEDIATION_RESPONSE ||
+          data.type === NotificationType.MEDIATION_REQUEST) &&
+        (Boolean(data.storeId) ||
+          data.title?.toLowerCase().includes('mediaci') ||
+          data.body?.toLowerCase().includes('mediaci'));
+
       const isOrderRelated =
-        data.type === NotificationType.ORDER_CREATED ||
-        data.type === NotificationType.ORDER_APPROVED ||
-        data.type === NotificationType.ORDER_REJECTED ||
-        data.type === NotificationType.PAYMENT_REPORTED ||
-        data.type === NotificationType.PAYMENT_APPROVED ||
-        data.type === NotificationType.PAYMENT_REJECTED ||
-        data.type === NotificationType.CHAT_MESSAGE ||
-        data.type === NotificationType.MEDIATION_REQUEST ||
-        data.type === NotificationType.MEDIATION_RESPONSE;
+        !isStoreMediation &&
+        (data.type === NotificationType.ORDER_CREATED ||
+          data.type === NotificationType.ORDER_APPROVED ||
+          data.type === NotificationType.ORDER_REJECTED ||
+          data.type === NotificationType.PAYMENT_REPORTED ||
+          data.type === NotificationType.PAYMENT_APPROVED ||
+          data.type === NotificationType.PAYMENT_REJECTED ||
+          data.type === NotificationType.CHAT_MESSAGE ||
+          data.type === NotificationType.MEDIATION_RESPONSE ||
+          data.type === NotificationType.ORDER_REVIEW_PROMPT ||
+          data.type === NotificationType.BUYER_REVIEW_PROMPT ||
+          data.type === NotificationType.ORDER_REVIEW_RECEIVED ||
+          data.type === NotificationType.ORDER_REVIEW_REPLIED ||
+          data.type === NotificationType.BUYER_REVIEW_RECEIVED);
 
       await this.sendPushNotification(data.userId, {
         notificationId: savedNotification.id,
         title: data.title,
         body: data.body,
         type: data.type,
-        orderId: isOrderRelated ? targetId : '',
+        orderId:
+          data.orderId ||
+          (isOrderRelated && data.type !== NotificationType.MEDIATION_REQUEST
+            ? targetId
+            : ''),
         targetId: targetId || '',
+        storeId: data.storeId || (isStoreMediation ? targetId : ''),
       });
 
       // 3. Si se proporcionó un storeId, emitir también a la sala de la tienda y notificar actualización de cuotas
@@ -739,7 +765,8 @@ export class NotificationService {
             title: data.title,
             body: data.body,
             type: data.type,
-            orderId: targetId,
+            orderId: data.orderId || '',
+            targetId: targetId,
           });
         }
       }

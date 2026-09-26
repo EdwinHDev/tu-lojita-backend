@@ -135,6 +135,9 @@ export class Item extends TimestampEntity {
   @Column('boolean', { default: true })
   isActive: boolean;
 
+  @Column('boolean', { default: false })
+  isAgeRestricted: boolean;
+
   @Column('numeric', {
     default: 0,
     transformer: {
@@ -146,6 +149,21 @@ export class Item extends TimestampEntity {
 
   @Column('jsonb', { nullable: true, default: [] })
   customizationGroups: any[];
+
+  // Promedio de calificaciones desnormalizado (actualizado por ReviewService)
+  @Column('decimal', {
+    precision: 3,
+    scale: 1,
+    default: 0,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => (value ? parseFloat(value) : 0),
+    },
+  })
+  averageRating: number;
+
+  @Column('int', { default: 0 })
+  totalReviews: number;
 
   @OneToMany(() => CustomizationGroup, (group) => group.item, { cascade: true })
   customizationGroupsRel: CustomizationGroup[];

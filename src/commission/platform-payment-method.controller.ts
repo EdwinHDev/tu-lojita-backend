@@ -31,7 +31,6 @@ export class PlatformPaymentMethodController {
   }
 
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('admin/all')
   findAllAdmin() {
     return this.methodRepository.find({

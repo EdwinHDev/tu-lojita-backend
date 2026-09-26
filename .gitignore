@@ -54,3 +54,17 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Firebase & secrets
+src/config/firebase-service-account.json
+*-service-account*.json
+*.pem
+*.key
+
+# Local PostgreSQL data
+/postgres/
+postgres/
+
+# Uploads & local media
+/uploads/
+uploads/

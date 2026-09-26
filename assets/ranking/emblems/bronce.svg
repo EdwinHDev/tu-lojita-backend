@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="bronzeGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#CD7F32" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#3E2723" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bronzePlate" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D78A46"/>
+      <stop offset="50%" stop-color="#A55A2A"/>
+      <stop offset="100%" stop-color="#5C2E14"/>
+    </linearGradient>
+    <linearGradient id="bronzeBorder" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F2A669"/>
+      <stop offset="100%" stop-color="#4E260E"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="90" fill="url(#bronzeGlow)"/>
+  <!-- Outer Crest -->
+  <polygon points="100,15 175,55 155,145 100,185 45,145 25,55" fill="url(#bronzePlate)" stroke="url(#bronzeBorder)" stroke-width="6"/>
+  <!-- Inner Shield -->
+  <polygon points="100,32 155,65 140,135 100,168 60,135 45,65" fill="#4E260E" stroke="#8D4925" stroke-width="3"/>
+  <!-- Winged Wings -->
+  <path d="M100,45 L125,75 L160,80 L130,110 L135,150 L100,130 L65,150 L70,110 L40,80 L75,75 Z" fill="#A55A2A" stroke="#F2A669" stroke-width="2"/>
+  <!-- Center Core -->
+  <polygon points="100,75 120,105 100,135 80,105" fill="#D78A46" stroke="#FFE0B2" stroke-width="2"/>
+  <circle cx="100" cy="105" r="8" fill="#FFE0B2"/>
+</svg>

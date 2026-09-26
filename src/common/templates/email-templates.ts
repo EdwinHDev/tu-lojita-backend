@@ -351,3 +351,407 @@ export function getOrderAutoCancelledTemplate(
   `;
 }
 
+export function getRegistrationOtpTemplate(
+  otp: string,
+  firstName?: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 520px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #EEF2FF; color: #4F46E5; padding: 8px 16px; border-radius: 9999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Verificación de Cuenta
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 12px; text-align: center;">
+        Hola, ${firstName || 'Usuario'}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 28px;">
+        Gracias por registrarte en <strong>Tu Lojita</strong>. Para verificar tu correo electrónico y activar tu cuenta, ingresa el siguiente código de seguridad en la aplicación:
+      </p>
+
+      <div style="background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 100%); border: 2px dashed #C7D2FE; border-radius: 14px; padding: 24px; text-align: center; margin-bottom: 28px;">
+        <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #6366F1; text-transform: uppercase; letter-spacing: 0.1em;">
+          Código de Verificación
+        </p>
+        <span style="font-size: 38px; font-weight: 800; color: #1E1B4B; letter-spacing: 8px; font-family: monospace;">
+          ${otp}
+        </span>
+        <p style="margin: 8px 0 0; font-size: 12px; color: #64748B;">
+          Válido durante <strong>10 minutos</strong>
+        </p>
+      </div>
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; color: #64748B; font-size: 13px; line-height: 1.5;">
+          Por tu seguridad, <strong>nunca compartas este código con nadie</strong>. El equipo de Tu Lojita nunca te pedirá este código por teléfono o mensaje.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Si no solicitaste este código, puedes ignorar este mensaje de forma segura. Tu cuenta no será creada hasta que confirmes el código.
+      </p>
+    </div>
+  `;
+}
+
+export function getStoreNewDisputeTemplate(
+  storeOwnerName: string,
+  storeName: string,
+  orderId: string,
+  customerName: string,
+  disputeType: string,
+  description: string,
+  totalAmount: number,
+  date?: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid #FCA5A5; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.08);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FEF2F2; color: #DC2626; border: 1px solid #FCA5A5; padding: 6px 14px; border-radius: 9999px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Atención Requerida &bull; Nuevo Reclamo
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 8px; text-align: center;">
+        Hola, ${storeOwnerName || storeName}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 24px;">
+        El cliente <strong>${customerName}</strong> ha reportado un problema con su orden en <strong>${storeName}</strong>.
+      </p>
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #E2E8F0; padding-bottom: 10px; margin-bottom: 10px;">
+          <span style="font-size: 13px; color: #64748B;">Orden:</span>
+          <span style="font-size: 13px; font-weight: 700; color: #0F172A;">#${orderId.toUpperCase()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #E2E8F0; padding-bottom: 10px; margin-bottom: 10px;">
+          <span style="font-size: 13px; color: #64748B;">Monto de la orden:</span>
+          <span style="font-size: 13px; font-weight: 700; color: #16A34A;">$${Number(totalAmount).toFixed(2)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #E2E8F0; padding-bottom: 10px; margin-bottom: 10px;">
+          <span style="font-size: 13px; color: #64748B;">Motivo reportado:</span>
+          <span style="font-size: 13px; font-weight: 600; color: #DC2626;">${disputeType}</span>
+        </div>
+        ${date ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-size: 13px; color: #64748B;">Fecha del reclamo:</span>
+          <span style="font-size: 13px; color: #475569;">${date}</span>
+        </div>
+        ` : ''}
+      </div>
+
+      <div style="background-color: #FFF5F5; border-left: 4px solid #DC2626; padding: 16px; border-radius: 0 10px 10px 0; margin-bottom: 24px;">
+        <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #991B1B; text-transform: uppercase;">
+          Detalle del cliente:
+        </p>
+        <p style="margin: 0; font-size: 14px; color: #374151; font-style: italic; line-height: 1.5;">
+          &ldquo;${description}&rdquo;
+        </p>
+      </div>
+
+      <div style="background-color: #EFF6FF; border: 1px solid #DBEAFE; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+        <p style="margin: 0; font-size: 13px; color: #1E40AF; line-height: 1.5;">
+          <strong>¿Qué debes hacer?</strong> Ingresa a tu panel de control o a la app móvil <strong>Tu Lojita Empresa</strong>, accede al detalle de la orden y responde al cliente o acepta el reclamo para coordinar la solución.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Notificación automática generada por Tu Lojita. Por favor no respondas directamente a este correo.
+      </p>
+    </div>
+  `;
+}
+
+export function getCustomerDisputeResponseTemplate(
+  customerName: string,
+  storeName: string,
+  orderId: string,
+  merchantResponse: string,
+  isAccepted: boolean,
+  date?: string,
+): string {
+  const badgeBg = isAccepted ? '#F0FDF4' : '#EEF2FF';
+  const badgeColor = isAccepted ? '#16A34A' : '#4F46E5';
+  const badgeBorder = isAccepted ? '#86EFAC' : '#C7D2FE';
+  const badgeText = isAccepted ? 'Reclamo Aceptado por el Comercio' : 'Respuesta a tu Reclamo';
+
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid ${isAccepted ? '#86EFAC' : '#E2E8F0'}; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; padding: 6px 14px; border-radius: 9999px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          ${badgeText}
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 8px; text-align: center;">
+        Hola, ${customerName || 'Cliente'}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 24px;">
+        El comercio <strong>${storeName}</strong> ha respondido a tu reclamo sobre el pedido <strong>#${orderId.toUpperCase()}</strong>.
+      </p>
+
+      <div style="background-color: ${isAccepted ? '#F0FDF4' : '#F8FAFC'}; border-left: 4px solid ${isAccepted ? '#16A34A' : '#4F46E5'}; padding: 18px; border-radius: 0 10px 10px 0; margin-bottom: 24px;">
+        <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; color: ${isAccepted ? '#166534' : '#3730A3'}; text-transform: uppercase;">
+          ${isAccepted ? 'Resolución del comercio:' : 'Mensaje del comercio:'}
+        </p>
+        <p style="margin: 0; font-size: 14px; color: #1E293B; line-height: 1.6;">
+          ${merchantResponse || (isAccepted ? 'El comercio ha aceptado el reclamo y procedió con la resolución.' : '')}
+        </p>
+      </div>
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 16px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; font-size: 13px; color: #64748B; line-height: 1.5;">
+          ${isAccepted 
+            ? 'Tu reclamo ha concluido exitosamente. Puedes revisar el estado actualizado en la app <strong>Tu Lojita</strong>.'
+            : 'Si estás de acuerdo con la respuesta o necesitas coordinar detalles adicionales, puedes chatear directamente con el comercio desde la aplicación <strong>Tu Lojita</strong>.'
+          }
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Notificación automática generada por Tu Lojita.
+      </p>
+    </div>
+  `;
+}
+
+export function getStoreStrikeNoticeTemplate(
+  storeName: string,
+  strikeCount: number,
+  reason: string,
+  expiresAt?: string,
+): string {
+  const isCritical = strikeCount >= 2;
+  const badgeBg = isCritical ? '#FEF2F2' : '#FFFBEB';
+  const badgeColor = isCritical ? '#DC2626' : '#D97706';
+  const badgeBorder = isCritical ? '#FECACA' : '#FDE68A';
+
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid ${isCritical ? '#FCA5A5' : '#E2E8F0'}; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; padding: 6px 16px; border-radius: 9999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Aviso de Sanción: Strike (${strikeCount}/3)
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 8px; text-align: center;">
+        Atención, equipo de ${storeName}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 24px;">
+        Se ha registrado una sanción administrativa en tu comercio debido a una infracción de las políticas comunitarias de Tu Lojita.
+      </p>
+
+      <div style="background-color: #F8FAFC; border-left: 4px solid ${badgeColor}; padding: 18px; border-radius: 0 10px 10px 0; margin-bottom: 24px;">
+        <p style="margin: 0 0 8px; font-size: 12px; font-weight: 700; color: #64748B; text-transform: uppercase;">
+          Detalle del Strike:
+        </p>
+        <p style="margin: 0 0 8px; font-size: 14px; color: #1E293B;">
+          <strong>Strikes activos:</strong> ${strikeCount} de 3 permitidos
+        </p>
+        <p style="margin: 0 0 8px; font-size: 14px; color: #1E293B;">
+          <strong>Motivo:</strong> ${reason || 'Incumplimiento de normativas de publicación o servicio'}
+        </p>
+        ${
+          expiresAt
+            ? `<p style="margin: 0; font-size: 14px; color: #1E293B;"><strong>Vigencia:</strong> Expira el ${expiresAt} (90 días desde su emisión)</p>`
+            : `<p style="margin: 0; font-size: 14px; color: #1E293B;"><strong>Vigencia:</strong> 90 días naturales</p>`
+        }
+      </div>
+
+      <div style="background-color: ${isCritical ? '#FEF2F2' : '#EFF6FF'}; border: 1px solid ${isCritical ? '#FCA5A5' : '#DBEAFE'}; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+        <p style="margin: 0; font-size: 13px; color: ${isCritical ? '#991B1B' : '#1E40AF'}; line-height: 1.5;">
+          ${
+            isCritical
+              ? '<strong>Advertencia crítica:</strong> Tu comercio está a 1 strike de ser suspendido automáticamente. Te recomendamos revisar tus operaciones y la sección "Salud del Comercio" en la app <strong>Tu Lojita Empresa</strong>.'
+              : '<strong>Importante:</strong> Mantener una conducta responsable es fundamental. Si acumulas 3 strikes activos, tu comercio será suspendido de manera automática.'
+          }
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Notificación de seguridad de Tu Lojita.
+      </p>
+    </div>
+  `;
+}
+
+export function getStoreSuspensionTemplate(
+  storeName: string,
+  reason: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid #F87171; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; padding: 6px 16px; border-radius: 9999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Comercio Suspendido
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 8px; text-align: center;">
+        Comunicado urgente para ${storeName}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 24px;">
+        Lamentamos informarte que la tienda <strong>${storeName}</strong> ha sido suspendida temporalmente por el equipo de moderación y administración.
+      </p>
+
+      <div style="background-color: #FEF2F2; border-left: 4px solid #DC2626; padding: 18px; border-radius: 0 10px 10px 0; margin-bottom: 24px;">
+        <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #991B1B; text-transform: uppercase;">
+          Causa de la suspensión:
+        </p>
+        <p style="margin: 0; font-size: 14px; color: #1E293B; line-height: 1.6;">
+          ${reason || 'Acumulación de 3 strikes de sanción o infracción directa a las políticas del servicio.'}
+        </p>
+      </div>
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+        <p style="margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #1E293B;">
+          Efectos de la suspensión:
+        </p>
+        <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #475569; line-height: 1.6;">
+          <li>Tu catálogo público no está visible para clientes.</li>
+          <li>No podrás recibir nuevos pedidos ni aceptar pagos.</li>
+          <li>Aún puedes gestionar las órdenes en curso o comunicarte con soporte.</li>
+        </ul>
+      </div>
+
+      <div style="text-align: center; margin-bottom: 24px;">
+        <p style="color: #64748B; font-size: 13px; margin-bottom: 12px;">
+          Si deseas apelar esta sanción o solicitar una revisión de tu cuenta, comunícate con nuestro canal oficial de soporte.
+        </p>
+        <a href="mailto:soporte@tulojita.com" style="display: inline-block; background-color: #0F172A; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 24px; border-radius: 8px;">
+          Contactar a Soporte y Mediación
+        </a>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Notificación oficial de administración de Tu Lojita.
+      </p>
+    </div>
+  `;
+}
+
+export function getItemHiddenTemplate(
+  storeName: string,
+  itemName: string,
+  reason: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid #FCD34D; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; padding: 6px 16px; border-radius: 9999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Artículo Desactivado
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 8px; text-align: center;">
+        Hola, ${storeName}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 24px;">
+        Tu publicación <strong>"${itemName}"</strong> ha sido desactivada y retirada del catálogo público tras una evaluación de moderación.
+      </p>
+
+      <div style="background-color: #F8FAFC; border-left: 4px solid #F59E0B; padding: 18px; border-radius: 0 10px 10px 0; margin-bottom: 24px;">
+        <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #78350F; text-transform: uppercase;">
+          Motivo reportado:
+        </p>
+        <p style="margin: 0; font-size: 14px; color: #1E293B; line-height: 1.6;">
+          ${reason || 'Incumplimiento de lineamientos de publicación, contenido inapropiado o imágenes no autorizadas.'}
+        </p>
+      </div>
+
+      <div style="background-color: #EFF6FF; border: 1px solid #DBEAFE; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+        <p style="margin: 0; font-size: 13px; color: #1E40AF; line-height: 1.5;">
+          <strong>¿Cómo reactivarlo?</strong> Accede al catálogo de tu tienda en <strong>Tu Lojita Empresa</strong>, edita la descripción, precio o imágenes para asegurar que cumplan las normativas comunitarias y solicita su reactivación.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Notificación automática generada por Tu Lojita.
+      </p>
+    </div>
+  `;
+}
+
+export function getCustomerBlockedTemplate(
+  customerName: string,
+  storeName: string,
+  reason?: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #F1F5F9; color: #475569; border: 1px solid #CBD5E1; padding: 6px 16px; border-radius: 9999px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Restricción en Comercio
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 8px; text-align: center;">
+        Hola, ${customerName || 'Cliente'}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 24px;">
+        Queremos informarte con total claridad que el comercio <strong>${storeName}</strong> ha restringido tu acceso para realizar nuevas compras u órdenes en su establecimiento.
+      </p>
+
+      <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+        <p style="margin: 0; font-size: 13px; color: #166534; line-height: 1.5;">
+          <strong>Tu cuenta global permanece 100% activa:</strong> Esta restricción aplica únicamente para compras en <strong>${storeName}</strong>. Puedes continuar navegando, realizando compras y recibiendo pedidos en todos los demás comercios de Tu Lojita con normalidad.
+        </p>
+      </div>
+
+      <div style="background-color: #F8FAFC; border-left: 4px solid #64748B; padding: 18px; border-radius: 0 10px 10px 0; margin-bottom: 24px;">
+        <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #64748B; text-transform: uppercase;">
+          Motivo indicado por el comercio:
+        </p>
+        <p style="margin: 0; font-size: 14px; color: #1E293B; line-height: 1.6;">
+          ${reason || 'Decisión comercial o política interna del establecimiento.'}
+        </p>
+      </div>
+
+      <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 16px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; font-size: 13px; color: #475569; line-height: 1.5;">
+          ¿Consideras que se trata de un error o deseas resolver esta situación con el comercio? Puedes <strong>solicitar una mediación</strong> directamente desde la aplicación <strong>Tu Lojita</strong> para que nuestro equipo te asista.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Notificación informativa generada por Tu Lojita.
+      </p>
+    </div>
+  `;
+}
+
+export function getCustomerUnblockedTemplate(
+  customerName: string,
+  storeName: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid #86EFAC; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #F0FDF4; color: #16A34A; border: 1px solid #BBF7D0; padding: 6px 16px; border-radius: 9999px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Acceso Restablecido
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 8px; text-align: center;">
+        ¡Hola, ${customerName || 'Cliente'}!
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 24px;">
+        Te informamos con agrado que el comercio <strong>${storeName}</strong> ha restablecido tu acceso para realizar órdenes y compras en su tienda.
+      </p>
+
+      <div style="background-color: #F0FDF4; border: 1px solid #86EFAC; border-radius: 12px; padding: 18px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; font-size: 14px; color: #166534; line-height: 1.5;">
+          Ya puedes ingresar a la tienda de <strong>${storeName}</strong> desde la app <strong>Tu Lojita</strong>, explorar sus productos y realizar tus pedidos habituales.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Notificación automática generada por Tu Lojita.
+      </p>
+    </div>
+  `;
+}
+
+
+

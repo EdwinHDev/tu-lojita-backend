@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="emeraldGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00E676" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#003314" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="emeraldPlate" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#B9F6CA"/>
+      <stop offset="35%" stop-color="#00E676"/>
+      <stop offset="70%" stop-color="#00A152"/>
+      <stop offset="100%" stop-color="#004D20"/>
+    </linearGradient>
+    <linearGradient id="emeraldBorder" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#E8F5E9"/>
+      <stop offset="50%" stop-color="#00E676"/>
+      <stop offset="100%" stop-color="#002910"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="92" fill="url(#emeraldGlow)"/>
+  <!-- Emerald Spikes -->
+  <polygon points="15,45 50,30 65,70 20,95" fill="#00A152" stroke="#B9F6CA" stroke-width="2"/>
+  <polygon points="185,45 150,30 135,70 180,95" fill="#00A152" stroke="#B9F6CA" stroke-width="2"/>
+  <polygon points="100,5 115,28 100,38 85,28" fill="#B9F6CA" stroke="#FFF" stroke-width="2"/>
+  <!-- Main Shield -->
+  <polygon points="100,18 172,55 152,152 100,192 48,152 28,55" fill="url(#emeraldPlate)" stroke="url(#emeraldBorder)" stroke-width="6"/>
+  <!-- Inner Dark Jade Core -->
+  <polygon points="100,36 150,68 136,140 100,175 64,140 50,68" fill="#00240D" stroke="#00E676" stroke-width="3"/>
+  <!-- Faceted Emerald Gem -->
+  <polygon points="100,55 130,85 120,135 100,155 80,135 70,85" fill="#00E676" stroke="#FFFFFF" stroke-width="2.5"/>
+  <polygon points="100,75 115,95 100,125 85,95" fill="#B9F6CA" stroke="#FFF" stroke-width="2"/>
+  <circle cx="100" cy="100" r="6" fill="#FFFFFF"/>
+</svg>

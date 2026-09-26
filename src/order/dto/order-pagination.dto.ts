@@ -50,4 +50,9 @@ export class OrderPaginationDto extends PaginationDto {
   @IsOptional()
   @IsString({ message: 'El término de búsqueda debe ser un texto' })
   search?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true' || value === true)
+  hasDispute?: boolean;
 }

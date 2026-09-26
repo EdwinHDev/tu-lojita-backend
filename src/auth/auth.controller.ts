@@ -14,8 +14,13 @@ import {
 import { AuthService } from './auth.service';
 import { AuthGoogleLoginDto } from './dto/auth-google-login.dto';
 import { LoginDto } from './dto/login.dto';
+import { RequestRegistrationOtpDto } from './dto/request-registration-otp.dto';
+import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
+import { ResendRegistrationOtpDto } from './dto/resend-registration-otp.dto';
+import { CreateAdminDto } from './dto/create-admin.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { User } from 'src/user/entities/user.entity';
+import { UserRole } from 'src/user/types/user-role.enum';
 import { Request, Response } from 'express';
 import { Auth } from './decorators/auth.decorator';
 
@@ -60,6 +65,21 @@ export class AuthController {
     return this.authService.renewTokens(user.id);
   }
 
+  @Post('register/request-otp')
+  requestRegistrationOtp(@Body() dto: RequestRegistrationOtpDto) {
+    return this.authService.requestRegistrationOtp(dto);
+  }
+
+  @Post('register/verify-otp')
+  verifyRegistrationOtp(@Body() dto: VerifyRegistrationOtpDto) {
+    return this.authService.verifyRegistrationOtp(dto);
+  }
+
+  @Post('register/resend-otp')
+  resendRegistrationOtp(@Body() dto: ResendRegistrationOtpDto) {
+    return this.authService.resendRegistrationOtp(dto);
+  }
+
   @Auth() // Protege la ruta (Cualquier usuario logueado, sin importar el rol)
   @Get('check-status')
   checkAuthStatus(@Req() req: Request) {
@@ -67,5 +87,11 @@ export class AuthController {
     // Retornamos el usuario (la contraseña ya está oculta por TypeORM)
     const user = req.user as User;
     return { user };
+  }
+
+  @Auth(UserRole.ADMIN)
+  @Post('admin/create-admin')
+  createAdmin(@Body() dto: CreateAdminDto) {
+    return this.authService.createAdmin(dto);
   }
 }

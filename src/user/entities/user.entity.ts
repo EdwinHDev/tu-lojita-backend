@@ -59,6 +59,15 @@ export class User extends TimestampEntity {
   @Column({ type: 'text', select: false, nullable: true })
   password: string;
 
+  @Column('date', {
+    nullable: true,
+  })
+  birthDate?: Date;
+
+  get isAdult(): boolean {
+    return isUserAdult(this);
+  }
+
   @Column('bool', {
     default: true,
   })
@@ -82,6 +91,40 @@ export class User extends TimestampEntity {
     default: UserRole.USER,
   })
   role: UserRole;
+
+  @Column('timestamp with time zone', {
+    nullable: true,
+  })
+  chatSuspendedUntil?: Date | null;
+
+  @Column('bool', {
+    default: false,
+  })
+  isChatBannedPermanently: boolean;
+
+  @Column('text', {
+    nullable: true,
+  })
+  chatSuspensionReason?: string | null;
+
+  @Column({
+    type: 'text',
+    array: true,
+    default: [],
+  })
+  chatSuspensionEvidence?: string[];
+
+  // Promedio de calificaciones de comprador (actualizado por ReviewService)
+  @Column('decimal', {
+    precision: 3,
+    scale: 1,
+    default: 0,
+    nullable: true,
+  })
+  averageBuyerRating: number;
+
+  @Column('int', { default: 0 })
+  totalBuyerReviews: number;
 
   @OneToMany(() => Address, (address) => address.user)
   addresses: Address[];
@@ -112,3 +155,19 @@ export class User extends TimestampEntity {
     }
   }
 }
+
+export function isUserAdult(
+  user?: { birthDate?: Date | string } | null,
+): boolean {
+  if (!user || !user.birthDate) return false;
+  const today = new Date();
+  const birth = new Date(user.birthDate);
+  if (isNaN(birth.getTime())) return false;
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age >= 18;
+}
+

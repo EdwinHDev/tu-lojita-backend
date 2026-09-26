@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="masterGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E040FB" stop-opacity="0.9"/>
+      <stop offset="50%" stop-color="#7B1FA2" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#120024" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="masterPlate" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="25%" stop-color="#BA68C8"/>
+      <stop offset="65%" stop-color="#7B1FA2"/>
+      <stop offset="100%" stop-color="#311B92"/>
+    </linearGradient>
+    <linearGradient id="masterBorder" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="50%" stop-color="#EA80FC"/>
+      <stop offset="100%" stop-color="#4A148C"/>
+    </linearGradient>
+    <linearGradient id="goldFiligree" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFE082"/>
+      <stop offset="50%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#FF8F00"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="95" fill="url(#masterGlow)"/>
+  <!-- Grand Master Wings -->
+  <path d="M0,45 Q40,15 70,60 L45,120 Q10,85 0,45 Z" fill="#7B1FA2" stroke="#FFD700" stroke-width="2.5"/>
+  <path d="M200,45 Q160,15 130,60 L155,120 Q190,85 200,45 Z" fill="#7B1FA2" stroke="#FFD700" stroke-width="2.5"/>
+  <!-- Master Crown -->
+  <polygon points="100,0 115,22 135,10 128,32 100,22 72,32 65,10 85,22" fill="url(#goldFiligree)" stroke="#FFF" stroke-width="2"/>
+  <!-- Main Shield -->
+  <polygon points="100,16 176,55 156,156 100,198 44,156 24,55" fill="url(#masterPlate)" stroke="url(#masterBorder)" stroke-width="6"/>
+  <!-- Inner Velvet Void -->
+  <polygon points="100,34 154,68 138,144 100,180 62,144 46,68" fill="#15002A" stroke="#EA80FC" stroke-width="3"/>
+  <!-- Master Cosmic Eye / Emblem -->
+  <polygon points="100,50 140,88 100,158 60,88" fill="url(#goldFiligree)" stroke="#FFF" stroke-width="2"/>
+  <polygon points="100,68 124,92 100,135 76,92" fill="#E040FB" stroke="#FFD700" stroke-width="2"/>
+  <circle cx="100" cy="98" r="10" fill="#FFD700" stroke="#FFF" stroke-width="2"/>
+  <circle cx="100" cy="98" r="5" fill="#FFF"/>
+</svg>

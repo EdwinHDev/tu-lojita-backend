@@ -16,10 +16,17 @@ import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { MailerService } from '@nestjs-modules/mailer';
-import { getLoginAlertTemplate } from 'src/common/templates/email-templates';
+import {
+  getLoginAlertTemplate,
+  getRegistrationOtpTemplate,
+} from 'src/common/templates/email-templates';
+import { RequestRegistrationOtpDto } from './dto/request-registration-otp.dto';
+import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
+import { ResendRegistrationOtpDto } from './dto/resend-registration-otp.dto';
+import { CreateAdminDto } from './dto/create-admin.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import { MailerService } from '@nestjs-modules/mailer';
 
 @Injectable()
 export class AuthService {
@@ -102,6 +109,8 @@ export class AuthService {
     const user = await this.userRepository
       .createQueryBuilder('user')
       .addSelect('user.password')
+      .leftJoinAndSelect('user.company', 'company')
+      .leftJoinAndSelect('user.store', 'store')
       .where('LOWER(user.email) = :email', {
         email: email.toLowerCase().trim(),
       })
@@ -491,6 +500,240 @@ export class AuthService {
     return {
       user: restUser,
       ...tokens,
+    };
+  }
+
+  async requestRegistrationOtp(dto: RequestRegistrationOtpDto) {
+    const email = dto.email.toLowerCase().trim();
+
+    // 1. Validar que el correo no esté ya registrado en la base de datos
+    const existingUser = await this.userRepository.findOne({
+      where: { email },
+    });
+
+    if (existingUser) {
+      throw new BadRequestException('El correo electrónico ya está registrado.');
+    }
+
+    // 2. Generar código OTP numérico de 6 dígitos
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = bcrypt.hashSync(otp, 10);
+
+    // 3. Crear token de pre-registro firmado (10 minutos de vigencia)
+    const payload = {
+      type: 'REGISTRATION_OTP',
+      email,
+      firstName: dto.firstName,
+      lastName: dto.lastName || null,
+      password: dto.password,
+      appOrigin: dto.appOrigin,
+      phone: dto.phone || null,
+      identification: dto.identification || null,
+      birthDate: dto.birthDate || null,
+      otpHash,
+      issuedAt: Date.now(),
+    };
+
+    const registrationToken = this.jwtService.sign(payload, {
+      secret: envs.jwtSecret,
+      expiresIn: '10m',
+    });
+
+    // 4. Enviar correo electrónico con el código OTP
+    try {
+      await this.mailerService.sendMail({
+        to: email,
+        subject: 'Código de verificación de tu cuenta - Tu Lojita',
+        html: getRegistrationOtpTemplate(otp, dto.firstName),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error enviando correo OTP a ${email}: ${(error as Error).message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo enviar el correo de verificación. Por favor verifica tu dirección de correo.',
+      );
+    }
+
+    // 5. Retornar confirmación (La base de datos NO se toca)
+    return {
+      message: 'Código de verificación enviado al correo electrónico.',
+      registrationToken,
+      expiresIn: 600,
+    };
+  }
+
+  async verifyRegistrationOtp(dto: VerifyRegistrationOtpDto) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.registrationToken, {
+        secret: envs.jwtSecret,
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        'El código o la sesión de verificación ha expirado. Por favor intenta registrarte de nuevo.',
+      );
+    }
+
+    if (payload.type !== 'REGISTRATION_OTP') {
+      throw new BadRequestException('Token de verificación inválido.');
+    }
+
+    // Validar el código OTP
+    const isOtpValid = bcrypt.compareSync(dto.otp.trim(), payload.otpHash);
+    if (!isOtpValid) {
+      throw new BadRequestException(
+        'El código de verificación ingresado es incorrecto.',
+      );
+    }
+
+    // Doble verificación: comprobar que el correo no fue registrado mientras tanto
+    const existingUser = await this.userRepository.findOne({
+      where: { email: payload.email },
+    });
+    if (existingUser) {
+      throw new BadRequestException('El correo electrónico ya está registrado.');
+    }
+
+    // Asignar rol según el origen de la aplicación
+    let role = UserRole.USER;
+    if (payload.appOrigin === AppOrigin.SELLER) role = UserRole.VENDOR;
+    if (payload.appOrigin === AppOrigin.BUSINESS) role = UserRole.COMPANY;
+
+    // Crear y guardar el usuario en PostgreSQL
+    const user = this.userRepository.create({
+      email: payload.email,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      password: payload.password, // El hook BeforeInsert() se encarga de hashearlo
+      role,
+      phone: payload.phone,
+      identification: payload.identification,
+      birthDate: payload.birthDate ? new Date(payload.birthDate) : undefined,
+      isActive: true,
+      confirm: true,
+    });
+
+    const savedUser = await this.userRepository.save(user);
+
+    // Cargar relaciones
+    const fullUser = await this.userRepository.findOne({
+      where: { id: savedUser.id },
+      relations: ['company', 'store'],
+    });
+
+    const {
+      confirm: _confirm,
+      confirmToken: _confirmToken,
+      password: _password,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      googleId: _googleId,
+      isActive: _isActive,
+      ...restUser
+    } = fullUser || savedUser;
+
+    const tokens = this.getTokens(savedUser.id);
+
+    return {
+      user: restUser,
+      ...tokens,
+    };
+  }
+
+  async resendRegistrationOtp(dto: ResendRegistrationOtpDto) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.registrationToken, {
+        secret: envs.jwtSecret,
+        ignoreExpiration: true,
+      });
+    } catch (error) {
+      throw new BadRequestException('Token de registro inválido.');
+    }
+
+    if (payload.type !== 'REGISTRATION_OTP') {
+      throw new BadRequestException('Token de registro inválido.');
+    }
+
+    // Cooldown de 60 segundos
+    const now = Date.now();
+    if (payload.issuedAt && now - payload.issuedAt < 60000) {
+      const remainingSeconds = Math.ceil(
+        (60000 - (now - payload.issuedAt)) / 1000,
+      );
+      throw new BadRequestException(
+        `Debes esperar ${remainingSeconds} segundos antes de solicitar un nuevo código.`,
+      );
+    }
+
+    // Generar nuevo código OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = bcrypt.hashSync(otp, 10);
+
+    const updatedPayload = {
+      ...payload,
+      otpHash,
+      issuedAt: now,
+    };
+    delete updatedPayload.exp;
+    delete updatedPayload.iat;
+
+    const newRegistrationToken = this.jwtService.sign(updatedPayload, {
+      secret: envs.jwtSecret,
+      expiresIn: '10m',
+    });
+
+    try {
+      await this.mailerService.sendMail({
+        to: payload.email,
+        subject: 'Nuevo código de verificación de tu cuenta - Tu Lojita',
+        html: getRegistrationOtpTemplate(otp, payload.firstName),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error reenviando OTP a ${payload.email}: ${(error as Error).message}`,
+      );
+      throw new BadRequestException('No se pudo enviar el correo de verificación.');
+    }
+
+    return {
+      message: 'Nuevo código de verificación enviado al correo electrónico.',
+      registrationToken: newRegistrationToken,
+      expiresIn: 600,
+    };
+  }
+
+  async createAdmin(dto: CreateAdminDto) {
+    const email = dto.email.toLowerCase().trim();
+
+    // 1. Validar unicidad del correo electrónico
+    const existing = await this.userRepository.findOne({
+      where: { email },
+    });
+
+    if (existing) {
+      throw new BadRequestException('El correo electrónico ya está registrado.');
+    }
+
+    // 2. Crear el nuevo administrador
+    const newAdmin = this.userRepository.create({
+      email,
+      firstName: dto.firstName.trim(),
+      lastName: dto.lastName.trim(),
+      password: dto.password,
+      role: UserRole.ADMIN,
+      isActive: true,
+      confirm: true,
+    });
+
+    const savedAdmin = await this.userRepository.save(newAdmin);
+    this.logger.log(`Nuevo administrador creado exitosamente: ${email}`);
+
+    const { password: _, ...cleanAdmin } = savedAdmin;
+    return {
+      message: 'Administrador creado exitosamente.',
+      user: cleanAdmin,
     };
   }
 }

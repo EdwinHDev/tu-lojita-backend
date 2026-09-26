@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="silverGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E0E6ED" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#486581" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="silverPlate" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0F4F8"/>
+      <stop offset="35%" stop-color="#D9E2EC"/>
+      <stop offset="70%" stop-color="#9FB3C8"/>
+      <stop offset="100%" stop-color="#627D98"/>
+    </linearGradient>
+    <linearGradient id="silverBorder" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#486581"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="90" fill="url(#silverGlow)"/>
+  <!-- Wings behind -->
+  <polygon points="20,60 50,40 70,80 30,110" fill="#9FB3C8" stroke="#D9E2EC" stroke-width="2"/>
+  <polygon points="180,60 150,40 130,80 170,110" fill="#9FB3C8" stroke="#D9E2EC" stroke-width="2"/>
+  <!-- Outer Shield -->
+  <polygon points="100,12 170,50 150,145 100,188 50,145 30,50" fill="url(#silverPlate)" stroke="url(#silverBorder)" stroke-width="6"/>
+  <!-- Inner Shield -->
+  <polygon points="100,30 150,62 135,135 100,170 65,135 50,62" fill="#334E68" stroke="#829AB1" stroke-width="3"/>
+  <!-- Silver Hawk Emblem -->
+  <path d="M100,45 L120,70 L155,75 L125,105 L130,145 L100,125 L70,145 L75,105 L45,75 L80,70 Z" fill="url(#silverPlate)" stroke="#FFFFFF" stroke-width="2"/>
+  <polygon points="100,80 118,105 100,130 82,105" fill="#BCCCDC" stroke="#FFFFFF" stroke-width="2"/>
+  <circle cx="100" cy="105" r="7" fill="#FFFFFF"/>
+</svg>

@@ -4,15 +4,19 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UserPaginationDto } from './dto/user-pagination.dto';
 import { User } from './entities/user.entity';
 import { Company } from 'src/company/entities/company.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { StoreStatus } from 'src/store/types/status.enum';
+import { Order } from 'src/order/entities/order.entity';
 import { AppOrigin } from 'src/auth/types/app-origin.enum';
 import { UserRole } from './types/user-role.enum';
+import { MediationRequest } from 'src/store/entities/mediation-request.entity';
 
 @Injectable()
 export class UserService {
@@ -23,6 +27,9 @@ export class UserService {
     private readonly companyRepository: Repository<Company>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
+    @InjectRepository(MediationRequest)
+    private readonly mediationRequestRepository: Repository<MediationRequest>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
@@ -41,19 +48,15 @@ export class UserService {
           existingUser.role = UserRole.COMPANY;
         } else {
           throw new BadRequestException(
-            'El correo ya está registrado y no es elegible para esta aplicación.',
+            'El correo ya está en uso.',
           );
         }
       }
     } else {
-      if (appOrigin === AppOrigin.BUSINESS) {
-        throw new BadRequestException(
-          'Debes registrarte primero en la aplicación de Sellers.',
-        );
-      }
       if (!userDetails.role) {
         if (appOrigin === AppOrigin.CLIENT) userDetails.role = UserRole.USER;
         if (appOrigin === AppOrigin.SELLER) userDetails.role = UserRole.VENDOR;
+        if (appOrigin === AppOrigin.BUSINESS) userDetails.role = UserRole.COMPANY;
       }
     }
 
@@ -92,11 +95,94 @@ export class UserService {
     return await this.userRepository.save(user);
   }
 
-  findAll() {
-    const users = this.userRepository.find({
-      relations: ['addresses', 'company', 'store'],
-    });
-    return users;
+  async findAll(paginationDto?: UserPaginationDto) {
+    const {
+      limit = 50,
+      offset = 0,
+      role,
+      search,
+      sort = 'createdAt',
+      order = 'DESC',
+    } = paginationDto || {};
+
+    const queryBuilder = this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.addresses', 'addresses')
+      .leftJoinAndSelect('user.company', 'company')
+      .leftJoinAndSelect('user.store', 'store');
+
+    if (role) {
+      queryBuilder.andWhere('user.role = :role', { role });
+    }
+
+    if (search && search.trim().length > 0) {
+      queryBuilder.andWhere(
+        '(user.firstName ILIKE :search OR user.lastName ILIKE :search OR user.email ILIKE :search OR user.phone ILIKE :search)',
+        { search: `%${search.trim()}%` },
+      );
+    }
+
+    const validSortFields = [
+      'createdAt',
+      'firstName',
+      'lastName',
+      'email',
+      'role',
+      'isActive',
+    ];
+    const sortField = validSortFields.includes(sort as string)
+      ? `user.${sort}`
+      : 'user.createdAt';
+    queryBuilder.orderBy(sortField, order);
+
+    queryBuilder.skip(offset).take(limit);
+
+    const [items, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      items,
+      total,
+      limit,
+      offset,
+    };
+  }
+
+  async getPlatformMetrics() {
+    const [totalUsers, totalClients, totalVendors, totalCompanies, totalAdmins] =
+      await Promise.all([
+        this.userRepository.count(),
+        this.userRepository.count({ where: { role: UserRole.USER } }),
+        this.userRepository.count({ where: { role: UserRole.VENDOR } }),
+        this.userRepository.count({ where: { role: UserRole.COMPANY } }),
+        this.userRepository.count({ where: { role: UserRole.ADMIN } }),
+      ]);
+
+    const [totalStores, activeStores, suspendedStores] = await Promise.all([
+      this.storeRepository.count(),
+      this.storeRepository.count({ where: { status: StoreStatus.ACTIVE } }),
+      this.storeRepository.count({ where: { status: StoreStatus.SUSPENDED } }),
+    ]);
+
+    const orderRepo = this.dataSource.getRepository(Order);
+    const totalOrders = await orderRepo.count();
+
+    return {
+      users: {
+        total: totalUsers,
+        clients: totalClients,
+        vendors: totalVendors,
+        companies: totalCompanies,
+        admins: totalAdmins,
+      },
+      stores: {
+        total: totalStores,
+        active: activeStores,
+        suspended: suspendedStores,
+      },
+      orders: {
+        total: totalOrders,
+      },
+    };
   }
 
   async findOne(id: string) {
@@ -198,6 +284,48 @@ export class UserService {
       user.phone = updateProfileDto.phone;
     }
 
+    if (updateProfileDto.birthDate !== undefined) {
+      user.birthDate = updateProfileDto.birthDate ? new Date(updateProfileDto.birthDate) : undefined;
+    }
+
     return await this.userRepository.save(user);
+  }
+
+  async getMyMediations(customerId: string, storeId?: string) {
+    const where: Record<string, any> = { customerId };
+    if (storeId) where['storeId'] = storeId;
+
+    const requests = await this.mediationRequestRepository.find({
+      where,
+      relations: ['store'],
+      order: { createdAt: 'DESC' },
+      select: {
+        id: true,
+        topic: true,
+        message: true,
+        status: true,
+        storeResponse: true,
+        storeId: true,
+        createdAt: true,
+        updatedAt: true,
+        store: {
+          id: true,
+          name: true,
+          logo: true,
+        },
+      },
+    });
+
+    return requests.map((req) => ({
+      ...req,
+      store: req.store
+        ? {
+            id: req.store.id,
+            name: req.store.name,
+            logo: req.store.logo,
+            logoUrl: req.store.logo,
+          }
+        : null,
+    }));
   }
 }

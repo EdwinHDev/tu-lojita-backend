@@ -107,4 +107,8 @@ export class CreateStoreDto {
   @IsString({ message: 'La zona horaria debe ser una cadena de texto' })
   @IsOptional()
   timezone?: string;
+
+  @IsBoolean({ message: 'isAgeRestricted debe ser un booleano' })
+  @IsOptional()
+  isAgeRestricted?: boolean;
 }

@@ -12,6 +12,8 @@ import { JwtService } from '@nestjs/jwt';
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { envs } from '../config/envs';
 import { NotificationService } from './notification.service';
+import { filterChatContent } from '../common/utils/content-filter.utils';
+import { UserRole } from '../user/types';
 
 @WebSocketGateway({
   cors: {
@@ -55,6 +57,15 @@ export class NotificationGateway
       this.logger.log(
         `Client ${client.id} (User: ${userId}) connected → room user_${userId}`,
       );
+
+      // Si el usuario tiene rol ADMIN, unirlo automáticamente a admin_room y enviarle badges iniciales
+      const user = await this.notificationService.findUserById(userId);
+      if (user && user.role === UserRole.ADMIN) {
+        client.join('admin_room');
+        this.logger.log(`Admin client ${client.id} joined admin_room`);
+        const summary = await this.notificationService.getAdminBadgesSummary();
+        client.emit('admin_badges_updated', summary);
+      }
     } catch (error) {
       this.logger.error(
         `Auth failed for client ${client.id}: ${error.message}`,
@@ -86,13 +97,15 @@ export class NotificationGateway
     const history = await this.notificationService.getChatHistory(data.orderId);
     client.emit('chat_history', history);
 
-    // 2. Marcar los mensajes entrantes como entregados
+    // 2. Marcar los mensajes entrantes como entregados y obtener userId
+    let userId: string | undefined;
     try {
       const token = this.extractToken(client);
       if (token) {
         const payload = await this.jwtService.verifyAsync(token, {
           secret: envs.jwtSecret,
         });
+        userId = payload.sub;
         await this.notificationService.markMessagesDelivered(
           data.orderId,
           payload.sub,
@@ -102,9 +115,10 @@ export class NotificationGateway
       this.logger.error(`Error marking delivered on join: ${e.message}`);
     }
 
-    // 3. Notificar al cliente si el chat no está permitido o la orden está cerrada
+    // 3. Notificar al cliente si el chat no está permitido, la orden está cerrada o hay suspensión activa
     const chatStatus = await this.notificationService.checkChatStatusForOrder(
       data.orderId,
+      userId,
     );
     if (!chatStatus.allowed) {
       if (chatStatus.reason === 'CHAT_DISABLED') {
@@ -117,6 +131,18 @@ export class NotificationGateway
         client.emit('chat_closed', {
           orderId: data.orderId,
           reason: 'resolved',
+        });
+      } else if (
+        chatStatus.reason === 'USER_CHAT_SUSPENDED' ||
+        chatStatus.reason === 'COUNTERPART_CHAT_SUSPENDED'
+      ) {
+        client.emit('chat_closed', {
+          orderId: data.orderId,
+          reason: chatStatus.reason,
+          isPermanent: chatStatus.isPermanent,
+          until: chatStatus.until,
+          reasonText: chatStatus.reasonText,
+          evidence: chatStatus.evidence,
         });
       }
     }
@@ -160,6 +186,7 @@ export class NotificationGateway
 
     const chatStatus = await this.notificationService.checkChatStatusForOrder(
       data.orderId,
+      userId,
     );
     if (!chatStatus.allowed) {
       if (chatStatus.reason === 'CHAT_DISABLED') {
@@ -169,8 +196,39 @@ export class NotificationGateway
         });
         return { success: false, error: 'CHAT_DISABLED' };
       }
+      if (
+        chatStatus.reason === 'USER_CHAT_SUSPENDED' ||
+        chatStatus.reason === 'COUNTERPART_CHAT_SUSPENDED'
+      ) {
+        client.emit('chat_closed', {
+          orderId: data.orderId,
+          reason: chatStatus.reason,
+          isPermanent: chatStatus.isPermanent,
+          until: chatStatus.until,
+          reasonText: chatStatus.reasonText,
+          evidence: chatStatus.evidence,
+        });
+        return { success: false, error: chatStatus.reason };
+      }
       client.emit('chat_closed', { orderId: data.orderId, reason: 'resolved' });
       return { success: false, error: 'CHAT_CLOSED' };
+    }
+
+    // Moderación automatizada de lenguaje abusivo y estafas
+    if (data.content) {
+      const moderation = filterChatContent(data.content);
+      if (!moderation.isValid) {
+        client.emit('chat_policy_violation', {
+          orderId: data.orderId,
+          reason: moderation.reason,
+          matchedCategory: moderation.matchedCategory,
+        });
+        return {
+          success: false,
+          error: 'POLICY_VIOLATION',
+          message: moderation.reason,
+        };
+      }
     }
 
     try {
@@ -278,6 +336,28 @@ export class NotificationGateway
     const room = `store_${data.storeId}`;
     client.leave(room);
     this.logger.log(`Client ${client.id} left ${room}`);
+  }
+
+  // ─── Admin Badges ─────────────────────────────────────────────────────────
+
+  @SubscribeMessage('join_admin_room')
+  async handleJoinAdminRoom(@ConnectedSocket() client: Socket) {
+    client.join('admin_room');
+    this.logger.log(`Client ${client.id} joined admin_room via event`);
+    const summary = await this.notificationService.getAdminBadgesSummary();
+    client.emit('admin_badges_updated', summary);
+  }
+
+  async emitAdminBadgesUpdate() {
+    try {
+      const summary = await this.notificationService.getAdminBadgesSummary();
+      this.server.to('admin_room').emit('admin_badges_updated', summary);
+      this.logger.log(
+        `Emitted admin_badges_updated to admin_room: ${JSON.stringify(summary)}`,
+      );
+    } catch (err) {
+      this.logger.error(`Error in emitAdminBadgesUpdate: ${err.message}`);
+    }
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────

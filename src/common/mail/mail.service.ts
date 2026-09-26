@@ -9,6 +9,13 @@ import {
   getPaymentApprovedTemplate,
   getPaymentRejectedTemplate,
   getOrderAutoCancelledTemplate,
+  getStoreNewDisputeTemplate,
+  getCustomerDisputeResponseTemplate,
+  getStoreStrikeNoticeTemplate,
+  getStoreSuspensionTemplate,
+  getItemHiddenTemplate,
+  getCustomerBlockedTemplate,
+  getCustomerUnblockedTemplate,
 } from 'src/common/templates/email-templates';
 import { formatDateInTimezone } from 'src/common/utils/timezone.utils';
 
@@ -433,6 +440,191 @@ export class MailService {
       this.logger.log(`Subscription suspended notice email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send subscription suspension email to ${email}: ${error.message}`);
+    }
+  }
+
+  async sendDisputeOpenedToStore(params: {
+    toEmail: string;
+    storeOwnerName: string;
+    storeName: string;
+    orderId: string;
+    customerName: string;
+    disputeType: string;
+    description: string;
+    totalAmount: number;
+  }) {
+    try {
+      const orderShort =
+        params.orderId.length > 8
+          ? params.orderId.substring(0, 8).toUpperCase()
+          : params.orderId.toUpperCase();
+      const dateFormatted = formatDateInTimezone(new Date());
+      await this.mailerService.sendMail({
+        to: params.toEmail,
+        subject: `⚠️ Nuevo Reclamo en Pedido #${orderShort} - Tu Lojita`,
+        html: getStoreNewDisputeTemplate(
+          params.storeOwnerName,
+          params.storeName,
+          orderShort,
+          params.customerName,
+          params.disputeType,
+          params.description,
+          params.totalAmount,
+          dateFormatted,
+        ),
+      });
+      this.logger.log(
+        `Dispute opened email sent to store owner ${params.toEmail} for order ${params.orderId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send dispute opened email to store ${params.toEmail}: ${error.message}`,
+      );
+    }
+  }
+
+  async sendDisputeResponseToCustomer(params: {
+    toEmail: string;
+    customerName: string;
+    storeName: string;
+    orderId: string;
+    merchantResponse: string;
+    isAccepted: boolean;
+  }) {
+    try {
+      const orderShort =
+        params.orderId.length > 8
+          ? params.orderId.substring(0, 8).toUpperCase()
+          : params.orderId.toUpperCase();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const subject = params.isAccepted
+        ? `✅ Reclamo Aceptado: Pedido #${orderShort} - Tu Lojita`
+        : `💬 Respuesta a tu Reclamo: Pedido #${orderShort} - Tu Lojita`;
+
+      await this.mailerService.sendMail({
+        to: params.toEmail,
+        subject,
+        html: getCustomerDisputeResponseTemplate(
+          params.customerName,
+          params.storeName,
+          orderShort,
+          params.merchantResponse,
+          params.isAccepted,
+          dateFormatted,
+        ),
+      });
+      this.logger.log(
+        `Dispute response email sent to customer ${params.toEmail} for order ${params.orderId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send dispute response email to customer ${params.toEmail}: ${error.message}`,
+      );
+    }
+  }
+
+  async sendStoreStrikeNotice(params: {
+    toEmail: string;
+    storeName: string;
+    strikeCount: number;
+    reason: string;
+    expiresAt?: string;
+  }) {
+    try {
+      await this.mailerService.sendMail({
+        to: params.toEmail,
+        subject: `⚠️ Aviso de Sanción: Strike (${params.strikeCount}/3) - ${params.storeName}`,
+        html: getStoreStrikeNoticeTemplate(
+          params.storeName,
+          params.strikeCount,
+          params.reason,
+          params.expiresAt,
+        ),
+      });
+      this.logger.log(`Strike notice sent to store owner at ${params.toEmail}`);
+    } catch (error) {
+      this.logger.error(`Failed to send strike notice email: ${error.message}`);
+    }
+  }
+
+  async sendStoreSuspensionNotice(params: {
+    toEmail: string;
+    storeName: string;
+    reason: string;
+  }) {
+    try {
+      await this.mailerService.sendMail({
+        to: params.toEmail,
+        subject: `🚨 Suspensión Temporal de Comercio - ${params.storeName}`,
+        html: getStoreSuspensionTemplate(params.storeName, params.reason),
+      });
+      this.logger.log(`Suspension notice sent to store owner at ${params.toEmail}`);
+    } catch (error) {
+      this.logger.error(`Failed to send suspension notice email: ${error.message}`);
+    }
+  }
+
+  async sendItemHiddenNotice(params: {
+    toEmail: string;
+    storeName: string;
+    itemName: string;
+    reason: string;
+  }) {
+    try {
+      await this.mailerService.sendMail({
+        to: params.toEmail,
+        subject: `⚠️ Publicación desactivada por moderación - ${params.itemName}`,
+        html: getItemHiddenTemplate(
+          params.storeName,
+          params.itemName,
+          params.reason,
+        ),
+      });
+      this.logger.log(`Item hidden notice sent to store owner at ${params.toEmail}`);
+    } catch (error) {
+      this.logger.error(`Failed to send item hidden notice email: ${error.message}`);
+    }
+  }
+
+  async sendCustomerBlockedNotice(params: {
+    toEmail: string;
+    customerName: string;
+    storeName: string;
+    reason?: string;
+  }) {
+    try {
+      await this.mailerService.sendMail({
+        to: params.toEmail,
+        subject: `Información sobre compras en ${params.storeName} - Tu Lojita`,
+        html: getCustomerBlockedTemplate(
+          params.customerName,
+          params.storeName,
+          params.reason,
+        ),
+      });
+      this.logger.log(`Customer block notice sent to ${params.toEmail}`);
+    } catch (error) {
+      this.logger.error(`Failed to send customer block email: ${error.message}`);
+    }
+  }
+
+  async sendCustomerUnblockedNotice(params: {
+    toEmail: string;
+    customerName: string;
+    storeName: string;
+  }) {
+    try {
+      await this.mailerService.sendMail({
+        to: params.toEmail,
+        subject: `Acceso restablecido en ${params.storeName} - Tu Lojita`,
+        html: getCustomerUnblockedTemplate(
+          params.customerName,
+          params.storeName,
+        ),
+      });
+      this.logger.log(`Customer unblock notice sent to ${params.toEmail}`);
+    } catch (error) {
+      this.logger.error(`Failed to send customer unblock email: ${error.message}`);
     }
   }
 

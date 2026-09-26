@@ -11,7 +11,7 @@ import { UpdateItemDto } from './dto/update-item.dto';
 import { Item } from './entities/item.entity';
 import { PriceType } from './types/price-type.enum';
 import { ItemPaginationDto } from './dto/item-pagination.dto';
-import { User } from 'src/user/entities/user.entity';
+import { User, isUserAdult } from 'src/user/entities/user.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreStatus } from 'src/store/types/status.enum';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
@@ -361,7 +361,7 @@ export class ItemService {
     return await this.mapItemResponse(savedItem);
   }
 
-  async findAll(paginationDto: ItemPaginationDto) {
+  async findAll(paginationDto: ItemPaginationDto, user?: User) {
     const {
       limit = 10,
       offset = 0,
@@ -401,6 +401,12 @@ export class ItemService {
     queryBuilder.andWhere('store.status = :activeStatus', {
       activeStatus: StoreStatus.ACTIVE,
     });
+
+    // Control estricto de edad (+18): si el usuario es menor o no verificado, excluir items y tiendas +18
+    if (!isUserAdult(user)) {
+      queryBuilder.andWhere('item.isAgeRestricted = false');
+      queryBuilder.andWhere('store.isAgeRestricted = false');
+    }
 
     // Filtros de Precio
     if (minPrice !== undefined) {
@@ -518,17 +524,24 @@ export class ItemService {
     };
   }
 
-  async findByStore(storeId: string, paginationDto: ItemPaginationDto) {
+  async findByStore(
+    storeId: string,
+    paginationDto: ItemPaginationDto,
+    user?: User,
+  ) {
     const includeInactive =
       paginationDto.includeInactive !== undefined
         ? paginationDto.includeInactive
         : true;
 
-    return await this.findAll({
-      ...paginationDto,
-      storeId,
-      includeInactive,
-    });
+    return await this.findAll(
+      {
+        ...paginationDto,
+        storeId,
+        includeInactive,
+      },
+      user,
+    );
   }
 
   async findOne(id: string) {

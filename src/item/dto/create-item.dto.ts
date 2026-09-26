@@ -123,4 +123,8 @@ export class CreateItemDto {
   })
   @IsOptional()
   lateFeePercentage?: number;
+
+  @IsBoolean({ message: 'isAgeRestricted debe ser un valor booleano' })
+  @IsOptional()
+  isAgeRestricted?: boolean;
 }

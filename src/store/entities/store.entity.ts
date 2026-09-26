@@ -4,6 +4,7 @@ import {
   Entity,
   ManyToOne,
   OneToMany,
+  OneToOne,
   BeforeInsert,
   BeforeUpdate,
 } from 'typeorm';
@@ -17,6 +18,7 @@ import { StoreAddress } from 'src/store-address/entities/store-address.entity';
 import { Payment } from 'src/payment/entities/payment.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
+import { StoreRanking } from 'src/ranking/entities/store-ranking.entity';
 import slugify from 'slugify';
 import { StoreStatus } from '../types/status.enum';
 import { InstallmentPeriod } from '../types/installment-period.enum';
@@ -89,6 +91,9 @@ export class Store extends TimestampEntity {
   @OneToMany(() => StorePaymentMethod, (method) => method.store)
   paymentMethodConfigs: StorePaymentMethod[];
 
+  @OneToOne(() => StoreRanking, (ranking) => ranking.store, { nullable: true })
+  ranking?: StoreRanking;
+
   // Configuración de Pagos Parciales
   @Column('boolean', { default: false })
   allowPartialPayments: boolean;
@@ -107,6 +112,12 @@ export class Store extends TimestampEntity {
 
   @Column('boolean', { default: true })
   allowChat: boolean;
+
+  @Column('boolean', { default: false })
+  isAgeRestricted: boolean;
+
+  @Column('int', { default: 0 })
+  strikes: number;
 
   @Column('int', { default: 7, nullable: true })
   installmentIntervalValue: number;

@@ -49,7 +49,6 @@ export class SubscriptionController {
   // RUTAS ADMINISTRATIVAS (FINANCIAL OTP GUARD)
   // ----------------------------------------------------
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('admin/settings')
   getSettings() {
     return this.subscriptionService.getSettings();
@@ -63,14 +62,12 @@ export class SubscriptionController {
   }
 
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('admin/all')
   getAllSubscriptions() {
     return this.subscriptionService.getAllSubscriptions();
   }
 
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('admin/pending-receipts')
   getPendingReceipts() {
     return this.subscriptionService.getPendingPayments();
@@ -89,7 +86,6 @@ export class SubscriptionController {
   }
 
   @Auth(UserRole.ADMIN)
-  @UseGuards(FinancialAdminGuard)
   @Get('admin/metrics')
   getSubscriptionMetrics() {
     return this.subscriptionService.getSubscriptionMetrics();

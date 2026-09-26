@@ -12,8 +12,20 @@ import { Order } from 'src/order/entities/order.entity';
 import { Item } from 'src/item/entities/item.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 
+import { StoreCustomerBlock } from './entities/store-customer-block.entity';
+import { MediationRequest } from './entities/mediation-request.entity';
+import { StoreStrike } from './entities/store-strike.entity';
+import { NotificationModule } from 'src/notification/notification.module';
+import { MailModule } from 'src/common/mail/mail.module';
+import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.module';
+import { RankingModule } from 'src/ranking/ranking.module';
+
 @Module({
   imports: [
+    NotificationModule,
+    MailModule,
+    PlatformSettingsModule,
+    RankingModule,
     TypeOrmModule.forFeature([
       Store,
       Company,
@@ -24,6 +36,9 @@ import { StoreCategory } from 'src/store-category/entities/store-category.entity
       Order,
       Item,
       StoreCategory,
+      StoreCustomerBlock,
+      MediationRequest,
+      StoreStrike,
     ]),
   ],
   controllers: [StoreController],
