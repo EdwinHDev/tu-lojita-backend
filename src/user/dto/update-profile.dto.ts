@@ -13,7 +13,9 @@ export class UpdateProfileDto {
   @MinLength(10, { message: 'El teléfono debe tener al menos 10 caracteres' })
   phone?: string;
 
-  @IsString({ message: 'La fecha de nacimiento debe ser una cadena de texto válida' })
+  @IsString({
+    message: 'La fecha de nacimiento debe ser una cadena de texto válida',
+  })
   @IsOptional()
   birthDate?: string;
 }

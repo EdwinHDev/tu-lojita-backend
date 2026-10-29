@@ -28,6 +28,7 @@ import { OrderDisputeModule } from './order-dispute/order-dispute.module';
 import { ReviewModule } from './review/review.module';
 import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { RankingModule } from './ranking/ranking.module';
+import { FavoriteModule } from './favorite/favorite.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { RankingModule } from './ranking/ranking.module';
       },
       defaults: {
         from: envs.emailFrom,
+        replyTo: 'no-reply@tulojita.com',
       },
     }),
     TypeOrmModule.forRoot({
@@ -81,6 +83,7 @@ import { RankingModule } from './ranking/ranking.module';
     ReviewModule,
     PlatformSettingsModule,
     RankingModule,
+    FavoriteModule,
   ],
   controllers: [],
   providers: [],

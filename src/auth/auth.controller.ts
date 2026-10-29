@@ -18,11 +18,21 @@ import { RequestRegistrationOtpDto } from './dto/request-registration-otp.dto';
 import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
 import { ResendRegistrationOtpDto } from './dto/resend-registration-otp.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { RequestForgotPasswordOtpDto } from './dto/request-forgot-password-otp.dto';
+import { VerifyForgotPasswordOtpDto } from './dto/verify-forgot-password-otp.dto';
+import { ResendForgotPasswordOtpDto } from './dto/resend-forgot-password-otp.dto';
+import { ResetForgotPasswordDto } from './dto/reset-forgot-password.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
 import { Request, Response } from 'express';
+import {
+  CollaboratorLoginDto,
+  ChangeCollaboratorPasswordDto,
+} from 'src/company/dto/collaborator-auth.dto';
 import { Auth } from './decorators/auth.decorator';
+import { GetUser } from './decorators/get-user.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -33,6 +43,20 @@ export class AuthController {
     const html = await this.authService.blockAccount(token);
     res.setHeader('Content-Type', 'text/html');
     return res.send(html);
+  }
+
+  @Post('collaborator-login')
+  loginCollaborator(@Body() loginDto: CollaboratorLoginDto) {
+    return this.authService.loginCollaborator(loginDto);
+  }
+
+  @Post('collaborator-change-password')
+  @Auth()
+  changeCollaboratorPassword(
+    @Body() dto: ChangeCollaboratorPasswordDto,
+    @GetUser() actor: any,
+  ) {
+    return this.authService.changeCollaboratorPassword(actor.id, dto);
   }
 
   @Post('seed')
@@ -80,6 +104,26 @@ export class AuthController {
     return this.authService.resendRegistrationOtp(dto);
   }
 
+  @Post('forgot-password/request-otp')
+  requestForgotPasswordOtp(@Body() dto: RequestForgotPasswordOtpDto) {
+    return this.authService.requestForgotPasswordOtp(dto);
+  }
+
+  @Post('forgot-password/verify-otp')
+  verifyForgotPasswordOtp(@Body() dto: VerifyForgotPasswordOtpDto) {
+    return this.authService.verifyForgotPasswordOtp(dto);
+  }
+
+  @Post('forgot-password/resend-otp')
+  resendForgotPasswordOtp(@Body() dto: ResendForgotPasswordOtpDto) {
+    return this.authService.resendForgotPasswordOtp(dto);
+  }
+
+  @Post('forgot-password/reset-password')
+  resetPassword(@Body() dto: ResetForgotPasswordDto) {
+    return this.authService.resetPasswordWithToken(dto);
+  }
+
   @Auth() // Protege la ruta (Cualquier usuario logueado, sin importar el rol)
   @Get('check-status')
   checkAuthStatus(@Req() req: Request) {
@@ -93,5 +137,14 @@ export class AuthController {
   @Post('admin/create-admin')
   createAdmin(@Body() dto: CreateAdminDto) {
     return this.authService.createAdmin(dto);
+  }
+
+  @Auth()
+  @Patch('change-password')
+  changePassword(
+    @GetUser('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(userId, dto);
   }
 }

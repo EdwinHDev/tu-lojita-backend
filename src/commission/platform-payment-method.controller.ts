@@ -40,7 +40,7 @@ export class PlatformPaymentMethodController {
 
   @Auth(UserRole.ADMIN)
   @UseGuards(FinancialAdminGuard)
-  @Post()
+  @Post(['', 'admin'])
   create(@Body() dto: Partial<PlatformPaymentMethod>) {
     const method = this.methodRepository.create(dto);
     return this.methodRepository.save(method);
@@ -48,7 +48,7 @@ export class PlatformPaymentMethodController {
 
   @Auth(UserRole.ADMIN)
   @UseGuards(FinancialAdminGuard)
-  @Patch(':id')
+  @Patch([':id', 'admin/:id'])
   async update(
     @Param('id') id: string,
     @Body() dto: Partial<PlatformPaymentMethod>,
@@ -61,7 +61,7 @@ export class PlatformPaymentMethodController {
 
   @Auth(UserRole.ADMIN)
   @UseGuards(FinancialAdminGuard)
-  @Delete(':id')
+  @Delete([':id', 'admin/:id'])
   async remove(@Param('id') id: string) {
     const method = await this.methodRepository.findOne({ where: { id } });
     if (!method) throw new Error('Método de pago no encontrado');

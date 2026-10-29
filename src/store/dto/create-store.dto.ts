@@ -63,7 +63,8 @@ export class CreateStoreDto {
   mainAddress?: CreateStoreAddressDto;
 
   @IsUUID('4', { message: 'El ID de la subcategoría debe ser un UUID válido' })
-  subCategoryId: string;
+  @IsOptional()
+  subCategoryId?: string;
 
   @IsString({
     message: 'El nombre de la sucursal debe ser una cadena de texto',
@@ -111,4 +112,14 @@ export class CreateStoreDto {
   @IsBoolean({ message: 'isAgeRestricted debe ser un booleano' })
   @IsOptional()
   isAgeRestricted?: boolean;
+
+  @IsString({ message: 'El usuario de Instagram debe ser una cadena de texto' })
+  @IsOptional()
+  @MaxLength(100, { message: 'El usuario de Instagram debe tener menos de 100 caracteres' })
+  instagram?: string;
+
+  @IsString({ message: 'El usuario de TikTok debe ser una cadena de texto' })
+  @IsOptional()
+  @MaxLength(100, { message: 'El usuario de TikTok debe tener menos de 100 caracteres' })
+  tiktok?: string;
 }

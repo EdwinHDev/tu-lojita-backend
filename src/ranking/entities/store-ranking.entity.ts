@@ -25,7 +25,14 @@ export class StoreRanking extends TimestampEntity {
 
   @Index()
   @Column('int', { default: 0 })
-  currentLP: number; // Represents PR (Puntos de Rango)
+  currentPR: number;
+
+  get currentLP(): number {
+    return this.currentPR;
+  }
+  set currentLP(value: number) {
+    this.currentPR = value;
+  }
 
   @Column('enum', {
     enum: Division,

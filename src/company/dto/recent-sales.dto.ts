@@ -6,6 +6,8 @@ export class RecentSaleDto {
   time: string;
   orderId: string;
   status: string;
+  itemTitle?: string;
+  itemImageUrl?: string | null;
 }
 
 export class RecentSalesResponseDto {

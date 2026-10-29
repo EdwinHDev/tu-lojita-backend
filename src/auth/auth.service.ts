@@ -4,7 +4,9 @@ import {
   UnauthorizedException,
   ForbiddenException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
+import { MailerService } from '@nestjs-modules/mailer';
 import { OAuth2Client } from 'google-auth-library';
 import { envs } from 'src/config/envs';
 import { AuthGoogleLoginDto } from './dto/auth-google-login.dto';
@@ -19,20 +21,34 @@ import { JwtService } from '@nestjs/jwt';
 import {
   getLoginAlertTemplate,
   getRegistrationOtpTemplate,
+  getPasswordResetOtpTemplate,
 } from 'src/common/templates/email-templates';
 import { RequestRegistrationOtpDto } from './dto/request-registration-otp.dto';
 import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
 import { ResendRegistrationOtpDto } from './dto/resend-registration-otp.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { RequestForgotPasswordOtpDto } from './dto/request-forgot-password-otp.dto';
+import { VerifyForgotPasswordOtpDto } from './dto/verify-forgot-password-otp.dto';
+import { ResendForgotPasswordOtpDto } from './dto/resend-forgot-password-otp.dto';
+import { ResetForgotPasswordDto } from './dto/reset-forgot-password.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { MailerService } from '@nestjs-modules/mailer';
+import { CompanyCollaborator } from 'src/company/entities/company-collaborator.entity';
+import {
+  CollaboratorLoginDto,
+  ChangeCollaboratorPasswordDto,
+} from 'src/company/dto/collaborator-auth.dto';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger('AuthService');
   private readonly googleClient = new OAuth2Client(envs.googleClientId);
   private readonly activeBlockTokens = new Map<string, string>();
+  private readonly collaboratorLoginAttempts = new Map<
+    string,
+    { attempts: number; blockedUntil: number }
+  >();
   private readonly adminPins = new Map<
     string,
     { pin: string; userId: string; expiresAt: number; attempts: number }
@@ -41,6 +57,8 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(CompanyCollaborator)
+    private readonly collaboratorRepository: Repository<CompanyCollaborator>,
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
   ) {}
@@ -110,16 +128,30 @@ export class AuthService {
       .createQueryBuilder('user')
       .addSelect('user.password')
       .leftJoinAndSelect('user.company', 'company')
+      .leftJoinAndSelect('company.subcategory', 'companySubcategory')
+      .leftJoinAndSelect('companySubcategory.category', 'companyCategory')
       .leftJoinAndSelect('user.store', 'store')
       .where('LOWER(user.email) = :email', {
         email: email.toLowerCase().trim(),
       })
       .getOne();
 
-    if (!user || !user.isActive) {
+    if (!user) {
       throw new UnauthorizedException(
         'Las credenciales ingresadas no son válidas.',
       );
+    }
+
+    if (!user.isActive) {
+      const reasonMsg = user.accountSuspensionReason
+        ? ` Motivo: ${user.accountSuspensionReason}`
+        : '';
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ACCOUNT_BANNED',
+        message: `Tu cuenta ha sido cancelada o suspendida permanentemente.${reasonMsg}`,
+        reason: user.accountSuspensionReason || undefined,
+      });
     }
 
     if (!user.password) {
@@ -133,6 +165,19 @@ export class AuthService {
       throw new UnauthorizedException(
         'Las credenciales ingresadas no son válidas.',
       );
+    }
+
+    // Validar suspensión temporal por fraude
+    if (user.accountSuspendedUntil) {
+      const now = new Date();
+      if (new Date(user.accountSuspendedUntil) <= now) {
+        user.accountSuspendedUntil = null;
+        user.accountSuspensionReason = null;
+        await this.userRepository.save(user);
+      }
+      // NOTA: Si sigue suspendido (> now), NO lanzamos ForbiddenException aquí.
+      // Se emiten tokens y se retorna el usuario con accountSuspendedUntil para
+      // permitir acceso a AccountSuspendedScreen y gestión de apelación / soporte.
     }
 
     if (appOrigin === AppOrigin.CLIENT) {
@@ -264,8 +309,6 @@ export class AuthService {
       password: _,
       createdAt: _createdAt,
       updatedAt: _updatedAt,
-      googleId: _googleId,
-      isActive: _isActive,
       ...restUser
     } = user;
 
@@ -345,7 +388,12 @@ export class AuthService {
       const payload = ticket.getPayload() as GooglePayload;
       let user = await this.userRepository.findOne({
         where: { email: payload.email },
-        relations: ['company', 'store'],
+        relations: [
+          'company',
+          'company.subcategory',
+          'company.subcategory.category',
+          'store',
+        ],
       });
 
       if (!user) {
@@ -367,6 +415,18 @@ export class AuthService {
         user = await this.userRepository.save(user);
         // Para usuarios nuevos, company y store serán null por defecto.
       } else {
+        if (!user.isActive) {
+          const reasonMsg = user.accountSuspensionReason
+            ? ` Motivo: ${user.accountSuspensionReason}`
+            : '';
+          throw new ForbiddenException({
+            statusCode: 403,
+            code: 'ACCOUNT_BANNED',
+            message: `Tu cuenta ha sido cancelada o suspendida permanentemente.${reasonMsg}`,
+            reason: user.accountSuspensionReason || undefined,
+          });
+        }
+
         if (authGoogleLoginDto.appOrigin === AppOrigin.CLIENT) {
           if (user.role === UserRole.VENDOR || user.role === UserRole.COMPANY) {
             throw new ForbiddenException(
@@ -398,6 +458,16 @@ export class AuthService {
         }
       }
 
+      // Validar suspensión temporal por fraude
+      if (user.accountSuspendedUntil) {
+        const now = new Date();
+        if (new Date(user.accountSuspendedUntil) <= now) {
+          user.accountSuspendedUntil = null;
+          user.accountSuspensionReason = null;
+          await this.userRepository.save(user);
+        }
+      }
+
       // Quitamos datos sensibles
       const {
         confirm: _confirm,
@@ -405,8 +475,6 @@ export class AuthService {
         password: _password,
         createdAt: _createdAt,
         updatedAt: _updatedAt,
-        googleId: _googleId,
-        isActive: _isActive,
         ...restUser
       } = user;
 
@@ -475,7 +543,12 @@ export class AuthService {
 
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      relations: ['company', 'store'],
+      relations: [
+        'company',
+        'company.subcategory',
+        'company.subcategory.category',
+        'store',
+      ],
     });
 
     if (!user || !user.isActive) {
@@ -490,7 +563,6 @@ export class AuthService {
       password: _password,
       createdAt: _createdAt,
       updatedAt: _updatedAt,
-      googleId: _googleId,
       isActive: _isActive,
       ...restUser
     } = user;
@@ -512,7 +584,9 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new BadRequestException('El correo electrónico ya está registrado.');
+      throw new BadRequestException(
+        'El correo electrónico ya está registrado.',
+      );
     }
 
     // 2. Generar código OTP numérico de 6 dígitos
@@ -544,6 +618,7 @@ export class AuthService {
       await this.mailerService.sendMail({
         to: email,
         subject: 'Código de verificación de tu cuenta - Tu Lojita',
+        text: `Hola ${dto.firstName},\n\nTu código de verificación para registrarte en Tu Lojita es: ${otp}\n\nEste código vence en 10 minutos.\nSi no solicitaste este código, puedes ignorar este mensaje.\n\nTu Lojita`,
         html: getRegistrationOtpTemplate(otp, dto.firstName),
       });
     } catch (error) {
@@ -592,7 +667,9 @@ export class AuthService {
       where: { email: payload.email },
     });
     if (existingUser) {
-      throw new BadRequestException('El correo electrónico ya está registrado.');
+      throw new BadRequestException(
+        'El correo electrónico ya está registrado.',
+      );
     }
 
     // Asignar rol según el origen de la aplicación
@@ -619,7 +696,12 @@ export class AuthService {
     // Cargar relaciones
     const fullUser = await this.userRepository.findOne({
       where: { id: savedUser.id },
-      relations: ['company', 'store'],
+      relations: [
+        'company',
+        'company.subcategory',
+        'company.subcategory.category',
+        'store',
+      ],
     });
 
     const {
@@ -628,7 +710,6 @@ export class AuthService {
       password: _password,
       createdAt: _createdAt,
       updatedAt: _updatedAt,
-      googleId: _googleId,
       isActive: _isActive,
       ...restUser
     } = fullUser || savedUser;
@@ -688,13 +769,16 @@ export class AuthService {
       await this.mailerService.sendMail({
         to: payload.email,
         subject: 'Nuevo código de verificación de tu cuenta - Tu Lojita',
+        text: `Hola ${payload.firstName},\n\nTu nuevo código de verificación para Tu Lojita es: ${otp}\n\nEste código vence en 10 minutos.\n\nTu Lojita`,
         html: getRegistrationOtpTemplate(otp, payload.firstName),
       });
     } catch (error) {
       this.logger.error(
         `Error reenviando OTP a ${payload.email}: ${(error as Error).message}`,
       );
-      throw new BadRequestException('No se pudo enviar el correo de verificación.');
+      throw new BadRequestException(
+        'No se pudo enviar el correo de verificación.',
+      );
     }
 
     return {
@@ -713,7 +797,9 @@ export class AuthService {
     });
 
     if (existing) {
-      throw new BadRequestException('El correo electrónico ya está registrado.');
+      throw new BadRequestException(
+        'El correo electrónico ya está registrado.',
+      );
     }
 
     // 2. Crear el nuevo administrador
@@ -734,6 +820,446 @@ export class AuthService {
     return {
       message: 'Administrador creado exitosamente.',
       user: cleanAdmin,
+    };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .where('user.id = :id', { id: userId })
+      .addSelect('user.password')
+      .getOne();
+
+    if (!user) {
+      throw new UnauthorizedException('Usuario no encontrado.');
+    }
+
+    if (!user.password) {
+      throw new BadRequestException(
+        'Esta cuenta está vinculada a Google y no utiliza contraseña.',
+      );
+    }
+
+    const isCurrentValid = bcrypt.compareSync(dto.currentPassword, user.password);
+    if (!isCurrentValid) {
+      throw new BadRequestException('La contraseña actual es incorrecta.');
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException(
+        'La nueva contraseña debe ser diferente a la contraseña actual.',
+      );
+    }
+
+    const hashedNewPassword = bcrypt.hashSync(dto.newPassword, 10);
+    await this.userRepository.update({ id: user.id }, { password: hashedNewPassword });
+
+    this.logger.log(`Contraseña actualizada exitosamente para usuario: ${user.email}`);
+
+    return {
+      message: 'Contraseña actualizada exitosamente.',
+    };
+  }
+
+  async requestForgotPasswordOtp(dto: RequestForgotPasswordOtpDto) {
+    const email = dto.email.toLowerCase().trim();
+
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .where('LOWER(user.email) = :email', { email })
+      .addSelect('user.password')
+      .getOne();
+
+    // Silent/generic handling for non-existent users to prevent enumeration
+    if (!user) {
+      this.logger.warn(
+        `Solicitud de recuperación de contraseña para correo no registrado: ${email}`,
+      );
+      return {
+        message:
+          'Si el correo electrónico está registrado, recibirás un código de recuperación.',
+        expiresIn: 600,
+      };
+    }
+
+    if (!user.isActive) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ACCOUNT_BANNED',
+        message:
+          'Tu cuenta ha sido cancelada o suspendida. No es posible recuperar la contraseña.',
+      });
+    }
+
+    if (!user.password) {
+      throw new BadRequestException(
+        'Esta cuenta está vinculada a Google y no utiliza contraseña. Por favor inicia sesión con Google.',
+      );
+    }
+
+    // Generar código OTP numérico de 6 dígitos
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = bcrypt.hashSync(otp, 10);
+
+    const payload = {
+      type: 'PASSWORD_RESET_OTP',
+      userId: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      otpHash,
+      issuedAt: Date.now(),
+    };
+
+    const recoveryToken = this.jwtService.sign(payload, {
+      secret: envs.jwtSecret,
+      expiresIn: '10m',
+    });
+
+    try {
+      await this.mailerService.sendMail({
+        to: user.email,
+        subject: 'Código de recuperación de contraseña - Tu Lojita',
+        text: `Hola ${user.firstName},\n\nTu código para restablecer tu contraseña en Tu Lojita es: ${otp}\n\nEste código vence en 10 minutos.\nSi no solicitaste este cambio, puedes ignorar este mensaje.\n\nTu Lojita`,
+        html: getPasswordResetOtpTemplate(otp, user.firstName),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error enviando correo de recuperación a ${email}: ${(error as Error).message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo enviar el correo de recuperación. Por favor intenta más tarde.',
+      );
+    }
+
+    this.logger.log(`Código de recuperación enviado exitosamente a: ${email}`);
+    return {
+      message: 'Código de recuperación enviado al correo electrónico.',
+      recoveryToken,
+      expiresIn: 600,
+    };
+  }
+
+  async verifyForgotPasswordOtp(dto: VerifyForgotPasswordOtpDto) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.recoveryToken, {
+        secret: envs.jwtSecret,
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        'El código o la sesión de recuperación ha expirado. Por favor solicita un nuevo código.',
+      );
+    }
+
+    if (payload.type !== 'PASSWORD_RESET_OTP') {
+      throw new BadRequestException('Token de recuperación inválido.');
+    }
+
+    const isOtpValid = bcrypt.compareSync(dto.otp.trim(), payload.otpHash);
+    if (!isOtpValid) {
+      throw new BadRequestException(
+        'El código de verificación ingresado es incorrecto.',
+      );
+    }
+
+    // Generar token de sesión de restablecimiento temporal (5 minutos)
+    const sessionPayload = {
+      type: 'PASSWORD_RESET_AUTHORIZED',
+      userId: payload.userId,
+      email: payload.email,
+      issuedAt: Date.now(),
+    };
+
+    const resetSessionToken = this.jwtService.sign(sessionPayload, {
+      secret: envs.jwtSecret,
+      expiresIn: '5m',
+    });
+
+    return {
+      message: 'Código verificado exitosamente.',
+      resetSessionToken,
+      email: payload.email,
+    };
+  }
+
+  async resendForgotPasswordOtp(dto: ResendForgotPasswordOtpDto) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.recoveryToken, {
+        secret: envs.jwtSecret,
+        ignoreExpiration: true,
+      });
+    } catch (error) {
+      throw new BadRequestException('Token de recuperación inválido.');
+    }
+
+    if (payload.type !== 'PASSWORD_RESET_OTP') {
+      throw new BadRequestException('Token de recuperación inválido.');
+    }
+
+    // Cooldown de 60 segundos
+    const elapsed = Date.now() - (payload.issuedAt || 0);
+    if (elapsed < 60000) {
+      const remaining = Math.ceil((60000 - elapsed) / 1000);
+      throw new BadRequestException(
+        `Por favor espera ${remaining} segundos antes de solicitar un nuevo código.`,
+      );
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { id: payload.userId },
+    });
+
+    if (!user || !user.isActive) {
+      throw new BadRequestException('Usuario no válido o cuenta inactiva.');
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = bcrypt.hashSync(otp, 10);
+
+    const newPayload = {
+      type: 'PASSWORD_RESET_OTP',
+      userId: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      otpHash,
+      issuedAt: Date.now(),
+    };
+
+    const newRecoveryToken = this.jwtService.sign(newPayload, {
+      secret: envs.jwtSecret,
+      expiresIn: '10m',
+    });
+
+    try {
+      await this.mailerService.sendMail({
+        to: user.email,
+        subject: 'Nuevo código de recuperación de contraseña - Tu Lojita',
+        text: `Hola ${user.firstName},\n\nTu nuevo código para restablecer tu contraseña en Tu Lojita es: ${otp}\n\nEste código vence en 10 minutos.\n\nTu Lojita`,
+        html: getPasswordResetOtpTemplate(otp, user.firstName),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error reenviando correo de recuperación a ${user.email}: ${(error as Error).message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo reenviar el correo de recuperación.',
+      );
+    }
+
+    this.logger.log(`Código de recuperación reenviado a: ${user.email}`);
+    return {
+      message: 'Nuevo código de recuperación enviado.',
+      recoveryToken: newRecoveryToken,
+      expiresIn: 600,
+    };
+  }
+
+  async resetPasswordWithToken(dto: ResetForgotPasswordDto) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.resetSessionToken, {
+        secret: envs.jwtSecret,
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        'La sesión de restablecimiento ha expirado. Por favor solicita un nuevo código.',
+      );
+    }
+
+    if (payload.type !== 'PASSWORD_RESET_AUTHORIZED') {
+      throw new BadRequestException('Token de sesión no autorizado.');
+    }
+
+    if (!dto.newPassword || dto.newPassword.length < 6) {
+      throw new BadRequestException(
+        'La nueva contraseña debe tener al menos 6 caracteres.',
+      );
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { id: payload.userId },
+    });
+
+    if (!user || !user.isActive) {
+      throw new BadRequestException('Usuario no encontrado o cuenta inactiva.');
+    }
+
+    const hashedNewPassword = bcrypt.hashSync(dto.newPassword, 10);
+    await this.userRepository.update(
+      { id: user.id },
+      { password: hashedNewPassword },
+    );
+
+    this.logger.log(`Contraseña restablecida exitosamente para: ${user.email}`);
+
+    return {
+      message:
+        'Contraseña restablecida exitosamente. Ya puedes iniciar sesión con tu nueva contraseña.',
+    };
+  }
+
+  private getCollaboratorTokens(collaboratorId: string, tokenVersion: number) {
+    const payload = {
+      sub: collaboratorId,
+      actorType: 'COLLABORATOR',
+      tokenVersion,
+    };
+
+    return {
+      accessToken: this.jwtService.sign(payload, {
+        secret: envs.jwtSecret,
+        expiresIn: '30d',
+      }),
+      refreshToken: this.jwtService.sign(payload, {
+        secret: envs.jwtRefreshSecret,
+        expiresIn: '90d',
+      }),
+    };
+  }
+
+  async loginCollaborator(loginDto: CollaboratorLoginDto) {
+    const accessId = loginDto.accessId.trim();
+
+    // 1. Rate limiting contra fuerza bruta por ID de acceso (máximo 5 intentos fallidos en 15 minutos)
+    const rateRecord = this.collaboratorLoginAttempts.get(accessId);
+    const now = Date.now();
+    if (rateRecord && rateRecord.blockedUntil > now) {
+      const waitMinutes = Math.ceil((rateRecord.blockedUntil - now) / 60000);
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'COLLABORATOR_RATE_LIMITED',
+        message: `Demasiados intentos fallidos. Tu acceso está temporalmente bloqueado por ${waitMinutes} minuto(s).`,
+      });
+    }
+
+    // 2. Buscar colaborador con contraseña
+    const collaborator = await this.collaboratorRepository
+      .createQueryBuilder('collab')
+      .addSelect('collab.password')
+      .leftJoinAndSelect('collab.company', 'company')
+      .leftJoinAndSelect('collab.role', 'role')
+      .leftJoinAndSelect('role.permissions', 'permissions')
+      .leftJoinAndSelect('collab.stores', 'stores')
+      .where('collab.accessId = :accessId', { accessId })
+      .getOne();
+
+    if (!collaborator) {
+      this.recordFailedCollaboratorAttempt(accessId);
+      throw new UnauthorizedException(
+        'Las credenciales ingresadas no son válidas.',
+      );
+    }
+
+    if (!collaborator.isActive) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'COLLABORATOR_DEACTIVATED',
+        message: 'Tu cuenta de colaborador ha sido desactivada por la empresa.',
+      });
+    }
+
+    const isPasswordValid = bcrypt.compareSync(
+      loginDto.password,
+      collaborator.password,
+    );
+    if (!isPasswordValid) {
+      this.recordFailedCollaboratorAttempt(accessId);
+      throw new UnauthorizedException(
+        'Las credenciales ingresadas no son válidas.',
+      );
+    }
+
+    // Éxito: limpiar intentos fallidos
+    this.collaboratorLoginAttempts.delete(accessId);
+
+    // 3. Generar tokens
+    const tokens = this.getCollaboratorTokens(
+      collaborator.id,
+      collaborator.tokenVersion,
+    );
+
+    const permissions =
+      collaborator.role?.permissions?.map((p) => p.permission) || [];
+    const allowedBranchIds = collaborator.hasFullBranchAccess
+      ? []
+      : (collaborator.stores || []).map((s) => s.id);
+
+    return {
+      collaborator: {
+        id: collaborator.id,
+        accessId: collaborator.accessId,
+        firstName: collaborator.firstName,
+        lastName: collaborator.lastName,
+        fullName: collaborator.fullName,
+        identification: collaborator.identification,
+        phone: collaborator.phone,
+        company: {
+          id: collaborator.company?.id,
+          name: collaborator.company?.name,
+          rif: collaborator.company?.rif,
+          logo: collaborator.company?.logo,
+        },
+        role: {
+          id: collaborator.role?.id,
+          name: collaborator.role?.name,
+        },
+        permissions,
+        hasFullBranchAccess: collaborator.hasFullBranchAccess,
+        allowedBranchIds,
+        stores: (collaborator.stores || []).map((s) => ({
+          id: s.id,
+          name: s.name,
+          branchName: s.branchName,
+        })),
+      },
+      ...tokens,
+    };
+  }
+
+  private recordFailedCollaboratorAttempt(accessId: string) {
+    const now = Date.now();
+    const record = this.collaboratorLoginAttempts.get(accessId) || {
+      attempts: 0,
+      blockedUntil: 0,
+    };
+    record.attempts += 1;
+    if (record.attempts >= 5) {
+      record.blockedUntil = now + 15 * 60 * 1000; // 15 minutos de bloqueo
+    }
+    this.collaboratorLoginAttempts.set(accessId, record);
+  }
+
+  async changeCollaboratorPassword(
+    collaboratorId: string,
+    dto: ChangeCollaboratorPasswordDto,
+  ) {
+    const collaborator = await this.collaboratorRepository
+      .createQueryBuilder('collab')
+      .addSelect('collab.password')
+      .where('collab.id = :id', { id: collaboratorId })
+      .getOne();
+
+    if (!collaborator || !collaborator.isActive) {
+      throw new NotFoundException('Colaborador no encontrado o inactivo');
+    }
+
+    const isMatch = bcrypt.compareSync(
+      dto.currentPassword,
+      collaborator.password,
+    );
+    if (!isMatch) {
+      throw new UnauthorizedException(
+        'La contraseña actual ingresada es incorrecta.',
+      );
+    }
+
+    collaborator.password = dto.newPassword; // Hasheado en @BeforeUpdate
+    collaborator.tokenVersion += 1;
+    await this.collaboratorRepository.save(collaborator);
+
+    return {
+      message: 'Contraseña actualizada exitosamente.',
     };
   }
 }

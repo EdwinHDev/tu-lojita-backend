@@ -38,7 +38,9 @@ export class RequestRegistrationOtpDto {
   @IsOptional()
   identification?: string;
 
-  @IsString({ message: 'La fecha de nacimiento debe ser una cadena de texto válida.' })
+  @IsString({
+    message: 'La fecha de nacimiento debe ser una cadena de texto válida.',
+  })
   @IsOptional()
   birthDate?: string;
 }

@@ -38,4 +38,16 @@ export class CreateOrderDto {
   })
   @IsOptional()
   installmentIntervalUnit?: InstallmentPeriod;
+
+  @IsUUID('4', { message: 'bookingSlotHoldId debe ser un UUID válido' })
+  @IsOptional()
+  bookingSlotHoldId?: string;
+
+  @IsUUID('4', { message: 'timeSlotId debe ser un UUID válido' })
+  @IsOptional()
+  timeSlotId?: string;
+
+  @IsString({ message: 'bookingDate debe ser una fecha en formato YYYY-MM-DD' })
+  @IsOptional()
+  bookingDate?: string;
 }

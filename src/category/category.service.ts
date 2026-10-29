@@ -5,12 +5,16 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { Category } from './entities/category.entity';
 import { CategoryQueryDto } from './dto/category-query.dto';
+import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
+import { User, isUserAdult } from 'src/user/entities/user.entity';
 
 @Injectable()
 export class CategoryService {
   constructor(
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+    @InjectRepository(Subcategory)
+    private readonly subcategoryRepository: Repository<Subcategory>,
   ) {}
 
   async create(createCategoryDto: CreateCategoryDto) {
@@ -18,12 +22,21 @@ export class CategoryService {
     return await this.categoryRepository.save(category);
   }
 
-  async findAll(queryDto: CategoryQueryDto) {
+  async findAll(queryDto: CategoryQueryDto, user?: User | null) {
     const { inUse, search, page = 1, limit = 20 } = queryDto;
 
-    const queryBuilder = this.categoryRepository
-      .createQueryBuilder('category')
-      .leftJoinAndSelect('category.subcategories', 'subCategory');
+    const queryBuilder = this.categoryRepository.createQueryBuilder('category');
+
+    if (!isUserAdult(user)) {
+      queryBuilder.andWhere('category.isAgeRestricted = false');
+      queryBuilder.leftJoinAndSelect(
+        'category.subcategories',
+        'subCategory',
+        'subCategory.isAgeRestricted = false',
+      );
+    } else {
+      queryBuilder.leftJoinAndSelect('category.subcategories', 'subCategory');
+    }
 
     if (inUse) {
       // Filtrar solo las categorías que tienen al menos una subcategoría con una tienda asociada
@@ -59,7 +72,18 @@ export class CategoryService {
   async update(id: string, updateCategoryDto: UpdateCategoryDto) {
     const category = await this.findOne(id);
     this.categoryRepository.merge(category, updateCategoryDto);
-    return await this.categoryRepository.save(category);
+    const saved = await this.categoryRepository.save(category);
+
+    if (updateCategoryDto.isAgeRestricted === true) {
+      await this.subcategoryRepository
+        .createQueryBuilder()
+        .update(Subcategory)
+        .set({ isAgeRestricted: true })
+        .where('categoryId = :id', { id })
+        .execute();
+    }
+
+    return saved;
   }
 
   async remove(id: string) {

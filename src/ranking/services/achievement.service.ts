@@ -219,19 +219,92 @@ export class AchievementService {
   }
 
   async getStoreAchievements(storeId: string) {
-    return this.unlockRepo.find({
+    // 1. Evaluate any pending criteria on-demand so recent milestones unlock immediately
+    try {
+      await this.evaluate(storeId);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Error auto-evaluating achievements for store ${storeId}: ${errorMsg}`,
+      );
+    }
+
+    // 2. Fetch all active achievement definitions ordered by category and threshold
+    const definitions = await this.achievementRepo.find({
+      where: { isActive: true },
+      order: { category: 'ASC', triggerThreshold: 'ASC' },
+    });
+
+    // 3. Fetch unlocks for this store
+    const unlocks = await this.unlockRepo.find({
       where: { storeId },
-      relations: ['achievement'],
-      order: { unlockedAt: 'DESC' },
+    });
+    const unlockMap = new Map(unlocks.map((u) => [u.achievementId, u]));
+
+    // 4. Fetch showcase for this store
+    const showcase = await this.showcaseRepo.find({
+      where: { storeId },
+      order: { position: 'ASC' },
+    });
+    const showcasePositionMap = new Map(
+      showcase.map((s) => [s.achievementId, s.position]),
+    );
+
+    // 5. Construct unified catalog payload
+    return definitions.map((def) => {
+      const unlock = unlockMap.get(def.id);
+      const inShowcase = showcasePositionMap.has(def.id);
+      const showcasePosition = showcasePositionMap.get(def.id) || null;
+
+      return {
+        id: def.id,
+        achievementId: def.id,
+        code: def.name,
+        name: def.name,
+        title: def.name,
+        description: def.description,
+        imageUrl: def.imageUrl,
+        badgeUrl: def.imageUrl,
+        category: def.category,
+        triggerType: def.triggerType,
+        triggerThreshold: Number(def.triggerThreshold),
+        lpBonus: def.lpBonus,
+        isUnlocked: !!unlock,
+        unlockedAt: unlock?.unlockedAt || null,
+        lpBonusGranted: unlock?.lpBonusGranted || 0,
+        inShowcase,
+        showcasePosition,
+        achievement: def,
+      };
     });
   }
 
   async getStoreShowcase(storeId: string) {
-    return this.showcaseRepo.find({
+    const items = await this.showcaseRepo.find({
       where: { storeId },
       relations: ['achievement'],
       order: { position: 'ASC' },
     });
+
+    return items.map((s) => ({
+      id: s.achievementId,
+      showcaseId: s.id,
+      storeId: s.storeId,
+      achievementId: s.achievementId,
+      position: s.position,
+      name: s.achievement?.name,
+      title: s.achievement?.name,
+      description: s.achievement?.description,
+      imageUrl: s.achievement?.imageUrl,
+      badgeUrl: s.achievement?.imageUrl,
+      category: s.achievement?.category,
+      triggerType: s.achievement?.triggerType,
+      triggerThreshold: Number(s.achievement?.triggerThreshold || 0),
+      lpBonus: s.achievement?.lpBonus || 0,
+      isUnlocked: true,
+      inShowcase: true,
+      achievement: s.achievement,
+    }));
   }
 
   async updateShowcase(storeId: string, achievementIds: string[]) {

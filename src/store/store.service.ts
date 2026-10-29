@@ -45,6 +45,8 @@ import { NotificationType } from 'src/notification/entities/notification.entity'
 import { MailService } from 'src/common/mail/mail.service';
 import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
 import { RankingService } from 'src/ranking/services/ranking.service';
+import { RankingSettingsService } from 'src/ranking/services/ranking-settings.service';
+import { normalizeDivision } from 'src/ranking/types/division.enum';
 import { RankingEventType } from 'src/ranking/types';
 
 @Injectable()
@@ -75,24 +77,43 @@ export class StoreService {
     private readonly dataSource: DataSource,
     private readonly platformSettings: PlatformSettingsService,
     private readonly rankingService: RankingService,
+    private readonly rankingSettingsService: RankingSettingsService,
   ) {}
 
   async create(createStoreDto: CreateStoreDto, user: User) {
     const { companyId, subCategoryId, mainAddress, ...storeDetails } =
       createStoreDto;
 
-    const subcategory = await this.subcategoryRepository.findOneBy({
-      id: subCategoryId,
-    });
-    if (!subcategory) throw new NotFoundException(`Subcategoría no encontrada`);
-
     let company: Company | undefined;
     if (companyId) {
       company =
-        (await this.companyRepository.findOneBy({ id: companyId })) ??
-        undefined;
+        (await this.companyRepository.findOne({
+          where: { id: companyId },
+          relations: ['subcategory'],
+        })) ?? undefined;
     } else if (user.company) {
-      company = user.company;
+      company =
+        (await this.companyRepository.findOne({
+          where: { id: user.company.id },
+          relations: ['subcategory'],
+        })) ?? undefined;
+    }
+
+    const targetSubcategoryId = subCategoryId || company?.subcategory?.id;
+    if (!targetSubcategoryId) {
+      throw new BadRequestException(
+        'Se requiere una subcategoría para la tienda o debe pertenecer a una empresa con rubro asignado',
+      );
+    }
+
+    const subcategory = await this.subcategoryRepository.findOne({
+      where: { id: targetSubcategoryId },
+      relations: ['category'],
+    });
+    if (!subcategory) throw new NotFoundException(`Subcategoría no encontrada`);
+
+    if (subcategory.isAgeRestricted || subcategory.category?.isAgeRestricted) {
+      storeDetails.isAgeRestricted = true;
     }
 
     // Si pertenece a una empresa, heredamos su identidad (Nombre, RIF y Logo)
@@ -197,6 +218,7 @@ export class StoreService {
       .leftJoinAndSelect('store.owner', 'owner')
       .leftJoinAndSelect('store.addresses', 'address')
       .leftJoinAndSelect('store.ranking', 'ranking')
+      .leftJoinAndSelect('store.company', 'company')
       .take(limit)
       .skip(offset);
 
@@ -209,7 +231,8 @@ export class StoreService {
         .addGroupBy('category.id')
         .addGroupBy('owner.id')
         .addGroupBy('address.id')
-        .addGroupBy('ranking.id');
+        .addGroupBy('ranking.id')
+        .addGroupBy('company.id');
     }
 
     // Filtro estricto: Solo tiendas activas en consultas públicas de catálogo
@@ -237,13 +260,20 @@ export class StoreService {
       });
     if (q) queryBuilder.andWhere('store.name ILIKE :q', { q: `%${q}%` });
 
-    if (q) {
+    if (sort === 'ranking') {
+      queryBuilder.orderBy(
+        'ranking.currentPR',
+        order === 'ASC' ? 'ASC' : 'DESC',
+        'NULLS LAST',
+      );
+      queryBuilder.addOrderBy('store.name', 'ASC');
+    } else if (q) {
       // Priorizar tiendas de mayor rango en resultados de búsqueda
-      queryBuilder.orderBy('ranking.currentLP', 'DESC', 'NULLS LAST');
+      queryBuilder.orderBy('ranking.currentPR', 'DESC', 'NULLS LAST');
       queryBuilder.addOrderBy(`store.${sort}`, order);
     } else {
       queryBuilder.orderBy(`store.${sort}`, order);
-      queryBuilder.addOrderBy('ranking.currentLP', 'DESC', 'NULLS LAST');
+      queryBuilder.addOrderBy('ranking.currentPR', 'DESC', 'NULLS LAST');
     }
 
     // Cuando usamos GROUP BY, necesitamos contar de forma diferente
@@ -296,6 +326,9 @@ export class StoreService {
       [data, total] = await queryBuilder.getManyAndCount();
     }
 
+    await this.enrichStoresWithBranchStatus(data);
+    await this.enrichStoresWithRankingAssets(data);
+
     return {
       data,
       total,
@@ -304,7 +337,7 @@ export class StoreService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: User) {
     const store = await this.storeRepository.findOne({
       where: { id },
       relations: [
@@ -321,6 +354,34 @@ export class StoreService {
       throw new NotFoundException(`Tienda con ID ${id} no encontrada`);
     }
 
+    const isRestricted =
+      store.isAgeRestricted ||
+      store.subcategory?.isAgeRestricted ||
+      store.subcategory?.category?.isAgeRestricted;
+
+    if (isRestricted && !isUserAdult(user)) {
+      throw new ForbiddenException({
+        statusCode: HttpStatus.FORBIDDEN,
+        message: 'Esta tienda está restringida a mayores de 18 años',
+        code: 'AGE_RESTRICTED',
+      });
+    }
+
+    if (store.company?.id) {
+      const count = await this.storeRepository.count({
+        where: { company: { id: store.company.id } },
+      });
+      store.hasMultipleBranches = count > 1;
+    } else {
+      store.hasMultipleBranches = false;
+    }
+
+    store.productsCount = await this.itemRepository.count({
+      where: { store: { id: store.id } },
+    });
+
+    await this.enrichStoresWithRankingAssets([store]);
+
     return store;
   }
 
@@ -332,6 +393,7 @@ export class StoreService {
       .leftJoinAndSelect('store.owner', 'owner')
       .leftJoinAndSelect('store.addresses', 'address')
       .leftJoinAndSelect('store.ranking', 'ranking')
+      .leftJoinAndSelect('store.company', 'company')
       .innerJoin('store.items', 'item')
       .groupBy('store.id')
       .addGroupBy('subcategory.id')
@@ -339,6 +401,7 @@ export class StoreService {
       .addGroupBy('owner.id')
       .addGroupBy('address.id')
       .addGroupBy('ranking.id')
+      .addGroupBy('company.id')
       .orderBy('store.createdAt', 'DESC')
       .limit(limit);
 
@@ -346,7 +409,89 @@ export class StoreService {
       queryBuilder.andWhere('store.isAgeRestricted = false');
     }
 
-    return await queryBuilder.getMany();
+    const stores = await queryBuilder.getMany();
+    await this.enrichStoresWithBranchStatus(stores);
+    await this.enrichStoresWithRankingAssets(stores);
+    return stores;
+  }
+
+  private async enrichStoresWithBranchStatus(
+    stores: Store[],
+  ): Promise<Store[]> {
+    if (!stores || stores.length === 0) return stores;
+
+    const companyIds = Array.from(
+      new Set(
+        stores
+          .map((s) => s.company?.id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+
+    if (companyIds.length === 0) {
+      for (const store of stores) {
+        store.hasMultipleBranches = false;
+      }
+      return stores;
+    }
+
+    const companyCounts = await this.storeRepository
+      .createQueryBuilder('s')
+      .select('s.companyId', 'companyId')
+      .addSelect('COUNT(s.id)', 'count')
+      .where('s.companyId IN (:...companyIds)', { companyIds })
+      .groupBy('s.companyId')
+      .getRawMany<{ companyId: string; count: string }>();
+
+    const countMap = new Map(
+      companyCounts.map((c) => [c.companyId, parseInt(c.count, 10)]),
+    );
+
+    for (const store of stores) {
+      const count = store.company?.id
+        ? (countMap.get(store.company.id) ?? 1)
+        : 1;
+      store.hasMultipleBranches = count > 1;
+    }
+
+    return stores;
+  }
+
+  private async enrichStoresWithRankingAssets(
+    stores: Store[],
+  ): Promise<Store[]> {
+    if (!stores || stores.length === 0) return stores;
+
+    try {
+      const settings = await this.rankingSettingsService.getSettings();
+      for (const store of stores) {
+        if (store.ranking) {
+          const normDiv = normalizeDivision(store.ranking.division);
+          const frameKey =
+            settings.divisionFrames && normDiv in settings.divisionFrames
+              ? normDiv
+              : store.ranking.division;
+          const frameUrl =
+            (settings.divisionFrames && settings.divisionFrames[frameKey]) ||
+            `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
+
+          const emblemKey =
+            normDiv in settings.divisionEmblems
+              ? normDiv
+              : store.ranking.division;
+          const emblemUrl =
+            settings.divisionEmblems[emblemKey] ||
+            `/assets/ranking/emblems/${normDiv.toLowerCase()}.png`;
+
+          (store.ranking as any).divisionFrameUrl = frameUrl;
+          (store.ranking as any).divisionEmblemUrl = emblemUrl;
+        }
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+
+    return stores;
   }
 
   async update(id: string, updateStoreDto: UpdateStoreDto, user: User) {
@@ -417,14 +562,22 @@ export class StoreService {
     }
 
     if (subCategoryId) {
-      const subcategory = await this.subcategoryRepository.findOneBy({
-        id: subCategoryId,
+      const subcategory = await this.subcategoryRepository.findOne({
+        where: { id: subCategoryId },
+        relations: ['category'],
       });
       if (!subcategory)
         throw new NotFoundException(
           `Subcategoría con ID ${subCategoryId} no encontrada`,
         );
       store.subcategory = subcategory;
+    }
+
+    if (
+      store.subcategory?.isAgeRestricted ||
+      store.subcategory?.category?.isAgeRestricted
+    ) {
+      updateDetails.isAgeRestricted = true;
     }
 
     this.storeRepository.merge(store, updateDetails);
@@ -497,6 +650,10 @@ export class StoreService {
     const orders = await this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.store', 'store')
+      .leftJoinAndSelect('order.orderItems', 'orderItem')
+      .leftJoinAndSelect('orderItem.variant', 'variant')
+      .leftJoinAndSelect('orderItem.item', 'item')
+      .leftJoinAndSelect('item.variants', 'itemVariants')
       .where('order.storeId = :storeId', { storeId })
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
@@ -506,14 +663,23 @@ export class StoreService {
       .getMany();
 
     const recentSales = orders.map((order) => {
+      const firstItem = order.orderItems?.[0];
+      const itemImageUrl = this.resolveOrderItemImageUrl(firstItem);
+      const count = order.orderItems?.length || 0;
+      const itemTitle =
+        (firstItem?.title || firstItem?.item?.title || 'Producto') +
+        (count > 1 ? ` (+${count - 1})` : '');
+
       return {
         id: order.id,
-        storeName: order.store.name,
+        storeName: order.store?.name || '',
         amount: parseFloat(order.finalAmount.toString()),
         currency: 'USD',
         time: formatTimeInTimezone(new Date(order.createdAt), timezone),
-        orderId: `#${order.id.substring(0, 8)}`,
+        orderId: order.id,
         status: order.status,
+        itemTitle,
+        itemImageUrl,
       };
     });
 
@@ -529,6 +695,78 @@ export class StoreService {
       },
       recentSales,
     };
+  }
+
+  private resolveOrderItemImageUrl(orderItem: any): string | null {
+    if (!orderItem) return null;
+
+    if (orderItem.variant?.imageUrl) {
+      return orderItem.variant.imageUrl;
+    }
+
+    if (
+      orderItem.variant?.axisValues &&
+      typeof orderItem.variant.axisValues === 'object'
+    ) {
+      for (const val of Object.values(orderItem.variant.axisValues)) {
+        if (typeof val === 'string') {
+          const parts = val.split('|');
+          for (const part of parts) {
+            const trimmed = part.trim();
+            if (
+              trimmed.startsWith('http://') ||
+              trimmed.startsWith('https://')
+            ) {
+              return trimmed;
+            }
+          }
+        }
+      }
+    }
+
+    if (orderItem.item?.variants && Array.isArray(orderItem.item.variants)) {
+      const matchedVariant = orderItem.item.variants.find(
+        (v: any) =>
+          (orderItem.variantId && v.id === orderItem.variantId) ||
+          (orderItem.variant?.id && v.id === orderItem.variant.id),
+      );
+      if (matchedVariant) {
+        if (matchedVariant.imageUrl) {
+          return matchedVariant.imageUrl;
+        }
+        if (
+          matchedVariant.axisValues &&
+          typeof matchedVariant.axisValues === 'object'
+        ) {
+          for (const val of Object.values(matchedVariant.axisValues)) {
+            if (typeof val === 'string') {
+              const parts = val.split('|');
+              for (const part of parts) {
+                const trimmed = part.trim();
+                if (
+                  trimmed.startsWith('http://') ||
+                  trimmed.startsWith('https://')
+                ) {
+                  return trimmed;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (orderItem.item?.mainImage) {
+      return orderItem.item.mainImage;
+    }
+    if (
+      Array.isArray(orderItem.item?.images) &&
+      orderItem.item.images.length > 0
+    ) {
+      return orderItem.item.images[0];
+    }
+
+    return null;
   }
 
   private handleDBExceptions(error: any): never {
@@ -686,11 +924,7 @@ export class StoreService {
     dto: BlockCustomerDto,
     user: User,
   ) {
-    return this.blockCustomerByEmailOrId(
-      storeId,
-      { ...dto, customerId },
-      user,
-    );
+    return this.blockCustomerByEmailOrId(storeId, { ...dto, customerId }, user);
   }
 
   async unblockCustomer(storeId: string, customerId: string, user: User) {
@@ -837,7 +1071,8 @@ export class StoreService {
       const topicLabels: Record<string, string> = {
         [MediationTopic.ACCOUNT_REACTIVATION]: 'Reactivación de compras',
         [MediationTopic.SETTLE_DEBT]: 'Acuerdo de saldo pendiente',
-        [MediationTopic.CLARIFY_MISUNDERSTANDING]: 'Aclaratoria de malentendido',
+        [MediationTopic.CLARIFY_MISUNDERSTANDING]:
+          'Aclaratoria de malentendido',
         [MediationTopic.OTHER]: 'Consulta general',
       };
       const friendlyTopic = topicLabels[dto.topic] || 'Reactivación de compras';
@@ -924,4 +1159,3 @@ export class StoreService {
     return saved;
   }
 }
-

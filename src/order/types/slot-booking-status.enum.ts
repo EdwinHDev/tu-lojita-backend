@@ -1,0 +1,8 @@
+export enum SlotBookingStatus {
+  HOLD = 'HOLD',
+  CONFIRMED = 'CONFIRMED',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
+  NO_SHOW = 'NO_SHOW',
+}

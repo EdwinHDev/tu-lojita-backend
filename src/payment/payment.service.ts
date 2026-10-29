@@ -1,12 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, In } from 'typeorm';
+import { DataSource, Repository, In, EntityManager, MoreThan } from 'typeorm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { Payment } from './entities/payment.entity';
@@ -14,6 +15,7 @@ import { PaymentStatus } from './types';
 import { Order } from 'src/order/entities/order.entity';
 import { OrderStatus } from 'src/order/types';
 import { User } from 'src/user/entities/user.entity';
+import { UserRole } from 'src/user/types';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreCustomerBlock } from 'src/store/entities/store-customer-block.entity';
 import { PaymentPaginationDto } from './dto/payment-pagination.dto';
@@ -23,11 +25,18 @@ import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
 import { MailService } from 'src/common/mail/mail.service';
 import { CreatePaymentWithOrderDto } from './dto/create-payment-with-order.dto';
 import { Item } from 'src/item/entities/item.entity';
+import { ItemVariant } from 'src/item/entities/item-variant.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { Installment } from 'src/order/entities/installment.entity';
+import { CompanyActivityLogService } from 'src/company/services/company-activity-log.service';
+import { ActivityLogModule } from 'src/company/entities/company-activity-log.entity';
 import { InstallmentStatus } from 'src/order/types';
 import { StoreStatus } from 'src/store/types/status.enum';
 import { CommissionService } from 'src/commission/commission.service';
+import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
+import { ItemTimeSlot } from 'src/item/entities/item-time-slot.entity';
+import { OrderSlotBooking } from 'src/order/entities/order-slot-booking.entity';
+import { SlotBookingStatus } from 'src/order/types/slot-booking-status.enum';
 
 @Injectable()
 export class PaymentService {
@@ -50,6 +59,8 @@ export class PaymentService {
     private readonly notificationService: NotificationService,
     private readonly mailService: MailService,
     private readonly commissionService: CommissionService,
+    private readonly platformSettingsService: PlatformSettingsService,
+    private readonly activityLogService: CompanyActivityLogService,
   ) {}
 
   async verifyPayment(
@@ -57,13 +68,18 @@ export class PaymentService {
     newStatus: PaymentStatus,
     storeOwnerId: string,
     rejectionReason?: string,
+    receiptImage?: string,
+    bypassFraudPenalty: boolean = false,
+    actor?: any,
   ) {
     if (
       newStatus !== PaymentStatus.APPROVED &&
-      newStatus !== PaymentStatus.REJECTED
+      newStatus !== PaymentStatus.REJECTED &&
+      newStatus !== PaymentStatus.REFUNDED &&
+      newStatus !== PaymentStatus.REFUND_PENDING
     ) {
       throw new BadRequestException(
-        'Estado de verificación no válido. Debe ser APPROVED o REJECTED',
+        'Estado de verificación no válido. Debe ser APPROVED, REJECTED, REFUNDED o REFUND_PENDING',
       );
     }
 
@@ -82,22 +98,94 @@ export class PaymentService {
     try {
       payment = await queryRunner.manager.findOne(Payment, {
         where: { id: paymentId },
-        relations: ['order', 'store', 'store.owner', 'user'],
+        relations: [
+          'order',
+          'order.user',
+          'store',
+          'store.owner',
+          'store.company',
+          'user',
+        ],
       });
 
       if (!payment)
         throw new NotFoundException(`Pago #${paymentId} no encontrado`);
 
-      if (payment.status !== PaymentStatus.WAITING_VERIFICATION) {
+      if (
+        newStatus === PaymentStatus.REFUNDED ||
+        newStatus === PaymentStatus.REFUND_PENDING
+      ) {
+        if (payment.status === PaymentStatus.REFUNDED) {
+          throw new BadRequestException(
+            'Este pago ya ha sido procesado como reembolsado previamente',
+          );
+        }
+        if (payment.status === PaymentStatus.REJECTED) {
+          throw new BadRequestException(
+            'No se puede reembolsar un pago que fue rechazado',
+          );
+        }
+      } else if (payment.status !== PaymentStatus.WAITING_VERIFICATION) {
         throw new BadRequestException(
           'Este pago ya ha sido procesado previamente',
         );
       }
 
-      if (!payment.store.owner || payment.store.owner.id !== storeOwnerId) {
-        throw new BadRequestException(
-          'No tienes permiso para verificar pagos de esta tienda',
-        );
+      const isCollab =
+        (actor as any)?.isCollaborator === true ||
+        (actor as any)?.actorType === 'COLLABORATOR';
+
+      if (isCollab) {
+        const collab = actor as any;
+        if (
+          !payment.store?.company?.id ||
+          payment.store.company.id !== collab.company?.id
+        ) {
+          throw new ForbiddenException(
+            'No tienes permiso para verificar pagos de esta empresa',
+          );
+        }
+        if (
+          !collab.hasFullBranchAccess &&
+          !(collab.allowedBranchIds || []).includes(payment.store.id)
+        ) {
+          throw new ForbiddenException(
+            'No tienes autorización para gestionar pagos en esta sucursal',
+          );
+        }
+
+        const permissions: string[] = collab.permissions || [];
+        if (
+          newStatus === PaymentStatus.APPROVED &&
+          !permissions.includes('installments:approve_payment')
+        ) {
+          throw new ForbiddenException(
+            'No tienes permiso para aprobar pagos de cuotas',
+          );
+        }
+        if (
+          newStatus === PaymentStatus.REJECTED &&
+          !permissions.includes('installments:reject_payment')
+        ) {
+          throw new ForbiddenException(
+            'No tienes permiso para rechazar pagos de cuotas',
+          );
+        }
+      } else {
+        if (!payment.store.owner || payment.store.owner.id !== storeOwnerId) {
+          throw new BadRequestException(
+            'No tienes permiso para verificar pagos de esta tienda',
+          );
+        }
+      }
+
+      // Validar si la orden fue cancelada por el cliente
+      if (payment.order && payment.order.status === OrderStatus.CANCELLED) {
+        if (newStatus === PaymentStatus.APPROVED) {
+          throw new BadRequestException(
+            'No se puede aprobar el pago de una orden que ya ha sido cancelada por el cliente.',
+          );
+        }
       }
 
       store = payment.store;
@@ -356,14 +444,11 @@ export class PaymentService {
             ).length;
             const maxInst = parseInt(store.maxInstallments?.toString() || '1');
             const perInstComm =
-              maxInst > 0
-                ? Math.round((commAmount / maxInst) * 100) / 100
-                : 0;
+              maxInst > 0 ? Math.round((commAmount / maxInst) * 100) / 100 : 0;
             const isLastInst = approvedBefore + 1 >= maxInst;
             commToAdd = isLastInst
-              ? Math.round(
-                  (commAmount - perInstComm * (maxInst - 1)) * 100,
-                ) / 100
+              ? Math.round((commAmount - perInstComm * (maxInst - 1)) * 100) /
+                100
               : perInstComm;
           }
 
@@ -378,6 +463,15 @@ export class PaymentService {
         }
 
         await queryRunner.manager.save(order);
+
+        // Anti-Fraude: redención por compra aprobada (Regla 3x3)
+        const customerUser = payment.user || payment.order?.user;
+        if (customerUser) {
+          await this.handleFraudRedemptionOnPaymentApproval(
+            customerUser.id,
+            queryRunner.manager,
+          );
+        }
       } else if (newStatus === PaymentStatus.REJECTED) {
         payment.rejectionReason = rejectionReason || null;
         // En caso de rechazo, el stock permanece reservado para la orden.
@@ -390,20 +484,98 @@ export class PaymentService {
           const approvedCount = (orderForRejection.payments || []).filter(
             (p) => p.status === PaymentStatus.APPROVED,
           ).length;
-          if (approvedCount === 0) {
+          if (
+            approvedCount === 0 &&
+            orderForRejection.status !== OrderStatus.CANCELLED
+          ) {
             orderForRejection.status = OrderStatus.REJECTED;
             await queryRunner.manager.save(orderForRejection);
             await this.commissionService.voidOrderCommission(
               orderForRejection,
               queryRunner.manager,
             );
+
+            // Liberar reservas de turnos agendados para que el horario quede disponible inmediatamente
+            const slotBookings = await queryRunner.manager.find(
+              OrderSlotBooking,
+              {
+                where: {
+                  order: { id: orderForRejection.id },
+                  status: In([
+                    SlotBookingStatus.CONFIRMED,
+                    SlotBookingStatus.HOLD,
+                  ]),
+                },
+              },
+            );
+            for (const sb of slotBookings) {
+              sb.status = SlotBookingStatus.CANCELLED;
+              await queryRunner.manager.save(sb);
+            }
           }
+        }
+
+        // Anti-Fraude: evaluar rechazo de pago consecutivo
+        if (!bypassFraudPenalty) {
+          const customerUser = payment.user || payment.order?.user;
+          if (customerUser) {
+            await this.handleFraudPenaltyOnPaymentRejection(
+              customerUser.id,
+              queryRunner.manager,
+            );
+          }
+        }
+      } else if (
+        newStatus === PaymentStatus.REFUNDED ||
+        newStatus === PaymentStatus.REFUND_PENDING
+      ) {
+        payment.rejectionReason =
+          rejectionReason || 'Reembolso procesado por el comercio';
+        if (receiptImage) {
+          payment.receiptImage = receiptImage;
         }
       }
 
       payment.status = newStatus;
       const savedPayment = await queryRunner.manager.save(payment);
       await queryRunner.commitTransaction();
+
+      // Registro de auditoría de actividad
+      if (payment.store?.company?.id) {
+        let action = 'PAYMENT_VERIFIED';
+        let description = `Pago #${payment.id.split('-')[0].toUpperCase()} por $${payment.amount} verificado (${newStatus})`;
+
+        if (newStatus === PaymentStatus.APPROVED) {
+          action = 'INSTALLMENT_PAYMENT_APPROVED';
+          description = `Pago #${payment.id.split('-')[0].toUpperCase()} por $${payment.amount} aprobado para la orden #${payment.order?.id?.split('-')[0]?.toUpperCase() || ''}`;
+        } else if (newStatus === PaymentStatus.REJECTED) {
+          action = 'INSTALLMENT_PAYMENT_REJECTED';
+          description = `Pago #${payment.id.split('-')[0].toUpperCase()} por $${payment.amount} rechazado. Motivo: ${payment.rejectionReason || 'No especificado'}`;
+        } else if (
+          newStatus === PaymentStatus.REFUNDED ||
+          newStatus === PaymentStatus.REFUND_PENDING
+        ) {
+          action = 'PAYMENT_REFUND_PROCESSED';
+          description = `Reembolso procesado para el pago #${payment.id.split('-')[0].toUpperCase()} por $${payment.amount}`;
+        }
+
+        this.activityLogService.log({
+          companyId: payment.store.company.id,
+          storeId: payment.store.id,
+          actor: actor || { id: storeOwnerId },
+          module: ActivityLogModule.INSTALLMENTS,
+          action,
+          description,
+          entityType: 'payment',
+          entityId: payment.id,
+          metadata: {
+            orderId: payment.order?.id,
+            amount: payment.amount,
+            newStatus,
+            rejectionReason: payment.rejectionReason,
+          },
+        });
+      }
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -422,39 +594,52 @@ export class PaymentService {
           )
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
-            this.logger.error(
-              `Error sending payment approved email: ${msg}`,
-            );
+            this.logger.error(`Error sending payment approved email: ${msg}`);
           });
       } else if (newStatus === PaymentStatus.REJECTED) {
-        this.mailService
-          .sendPaymentRejected(payment)
-          .catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger.error(
-              `Error sending payment rejected email: ${msg}`,
-            );
-          });
+        this.mailService.sendPaymentRejected(payment).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Error sending payment rejected email: ${msg}`);
+        });
       }
 
       // Notificar al cliente sobre el resultado de la verificación
       try {
+        const isRefundPending = newStatus === PaymentStatus.REFUND_PENDING;
+        const isRefunded = newStatus === PaymentStatus.REFUNDED;
         const statusText =
-          newStatus === PaymentStatus.APPROVED ? 'aprobado' : 'rechazado';
-        const notificationBody =
-          newStatus === PaymentStatus.REJECTED && payment.rejectionReason
-            ? `Tu pago de $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()} ha sido rechazado: "${payment.rejectionReason}".`
-            : `Tu pago de $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()} ha sido ${statusText}.`;
+          newStatus === PaymentStatus.APPROVED
+            ? 'aprobado'
+            : isRefundPending
+              ? 'reembolso emitido (por verificar)'
+              : isRefunded
+                ? 'reembolsado'
+                : 'rechazado';
+
+        const notificationTitle = isRefundPending
+          ? 'Reembolso emitido por la tienda'
+          : `Pago ${statusText}`;
+
+        const notificationBody = isRefundPending
+          ? `La tienda ha emitido el reembolso de tu pago por $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()}. Ref/Detalle: "${payment.rejectionReason || 'Reembolso emitido'}". Por favor verifica tu cuenta y confirma la recepción.`
+          : isRefunded
+            ? `Tu pago de $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()} ha sido confirmado como reembolsado.`
+            : newStatus === PaymentStatus.REJECTED && payment.rejectionReason
+              ? `Tu pago de $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()} ha sido rechazado: "${payment.rejectionReason}".`
+              : `Tu pago de $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()} ha sido ${statusText}.`;
 
         await this.notificationService.create({
           userId: payment.user.id,
-          title: `Pago ${statusText}`,
+          title: notificationTitle,
           body: notificationBody,
-          type:
-            newStatus === PaymentStatus.APPROVED
-              ? NotificationType.PAYMENT_APPROVED
-              : NotificationType.PAYMENT_REJECTED,
-          orderId: payment.order.id,
+          type: isRefundPending
+            ? NotificationType.REFUND_REPORTED
+            : isRefunded
+              ? NotificationType.REFUND_CONFIRMED
+              : newStatus === PaymentStatus.APPROVED
+                ? NotificationType.PAYMENT_APPROVED
+                : NotificationType.PAYMENT_REJECTED,
+          targetId: payment.order.id,
         });
 
         // Si hay una siguiente cuota programada, enviar notificación push en la app
@@ -483,10 +668,7 @@ export class PaymentService {
 
         // Si la orden pasa a FULLY_PAID, cerrar sala de chat y notificar para calificación
         if (payment.order.status === OrderStatus.FULLY_PAID) {
-          this.notificationService.closeChatRoom(
-            payment.order.id,
-            'approved',
-          );
+          this.notificationService.closeChatRoom(payment.order.id, 'approved');
           // Disparar notificaciones de calificación
           const orderWithOwner = await this.orderRepository.findOne({
             where: { id: payment.order.id },
@@ -507,6 +689,7 @@ export class PaymentService {
               if (orderWithOwner.store?.owner?.id) {
                 this.notificationService.create({
                   userId: orderWithOwner.store.owner.id,
+                  storeId: orderWithOwner.store.id,
                   title: '\u{1F464} Califica a tu comprador',
                   body: 'Una orden fue completada. Puedes calificar al cliente.',
                   type: NotificationType.BUYER_REVIEW_PROMPT,
@@ -515,7 +698,9 @@ export class PaymentService {
                 });
               }
             } catch (reviewErr) {
-              this.logger.error(`Error sending review prompt notifications: ${reviewErr}`);
+              this.logger.error(
+                `Error sending review prompt notifications: ${reviewErr}`,
+              );
             }
           }
         }
@@ -528,7 +713,95 @@ export class PaymentService {
       }
     }
 
-    return payment!;
+    return payment;
+  }
+
+  private async handleFraudPenaltyOnPaymentRejection(
+    userId: string,
+    manager: EntityManager,
+  ) {
+    const isEnabled =
+      await this.platformSettingsService.isFraudPenaltyEnabled();
+    if (!isEnabled) return;
+
+    const user = await manager.findOne(User, { where: { id: userId } });
+    if (!user) return;
+
+    const resetDays =
+      await this.platformSettingsService.getConsecutiveResetDays();
+    const maxRejections =
+      await this.platformSettingsService.getMaxConsecutiveRejections();
+    const suspensionDays =
+      await this.platformSettingsService.getSuspensionDurationDays();
+
+    const now = new Date();
+
+    // Check decay: if lastRejectedPaymentAt exists and is older than resetDays, reset counter to 0
+    if (user.lastRejectedPaymentAt) {
+      const diffMs =
+        now.getTime() - new Date(user.lastRejectedPaymentAt).getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      if (diffDays >= resetDays) {
+        user.consecutiveRejectedPaymentsCount = 0;
+      }
+    }
+
+    user.consecutiveRejectedPaymentsCount =
+      (Number(user.consecutiveRejectedPaymentsCount) || 0) + 1;
+    user.lastRejectedPaymentAt = now;
+    user.consecutiveApprovedPaymentsCount = 0;
+
+    if (user.consecutiveRejectedPaymentsCount >= maxRejections) {
+      const suspendedUntil = new Date(
+        now.getTime() + suspensionDays * 24 * 60 * 60 * 1000,
+      );
+      user.accountSuspendedUntil = suspendedUntil;
+      user.accountSuspensionReason = `Suspensión automática por acumular ${user.consecutiveRejectedPaymentsCount} reportes consecutivos de pagos no verificados o rechazados.`;
+      this.logger.warn(
+        `User ${user.id} has been suspended until ${suspendedUntil.toISOString()} due to ${user.consecutiveRejectedPaymentsCount} consecutive rejected payments.`,
+      );
+    }
+
+    await manager.save(User, user);
+  }
+
+  private async handleFraudRedemptionOnPaymentApproval(
+    userId: string,
+    manager: EntityManager,
+  ) {
+    const isEnabled =
+      await this.platformSettingsService.isFraudPenaltyEnabled();
+    if (!isEnabled) return;
+
+    const user = await manager.findOne(User, { where: { id: userId } });
+    if (!user) return;
+
+    const resetDays =
+      await this.platformSettingsService.getConsecutiveResetDays();
+    const now = new Date();
+
+    // Check decay on rejection counter
+    if (user.lastRejectedPaymentAt) {
+      const diffMs =
+        now.getTime() - new Date(user.lastRejectedPaymentAt).getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      if (diffDays >= resetDays) {
+        user.consecutiveRejectedPaymentsCount = 0;
+        user.lastRejectedPaymentAt = null;
+      }
+    }
+
+    user.consecutiveApprovedPaymentsCount =
+      (Number(user.consecutiveApprovedPaymentsCount) || 0) + 1;
+
+    // Regla 3x3: 3 compras consecutivas aprobadas resetean los rechazos
+    if (user.consecutiveApprovedPaymentsCount >= 3) {
+      user.consecutiveRejectedPaymentsCount = 0;
+      user.lastRejectedPaymentAt = null;
+      user.consecutiveApprovedPaymentsCount = 0;
+    }
+
+    await manager.save(User, user);
   }
 
   async create(createPaymentDto: CreatePaymentDto, userId: string) {
@@ -712,9 +985,7 @@ export class PaymentService {
         .sendSinglePaymentUnderReview(orderWithRelations, incomingAmount)
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
-          this.logger.error(
-            `Error sending payment under review email: ${msg}`,
-          );
+          this.logger.error(`Error sending payment under review email: ${msg}`);
         });
     }
 
@@ -755,7 +1026,7 @@ export class PaymentService {
       );
     }
 
-    return savedPayment!;
+    return savedPayment;
   }
 
   async findAll(paginationDto: PaymentPaginationDto) {
@@ -905,12 +1176,14 @@ export class PaymentService {
         );
       }
 
-      // 3. Validar items duplicados
-      const itemIds = orderDto.items.map((i) => i.itemId);
-      const uniqueItemIds = new Set(itemIds);
-      if (uniqueItemIds.size !== itemIds.length) {
+      // 3. Validar items duplicados (clave compuesta itemId:variantId)
+      const compositeKeys = orderDto.items.map(
+        (i) => `${i.itemId}:${i.variantId || 'base'}`,
+      );
+      const uniqueCompositeKeys = new Set(compositeKeys);
+      if (uniqueCompositeKeys.size !== orderDto.items.length) {
         throw new BadRequestException(
-          'La orden contiene items duplicados. Por favor, agrupa las cantidades.',
+          'La orden contiene items o variantes duplicadas. Por favor, agrupa las cantidades.',
         );
       }
 
@@ -983,17 +1256,88 @@ export class PaymentService {
           );
         }
 
-        if (item.trackInventory) {
-          const currentStock = parseFloat(
-            item.stockQuantity?.toString() || '0',
-          );
-          if (currentStock < itemDto.quantity) {
+        // Manejo y validación de Variante
+        let variant: ItemVariant | undefined;
+        let variantLabel: string | undefined;
+
+        if (item.hasVariants) {
+          if (!itemDto.variantId) {
             throw new BadRequestException(
-              `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+              `Debes seleccionar una variante para el artículo "${item.title}".`,
             );
           }
-          item.stockQuantity = currentStock - itemDto.quantity;
-          await queryRunner.manager.save(item);
+          variant =
+            (await queryRunner.manager.findOne(ItemVariant, {
+              where: { id: itemDto.variantId, item: { id: item.id } },
+            })) ?? undefined;
+
+          if (!variant || !variant.isActive) {
+            throw new BadRequestException(
+              `La variante seleccionada para "${item.title}" no está disponible o no existe.`,
+            );
+          }
+          variantLabel = Object.values(variant.axisValues || {})
+            .map((v: any) =>
+              typeof v === 'string' && v.includes('|') ? v.split('|')[0] : v,
+            )
+            .join(' / ');
+        }
+
+        // Comprobar inventario y deducción atómica
+        if (item.trackInventory) {
+          if (item.hasVariants && variant) {
+            const currentStock = parseFloat(
+              variant.stockQuantity?.toString() || '0',
+            );
+            if (currentStock < itemDto.quantity) {
+              throw new BadRequestException(
+                `Stock insuficiente para la variante (${variantLabel || 'seleccionada'}) de "${item.title}". Disponible: ${currentStock}`,
+              );
+            }
+            const updateResult = await queryRunner.manager
+              .createQueryBuilder()
+              .update(ItemVariant)
+              .set({
+                stockQuantity: () => `stockQuantity - ${itemDto.quantity}`,
+              })
+              .where('id = :variantId AND stockQuantity >= :quantity', {
+                variantId: variant.id,
+                quantity: itemDto.quantity,
+              })
+              .execute();
+
+            if (updateResult.affected === 0) {
+              throw new BadRequestException(
+                `Stock insuficiente para la variante (${variantLabel || 'seleccionada'}) de "${item.title}".`,
+              );
+            }
+          } else {
+            const currentStock = parseFloat(
+              item.stockQuantity?.toString() || '0',
+            );
+            if (currentStock < itemDto.quantity) {
+              throw new BadRequestException(
+                `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+              );
+            }
+            const updateResult = await queryRunner.manager
+              .createQueryBuilder()
+              .update(Item)
+              .set({
+                stockQuantity: () => `stockQuantity - ${itemDto.quantity}`,
+              })
+              .where('id = :itemId AND stockQuantity >= :quantity', {
+                itemId: item.id,
+                quantity: itemDto.quantity,
+              })
+              .execute();
+
+            if (updateResult.affected === 0) {
+              throw new BadRequestException(
+                `Stock insuficiente para "${item.title}".`,
+              );
+            }
+          }
         }
 
         if (item.customizationGroupsRel) {
@@ -1065,9 +1409,25 @@ export class PaymentService {
           }
         }
 
-        const basePrice = item.discountPrice
-          ? parseFloat(item.discountPrice.toString())
-          : parseFloat(item.price.toString());
+        // Determinar precio base (prioridad a variant si tiene variantes, sustitutivo NO aditivo)
+        let basePrice: number;
+        if (item.hasVariants && variant) {
+          const vDiscount =
+            variant.discountPrice !== null &&
+            variant.discountPrice !== undefined
+              ? parseFloat(variant.discountPrice.toString())
+              : null;
+          const vPrice =
+            variant.price !== null && variant.price !== undefined
+              ? parseFloat(variant.price.toString())
+              : parseFloat(item.price.toString());
+          basePrice =
+            vDiscount !== null && vDiscount < vPrice ? vDiscount : vPrice;
+        } else {
+          basePrice = item.discountPrice
+            ? parseFloat(item.discountPrice.toString())
+            : parseFloat(item.price.toString());
+        }
 
         const totalLinePrice =
           basePrice * itemDto.quantity + customizationExtra;
@@ -1084,6 +1444,9 @@ export class PaymentService {
           quantity: itemDto.quantity,
           price: priceAtOrder,
           selectedOptions: itemDto.selectedOptions,
+          variantId: item.hasVariants ? variant?.id : undefined,
+          variantLabel: item.hasVariants ? variantLabel : undefined,
+          variant: item.hasVariants ? variant : undefined,
         });
         orderItemsToSave.push(orderItem);
       }
@@ -1197,6 +1560,94 @@ export class PaymentService {
       for (const oi of orderItemsToSave) {
         oi.order = savedOrder;
         await queryRunner.manager.save(oi);
+      }
+
+      // 7.1 Confirmar y asociar el turno agendado (por hold previo o por creación directa al ordenar)
+      let resolvedSlotId = orderDto.timeSlotId;
+      let resolvedBookingDate = orderDto.bookingDate;
+
+      if (!resolvedSlotId || !resolvedBookingDate) {
+        for (const itemDto of orderDto.items) {
+          if (itemDto.timeSlotId && itemDto.bookingDate) {
+            resolvedSlotId = itemDto.timeSlotId;
+            resolvedBookingDate = itemDto.bookingDate;
+            break;
+          }
+        }
+      }
+
+      if (orderDto.bookingSlotHoldId) {
+        const slotBooking = await queryRunner.manager.findOne(
+          OrderSlotBooking,
+          {
+            where: { id: orderDto.bookingSlotHoldId },
+          },
+        );
+        if (slotBooking) {
+          slotBooking.status = SlotBookingStatus.CONFIRMED;
+          slotBooking.order = savedOrder;
+          slotBooking.orderId = savedOrder.id;
+          await queryRunner.manager.save(slotBooking);
+        }
+      } else if (resolvedSlotId && resolvedBookingDate) {
+        const slot = await queryRunner.manager.findOne(ItemTimeSlot, {
+          where: { id: resolvedSlotId },
+          relations: ['slotConfig'],
+        });
+
+        if (slot && slot.isActive) {
+          const maxCapacity = slot.slotConfig?.maxConcurrentBookings || 1;
+
+          const confirmedCount = await queryRunner.manager.count(
+            OrderSlotBooking,
+            {
+              where: {
+                timeSlotId: slot.id,
+                bookingDate: resolvedBookingDate,
+                status: SlotBookingStatus.CONFIRMED,
+              },
+            },
+          );
+
+          const activeHoldsCount = await queryRunner.manager.count(
+            OrderSlotBooking,
+            {
+              where: {
+                timeSlotId: slot.id,
+                bookingDate: resolvedBookingDate,
+                status: SlotBookingStatus.HOLD,
+                lockedUntil: MoreThan(new Date()),
+              },
+            },
+          );
+
+          if (confirmedCount + activeHoldsCount >= maxCapacity) {
+            throw new ConflictException(
+              `El horario seleccionado (${slot.startTime} - ${slot.endTime}) para la fecha ${resolvedBookingDate} ya no tiene cupos disponibles.`,
+            );
+          }
+
+          const confirmedBooking = queryRunner.manager.create(
+            OrderSlotBooking,
+            {
+              bookingDate: resolvedBookingDate,
+              slotStartTime: slot.startTime,
+              slotEndTime: slot.endTime,
+              slotLabel: slot.label,
+              status: SlotBookingStatus.CONFIRMED,
+              timeSlot: slot,
+              timeSlotId: slot.id,
+              customer: user,
+              customerId: user.id,
+              store,
+              storeId: store.id,
+              order: savedOrder,
+              orderId: savedOrder.id,
+            },
+          );
+
+          await queryRunner.manager.save(OrderSlotBooking, confirmedBooking);
+        }
       }
 
       // 8. Cuotas (Generación progresiva: solo cuota 1 con fecha hoy, el resto null)
@@ -1379,6 +1830,69 @@ export class PaymentService {
       }
     }
 
-    return savedPayment!;
+    return savedPayment;
+  }
+
+  async confirmRefund(paymentId: string, user: User) {
+    const payment = await this.paymentRepository.findOne({
+      where: { id: paymentId },
+      relations: ['order', 'order.payments', 'store', 'store.owner', 'user'],
+    });
+
+    if (!payment) {
+      throw new NotFoundException(`Pago #${paymentId} no encontrado`);
+    }
+
+    if (payment.user?.id !== user.id && user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Solo el comprador puede confirmar la recepción del reembolso',
+      );
+    }
+
+    if (payment.status === PaymentStatus.REFUNDED) {
+      return payment;
+    }
+
+    if (payment.status !== PaymentStatus.REFUND_PENDING) {
+      throw new BadRequestException(
+        'Este pago no tiene un reembolso pendiente de confirmación',
+      );
+    }
+
+    payment.status = PaymentStatus.REFUNDED;
+    const saved = await this.paymentRepository.save(payment);
+
+    // Notificar al comercio
+    if (payment.store?.owner) {
+      try {
+        await this.notificationService.create({
+          userId: payment.store.owner.id,
+          storeId: payment.store.id,
+          title: 'Reembolso confirmado',
+          body: `El cliente confirmó la recepción del reembolso por $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()}.`,
+          type: NotificationType.REFUND_CONFIRMED,
+          targetId: payment.order.id,
+          orderId: payment.order.id,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `Error notifying store of refund confirmation: ${msg}`,
+        );
+      }
+    }
+
+    // Si ya no quedan pagos pendientes de reembolso ni disputas, cerrar chat
+    const remainingPending = payment.order.payments?.filter(
+      (p) =>
+        p.id !== payment.id &&
+        (p.status === PaymentStatus.WAITING_VERIFICATION ||
+          p.status === PaymentStatus.REFUND_PENDING),
+    );
+    if (!remainingPending || remainingPending.length === 0) {
+      this.notificationService.closeChatRoom(payment.order.id, 'resolved');
+    }
+
+    return saved;
   }
 }

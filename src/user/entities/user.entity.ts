@@ -3,6 +3,7 @@ import {
   BeforeUpdate,
   Column,
   Entity,
+  JoinColumn,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
@@ -16,6 +17,7 @@ import { Store } from 'src/store/entities/store.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { Payment } from 'src/payment/entities/payment.entity';
 import { Notification } from 'src/notification/entities/notification.entity';
+import { UserSuspension } from './user-suspension.entity';
 
 @Entity('users')
 export class User extends TimestampEntity {
@@ -114,6 +116,32 @@ export class User extends TimestampEntity {
   })
   chatSuspensionEvidence?: string[];
 
+  // Anti-fraud payment penalty and account suspension fields
+  @Column('int', { default: 0 })
+  consecutiveRejectedPaymentsCount: number;
+
+  @Column('timestamp with time zone', { nullable: true })
+  lastRejectedPaymentAt?: Date | null;
+
+  @Column('int', { default: 0 })
+  consecutiveApprovedPaymentsCount: number;
+
+  @Column('timestamp with time zone', { nullable: true })
+  accountSuspendedUntil?: Date | null;
+
+  @Column('text', { nullable: true })
+  accountSuspensionReason?: string | null;
+
+  @Column('uuid', { nullable: true })
+  currentSuspensionId?: string | null;
+
+  @ManyToOne(() => UserSuspension, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'currentSuspensionId' })
+  currentSuspension?: UserSuspension | null;
+
+  @OneToMany(() => UserSuspension, (suspension) => suspension.user)
+  suspensions?: UserSuspension[];
+
   // Promedio de calificaciones de comprador (actualizado por ReviewService)
   @Column('decimal', {
     precision: 3,
@@ -157,9 +185,26 @@ export class User extends TimestampEntity {
 }
 
 export function isUserAdult(
-  user?: { birthDate?: Date | string } | null,
+  user?: {
+    birthDate?: Date | string;
+    role?: UserRole | string;
+    roles?: string[];
+  } | null,
 ): boolean {
-  if (!user || !user.birthDate) return false;
+  if (!user) return false;
+  // Administradores y comercios tienen acceso completo al catálogo para gestión y clasificación
+  if (user.role === UserRole.ADMIN || user.roles?.includes(UserRole.ADMIN)) {
+    return true;
+  }
+  if (
+    user.role === UserRole.COMPANY ||
+    user.role === UserRole.VENDOR ||
+    user.roles?.includes(UserRole.COMPANY) ||
+    user.roles?.includes(UserRole.VENDOR)
+  ) {
+    return true;
+  }
+  if (!user.birthDate) return false;
   const today = new Date();
   const birth = new Date(user.birthDate);
   if (isNaN(birth.getTime())) return false;
@@ -170,4 +215,3 @@ export function isUserAdult(
   }
   return age >= 18;
 }
-

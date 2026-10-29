@@ -14,6 +14,10 @@ import { UpdateSubcategoryDto } from './dto/update-subcategory.dto';
 import { SubcategoryQueryDto } from './dto/subcategory-query.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { UserRole } from 'src/user/types';
+import { UseGuards } from '@nestjs/common';
+import { OptionalJwtAuthGuard } from 'src/auth/guards/optional-jwt-auth.guard';
+import { GetOptionalUser } from 'src/auth/decorators/get-optional-user.decorator';
+import { User } from 'src/user/entities/user.entity';
 
 @Controller('subcategories')
 export class SubcategoryController {
@@ -25,9 +29,13 @@ export class SubcategoryController {
     return this.subcategoryService.create(createSubcategoryDto);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
-  findAll(@Query() queryDto: SubcategoryQueryDto) {
-    return this.subcategoryService.findAll(queryDto);
+  findAll(
+    @Query() queryDto: SubcategoryQueryDto,
+    @GetOptionalUser() user: User | null,
+  ) {
+    return this.subcategoryService.findAll(queryDto, user);
   }
 
   @Get(':id')

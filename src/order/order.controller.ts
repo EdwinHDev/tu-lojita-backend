@@ -13,6 +13,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { ValidateCartDto } from './dto/validate-cart.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { ManualPaymentDto } from './dto/manual-payment.dto';
+import { CancelOrderDto } from './dto/cancel-order.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/user/entities/user.entity';
@@ -84,8 +85,17 @@ export class OrderController {
   }
 
   @Post(':id/cancel')
-  cancel(@Param('id') id: string, @GetUser() user: User) {
-    return this.orderService.cancelOrder(id, user.id);
+  cancel(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body() cancelOrderDto?: CancelOrderDto,
+  ) {
+    return this.orderService.cancelOrder(id, user.id, cancelOrderDto, user);
+  }
+
+  @Post(':id/accept-payment-not-received')
+  acceptPaymentNotReceived(@Param('id') id: string, @GetUser() user: User) {
+    return this.orderService.acceptPaymentNotReceived(id, user.id);
   }
 
   @Get('store/:storeId/installments')
@@ -152,6 +162,11 @@ export class OrderController {
       manualPaymentDto,
       user.id,
     );
+  }
+
+  @Patch(':id/preorder-stock-arrived')
+  markPreOrderStockArrived(@Param('id') id: string, @GetUser() user: User) {
+    return this.orderService.markPreOrderStockArrived(id, user);
   }
 
   @Delete(':id')

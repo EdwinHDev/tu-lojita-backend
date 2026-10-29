@@ -29,6 +29,10 @@ export class ValidateCartItemDto {
 
   @IsOptional()
   selectedOptions?: Record<string, string[]>;
+
+  @IsUUID('4', { message: 'El ID de la variante debe ser un UUID válido (v4)' })
+  @IsOptional()
+  variantId?: string;
 }
 
 export class ValidateCartDto {

@@ -16,6 +16,8 @@ import { StoreStatus } from 'src/store/types/status.enum';
 import { User } from 'src/user/entities/user.entity';
 import { SubscriptionStatus, SubscriptionPaymentStatus } from './types';
 import { MailService } from 'src/common/mail/mail.service';
+import { NotificationService } from 'src/notification/notification.service';
+import { Optional } from '@nestjs/common';
 
 @Injectable()
 export class CompanySubscriptionService {
@@ -35,6 +37,8 @@ export class CompanySubscriptionService {
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
     private readonly mailService: MailService,
+    @Optional()
+    private readonly notificationService?: NotificationService,
   ) {}
 
   async getSettings(): Promise<SubscriptionSettings> {
@@ -50,7 +54,9 @@ export class CompanySubscriptionService {
     return settings;
   }
 
-  async updateSettings(dto: Partial<SubscriptionSettings>): Promise<SubscriptionSettings> {
+  async updateSettings(
+    dto: Partial<SubscriptionSettings>,
+  ): Promise<SubscriptionSettings> {
     const settings = await this.getSettings();
     Object.assign(settings, dto);
     return this.settingsRepository.save(settings);
@@ -61,6 +67,8 @@ export class CompanySubscriptionService {
     hasActiveSubscription: boolean;
     requiresPayment: boolean;
     pendingVerification: boolean;
+    isPaymentRejected: boolean;
+    lastRejectionReason: string | null;
   }> {
     // 1. Buscar la empresa del usuario (relación directa o por owner)
     let company: Company | null | undefined = user.company;
@@ -88,7 +96,10 @@ export class CompanySubscriptionService {
         status: SubscriptionStatus.PAYMENT_REQUIRED,
       });
       subscription = await this.subscriptionRepository.save(subscription);
-    } else if (company && (!subscription.company || subscription.company.id !== company.id)) {
+    } else if (
+      company &&
+      (!subscription.company || subscription.company.id !== company.id)
+    ) {
       // Auto-reparación: Vincular la empresa si no estaba asignada
       subscription.company = company;
       await this.subscriptionRepository.save(subscription);
@@ -105,11 +116,31 @@ export class CompanySubscriptionService {
     const pendingVerification =
       subscription.status === SubscriptionStatus.PENDING_VERIFICATION;
 
+    // Evaluar si el último comprobante enviado fue rechazado
+    const sortedPayments = (subscription.payments || [])
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+    const latestPayment = sortedPayments[0];
+
+    const isPaymentRejected =
+      subscription.status === SubscriptionStatus.PAYMENT_REQUIRED &&
+      latestPayment?.status === SubscriptionPaymentStatus.REJECTED;
+
+    const lastRejectionReason = isPaymentRejected
+      ? latestPayment.rejectionReason ||
+        'El comprobante o los datos suministrados no concuerdan con los registros bancarios.'
+      : null;
+
     return {
       subscription,
       hasActiveSubscription,
       requiresPayment,
       pendingVerification,
+      isPaymentRejected,
+      lastRejectionReason,
     };
   }
 
@@ -126,9 +157,11 @@ export class CompanySubscriptionService {
 
     // Asegurar que si el usuario tiene empresa, la suscripción tenga la empresa asignada
     if (!subscription.company) {
-      const company = user.company || await this.companyRepository.findOne({
-        where: { owner: { id: user.id } },
-      });
+      const company =
+        user.company ||
+        (await this.companyRepository.findOne({
+          where: { owner: { id: user.id } },
+        }));
       if (company) {
         subscription.company = company;
         await this.subscriptionRepository.save(subscription);
@@ -139,7 +172,9 @@ export class CompanySubscriptionService {
       where: { id: dto.paymentMethodId },
     });
     if (!paymentMethod) {
-      throw new NotFoundException('Método de pago de la plataforma no encontrado');
+      throw new NotFoundException(
+        'Método de pago de la plataforma no encontrado',
+      );
     }
 
     const payment = this.paymentRepository.create({
@@ -154,12 +189,37 @@ export class CompanySubscriptionService {
     });
     const savedPayment = await this.paymentRepository.save(payment);
 
+    // Actualizar el estado de la suscripción a PENDING_VERIFICATION usando update para no desvincular relaciones de pagos
+    subscription.status = SubscriptionStatus.PENDING_VERIFICATION;
     await this.subscriptionRepository.update(subscription.id, {
       status: SubscriptionStatus.PENDING_VERIFICATION,
     });
 
+    // Notificar al panel admin en tiempo real que hay una empresa con pago por validar
+    const compName = subscription.company?.name || 'Comercio';
+    const compId = subscription.company?.id || '';
+    this.notificationService?.notifyAdminActionRequired({
+      type: 'SUBSCRIPTION_PAYMENT_PENDING',
+      title: 'Validación de pago de membresía',
+      message: `La empresa "${compName}" reportó pago de membresía por $${Number(dto.amount).toFixed(2)} USD`,
+      entityId: compId,
+      link: '/subscriptions',
+      metadata: {
+        paymentId: savedPayment.id,
+        referenceNumber: dto.referenceNumber,
+        companyId: compId,
+        amount: dto.amount,
+      },
+    });
+
+    // Notificar al panel admin que el contador de pendientes se incrementó
+    this.notificationService?.notifyAdminBadgesChanged();
+
     const userName = `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`;
-    await this.mailService.sendSubscriptionReceiptReceived(user.email, userName);
+    await this.mailService.sendSubscriptionReceiptReceived(
+      user.email,
+      userName,
+    );
 
     return savedPayment;
   }
@@ -194,16 +254,39 @@ export class CompanySubscriptionService {
   ) {
     const payment = await this.paymentRepository.findOne({
       where: { id: paymentId },
-      relations: [
-        'subscription',
-        'subscription.owner',
-        'subscription.company',
-      ],
+      relations: ['subscription', 'subscription.owner', 'subscription.company'],
     });
-    if (!payment) throw new NotFoundException('Comprobante de pago no encontrado');
+    if (!payment)
+      throw new NotFoundException('Comprobante de pago no encontrado');
 
     if (!payment.subscription) {
-      throw new BadRequestException('El comprobante de pago no tiene una suscripción empresarial asociada.');
+      // Auto-sanación: intentar recuperar la suscripción si no estaba vinculada
+      let recoveredSub: CompanySubscription | null = null;
+      if (payment.subscriptionId) {
+        recoveredSub = await this.subscriptionRepository.findOne({
+          where: { id: payment.subscriptionId },
+          relations: ['owner', 'company'],
+        });
+      }
+      if (!recoveredSub) {
+        recoveredSub = await this.subscriptionRepository.findOne({
+          where: { status: SubscriptionStatus.PENDING_VERIFICATION },
+          relations: ['owner', 'company'],
+          order: { updatedAt: 'DESC' },
+        });
+      }
+
+      if (recoveredSub) {
+        payment.subscription = recoveredSub;
+        payment.subscriptionId = recoveredSub.id;
+        await this.paymentRepository.update(payment.id, {
+          subscriptionId: recoveredSub.id,
+        });
+      } else {
+        throw new BadRequestException(
+          'El comprobante de pago no tiene una suscripción empresarial asociada.',
+        );
+      }
     }
 
     payment.status = action.status;
@@ -245,9 +328,16 @@ export class CompanySubscriptionService {
       }
 
       // Resolver datos del propietario de forma segura para el envío de correo
-      const owner = subscription.owner || (subscription.company?.id 
-        ? (await this.companyRepository.findOne({ where: { id: subscription.company.id }, relations: ['owner'] }))?.owner 
-        : null);
+      const owner =
+        subscription.owner ||
+        (subscription.company?.id
+          ? (
+              await this.companyRepository.findOne({
+                where: { id: subscription.company.id },
+                relations: ['owner'],
+              })
+            )?.owner
+          : null);
 
       if (owner && owner.email) {
         const userName = `${owner.firstName || 'Comercio'}${owner.lastName ? ' ' + owner.lastName : ''}`;
@@ -258,9 +348,39 @@ export class CompanySubscriptionService {
         );
       }
     } else {
+      // 1. Resolver datos del propietario para enviar correo de rechazo
+      const owner =
+        subscription.owner ||
+        (subscription.company?.id
+          ? (
+              await this.companyRepository.findOne({
+                where: { id: subscription.company.id },
+                relations: ['owner'],
+              })
+            )?.owner
+          : null);
+
+      if (owner && owner.email) {
+        const userName = `${owner.firstName || 'Comercio'}${owner.lastName ? ' ' + owner.lastName : ''}`;
+        await this.mailService.sendSubscriptionRejected(
+          owner.email,
+          userName,
+          action.rejectionReason ||
+            'El comprobante o los datos suministrados no concuerdan con los registros bancarios.',
+        );
+      }
+
+      // 2. Establecer estado de pago requerido sin borrar la empresa ni sus tiendas
       subscription.status = SubscriptionStatus.PAYMENT_REQUIRED;
       await this.subscriptionRepository.save(subscription);
+
+      this.logger.log(
+        `Subscription payment ${payment.id} rejected. Company ${subscription.company?.id} retained in PAYMENT_REQUIRED state.`,
+      );
     }
+
+    // Notificar al panel admin en tiempo real que cambiaron las empresas pendientes
+    this.notificationService?.notifyAdminBadgesChanged();
 
     return payment;
   }
@@ -283,10 +403,13 @@ export class CompanySubscriptionService {
       })
       .execute();
 
-    this.logger.log('Reset test data: All subscription payments deleted and subscriptions set to PAYMENT_REQUIRED');
+    this.logger.log(
+      'Reset test data: All subscription payments deleted and subscriptions set to PAYMENT_REQUIRED',
+    );
     return {
       success: true,
-      message: 'Todos los pagos de suscripción han sido eliminados y las suscripciones restablecidas a PAGO REQUERIDO.',
+      message:
+        'Todos los pagos de suscripción han sido eliminados y las suscripciones restablecidas a PAGO REQUERIDO.',
     };
   }
 

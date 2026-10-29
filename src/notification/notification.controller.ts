@@ -1,4 +1,14 @@
-import { Controller, Get, Patch, Post, Param, Req, Body } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Param,
+  Req,
+  Body,
+  Query,
+  ForbiddenException,
+} from '@nestjs/common';
 import { NotificationService } from './notification.service';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -10,6 +20,7 @@ import {
   PenalizeChatUserDto,
   LiftChatSuspensionDto,
 } from './dto/penalize-chat-user.dto';
+import { ChatChannelType } from './entities/chat-message.entity';
 
 @Controller(['notifications', 'notification', 'admin'])
 export class NotificationController {
@@ -17,8 +28,8 @@ export class NotificationController {
 
   @Auth()
   @Get()
-  findAll(@Req() req: { user: { id: string } }) {
-    return this.notificationService.findAllByUser(req.user.id);
+  findAll(@Req() req: { user: any }) {
+    return this.notificationService.findAllForActor(req.user);
   }
 
   @Auth()
@@ -41,8 +52,8 @@ export class NotificationController {
 
   @Auth()
   @Get('unread-disputes')
-  getUnreadDisputes(@Req() req: { user: { id: string } }) {
-    return this.notificationService.getUnreadDisputeOrderIds(req.user.id);
+  getUnreadDisputes(@Req() req: { user: any }) {
+    return this.notificationService.getUnreadDisputeOrderIdsForActor(req.user);
   }
 
   @Auth()
@@ -54,11 +65,11 @@ export class NotificationController {
   @Auth()
   @Patch('order/:orderId/dispute-read')
   markDisputeRead(
-    @Req() req: { user: { id: string } },
+    @Req() req: { user: any },
     @Param('orderId') orderId: string,
   ) {
-    return this.notificationService.markDisputeNotificationsAsRead(
-      req.user.id,
+    return this.notificationService.markDisputeNotificationsAsReadForActor(
+      req.user,
       orderId,
     );
   }
@@ -70,6 +81,27 @@ export class NotificationController {
     @GetUser() user: User,
   ) {
     return this.notificationService.getOrderChatHistory(orderId, user);
+  }
+
+  @Auth()
+  @Get('order/:orderId/support-chat')
+  async getSupportChatHistory(
+    @Param('orderId') orderId: string,
+    @Query('channelType') channelType: ChatChannelType,
+    @GetUser() user: User,
+  ) {
+    const status =
+      await this.notificationService.checkSupportChatStatusForOrder(
+        orderId,
+        user.id,
+        channelType,
+      );
+    if (!status.allowed) {
+      throw new ForbiddenException(
+        'No tienes autorización para acceder a este chat de soporte',
+      );
+    }
+    return this.notificationService.getChatHistory(orderId, channelType);
   }
 
   @Auth(UserRole.ADMIN)
@@ -90,4 +122,3 @@ export class NotificationController {
     return this.notificationService.getAdminBadgesSummary();
   }
 }
-

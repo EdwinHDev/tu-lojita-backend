@@ -8,7 +8,9 @@ export class MailController {
   @Get('test-send')
   async testSend(@Query('to') to: string) {
     if (!to) {
-      throw new BadRequestException('El parámetro "to" es obligatorio (ej: /mail/test-send?to=tu-correo@gmail.com)');
+      throw new BadRequestException(
+        'El parámetro "to" es obligatorio (ej: /mail/test-send?to=tu-correo@gmail.com)',
+      );
     }
     return this.mailService.sendTestEmail(to);
   }

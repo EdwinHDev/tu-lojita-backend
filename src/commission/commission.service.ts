@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual, MoreThanOrEqual, IsNull, EntityManager } from 'typeorm';
+import {
+  Repository,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  IsNull,
+  EntityManager,
+} from 'typeorm';
 import { CommissionConfigRange } from './entities/commission-config-range.entity';
 import { CommissionSettings } from './entities/commission-settings.entity';
 import { StoreCommissionBilling } from './entities/store-commission-billing.entity';
@@ -65,7 +71,10 @@ export class CommissionService {
     // Buscar el tramo que coincida
     const matchedRange = ranges.find((r) => {
       const min = parseFloat(r.minAmount.toString());
-      const max = r.maxAmount !== null && r.maxAmount !== undefined ? parseFloat(r.maxAmount.toString()) : Infinity;
+      const max =
+        r.maxAmount !== null && r.maxAmount !== undefined
+          ? parseFloat(r.maxAmount.toString())
+          : Infinity;
       return subtotalOrFinal >= min && subtotalOrFinal <= max;
     });
 
@@ -77,12 +86,18 @@ export class CommissionService {
       ? parseFloat(matchedRange.installmentPaymentRate.toString())
       : parseFloat(matchedRange.singlePaymentRate.toString());
 
-    const commissionAmount = Math.round(((subtotalOrFinal * rate) / 100) * 100) / 100;
+    const commissionAmount =
+      Math.round(((subtotalOrFinal * rate) / 100) * 100) / 100;
     return { rate, commissionAmount };
   }
 
-  async voidOrderCommission(order: Order, manager?: EntityManager): Promise<void> {
-    const commission = parseFloat(order.platformCommissionAmount?.toString() || '0');
+  async voidOrderCommission(
+    order: Order,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const commission = parseFloat(
+      order.platformCommissionAmount?.toString() || '0',
+    );
     if (commission <= 0 || order.isCommissionVoided) {
       return;
     }
@@ -102,16 +117,22 @@ export class CommissionService {
       return;
     }
 
-    const storeRepo = manager ? manager.getRepository(Store) : this.storeRepository;
+    const storeRepo = manager
+      ? manager.getRepository(Store)
+      : this.storeRepository;
     const store = await storeRepo.findOne({ where: { id: storeId } });
     if (store) {
-      const currentDebt = parseFloat(store.accumulatedCommissionDebt?.toString() || '0');
+      const currentDebt = parseFloat(
+        store.accumulatedCommissionDebt?.toString() || '0',
+      );
       const newDebt = Math.max(0, currentDebt - commission);
       await storeRepo.update(store.id, { accumulatedCommissionDebt: newDebt });
     }
 
     // Si existe una factura de corte pendiente para esa tienda, descontarlo
-    const billingRepo = manager ? manager.getRepository(StoreCommissionBilling) : this.billingRepository;
+    const billingRepo = manager
+      ? manager.getRepository(StoreCommissionBilling)
+      : this.billingRepository;
     const pendingBilling = await billingRepo.findOne({
       where: {
         store: { id: storeId },
@@ -120,7 +141,9 @@ export class CommissionService {
     });
 
     if (pendingBilling) {
-      const bCommission = parseFloat(pendingBilling.commissionAmount.toString());
+      const bCommission = parseFloat(
+        pendingBilling.commissionAmount.toString(),
+      );
       const bDue = parseFloat(pendingBilling.totalDue.toString());
       const updatedComm = Math.max(0, bCommission - commission);
       const updatedDue = Math.max(0, bDue - commission);
@@ -130,6 +153,8 @@ export class CommissionService {
       });
     }
 
-    this.logger.log(`Voided commission of $${commission} for cancelled order ${order.id}`);
+    this.logger.log(
+      `Voided commission of $${commission} for cancelled order ${order.id}`,
+    );
   }
 }

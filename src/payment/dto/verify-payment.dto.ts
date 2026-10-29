@@ -8,4 +8,8 @@ export class VerifyPaymentDto {
   @IsOptional()
   @IsString()
   rejectionReason?: string;
+
+  @IsOptional()
+  @IsString()
+  receiptImage?: string;
 }

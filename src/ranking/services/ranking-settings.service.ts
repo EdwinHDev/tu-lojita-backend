@@ -69,6 +69,10 @@ export class RankingSettingsService {
         ...DEFAULT_RANKING_SETTINGS.divisionEmblems,
         ...(record.divisionEmblems || {}),
       },
+      divisionFrames: {
+        ...(DEFAULT_RANKING_SETTINGS.divisionFrames || {}),
+        ...(record.divisionFrames || {}),
+      },
       retention: {
         ...DEFAULT_RANKING_SETTINGS.retention,
         ...(record.retention || {}),
@@ -118,6 +122,11 @@ export class RankingSettingsService {
           ...record.divisionEmblems,
           ...dto.divisionEmblems,
         };
+      if (dto.divisionFrames)
+        record.divisionFrames = {
+          ...(record.divisionFrames || {}),
+          ...dto.divisionFrames,
+        };
       if (dto.retention)
         record.retention = {
           ...(record.retention || DEFAULT_RANKING_SETTINGS.retention),
@@ -153,11 +162,38 @@ export class RankingSettingsService {
     imageUrl: string,
   ): Promise<RankingSettingsData> {
     const current = await this.getSettings();
+    const defaultPath = `/assets/ranking/emblems/${division.toLowerCase()}.png`;
+    const finalUrl =
+      !imageUrl || imageUrl.trim() === '' ? defaultPath : imageUrl.trim();
     const updatedEmblems = {
       ...current.divisionEmblems,
-      [division]: imageUrl,
+      [division]: finalUrl,
     };
     return this.updateSettings({ divisionEmblems: updatedEmblems });
+  }
+
+  async getFrameUrl(division: Division): Promise<string> {
+    const settings = await this.getSettings();
+    return (
+      settings.divisionFrames?.[division] ||
+      DEFAULT_RANKING_SETTINGS.divisionFrames?.[division] ||
+      ''
+    );
+  }
+
+  async updateDivisionFrame(
+    division: Division,
+    imageUrl: string,
+  ): Promise<RankingSettingsData> {
+    const current = await this.getSettings();
+    const defaultPath = `/assets/ranking/frames/${division.toLowerCase()}.png`;
+    const finalUrl =
+      !imageUrl || imageUrl.trim() === '' ? defaultPath : imageUrl.trim();
+    const updatedFrames = {
+      ...(current.divisionFrames || {}),
+      [division]: finalUrl,
+    };
+    return this.updateSettings({ divisionFrames: updatedFrames });
   }
 
   clearCache(): void {

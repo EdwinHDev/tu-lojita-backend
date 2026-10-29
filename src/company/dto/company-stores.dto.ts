@@ -8,8 +8,12 @@ export class CompanyStoreDto {
   logo: string;
   status: StoreStatus;
   productsCount: number;
+  hasMultipleBranches?: boolean;
   salesToday: number;
   currency: string;
+  instagram?: string;
+  tiktok?: string;
+  phone?: string;
 }
 
 export class CompanyStoresResponseDto {

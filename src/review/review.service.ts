@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { OrderReview } from './entities/order-review.entity';
+import { OrderReviewLike } from './entities/order-review-like.entity';
 import { BuyerReview } from './entities/buyer-review.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { Item } from 'src/item/entities/item.entity';
@@ -37,6 +38,8 @@ export class ReviewService {
   constructor(
     @InjectRepository(OrderReview)
     private readonly orderReviewRepository: Repository<OrderReview>,
+    @InjectRepository(OrderReviewLike)
+    private readonly orderReviewLikeRepository: Repository<OrderReviewLike>,
     @InjectRepository(BuyerReview)
     private readonly buyerReviewRepository: Repository<BuyerReview>,
     @InjectRepository(Order)
@@ -65,18 +68,30 @@ export class ReviewService {
   ): Promise<OrderReview> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['user', 'store', 'store.owner', 'orderItems', 'orderItems.item'],
+      relations: [
+        'user',
+        'store',
+        'store.owner',
+        'orderItems',
+        'orderItems.item',
+      ],
     });
 
     if (!order) throw new NotFoundException(`Orden ${orderId} no encontrada`);
     if (order.status !== OrderStatus.FULLY_PAID) {
-      throw new ForbiddenException('Solo se pueden calificar órdenes completamente pagadas');
+      throw new ForbiddenException(
+        'Solo se pueden calificar órdenes completamente pagadas',
+      );
     }
     if (order.user?.id !== userId) {
-      throw new ForbiddenException('Solo el comprador de la orden puede dejar una reseña');
+      throw new ForbiddenException(
+        'Solo el comprador de la orden puede dejar una reseña',
+      );
     }
 
-    const existing = await this.orderReviewRepository.findOne({ where: { orderId } });
+    const existing = await this.orderReviewRepository.findOne({
+      where: { orderId },
+    });
     if (existing) {
       throw new ConflictException('Ya existe una reseña para esta orden');
     }
@@ -102,6 +117,7 @@ export class ReviewService {
     if (order.store?.owner?.id) {
       await this.notificationService.create({
         userId: order.store.owner.id,
+        storeId: order.store.id,
         title: '⭐ Nueva reseña recibida',
         body: `Un cliente calificó su orden con ${dto.rating} estrellas.`,
         type: NotificationType.ORDER_REVIEW_RECEIVED,
@@ -114,8 +130,10 @@ export class ReviewService {
       if (order.store?.id) {
         let rankingEventType: RankingEventType | null = null;
         if (dto.rating === 5) rankingEventType = RankingEventType.REVIEW_5_STAR;
-        else if (dto.rating === 4) rankingEventType = RankingEventType.REVIEW_4_STAR;
-        else if (dto.rating <= 2) rankingEventType = RankingEventType.REVIEW_1_2_STAR;
+        else if (dto.rating === 4)
+          rankingEventType = RankingEventType.REVIEW_4_STAR;
+        else if (dto.rating <= 2)
+          rankingEventType = RankingEventType.REVIEW_1_2_STAR;
 
         if (rankingEventType) {
           await this.rankingService.processEvent(
@@ -127,7 +145,9 @@ export class ReviewService {
         }
       }
     } catch (rankErr) {
-      this.logger.error(`Error processing ranking review event: ${rankErr.message}`);
+      this.logger.error(
+        `Error processing ranking review event: ${rankErr.message}`,
+      );
     }
 
     return review;
@@ -145,9 +165,12 @@ export class ReviewService {
       where: { id: reviewId },
     });
     if (!review) throw new NotFoundException('Reseña no encontrada');
-    if (review.authorId !== userId) throw new ForbiddenException('No autorizado');
+    if (review.authorId !== userId)
+      throw new ForbiddenException('No autorizado');
     if (Date.now() - review.createdAt.getTime() > THREE_DAYS_MS) {
-      throw new ForbiddenException('La ventana de edición de 3 días ha expirado');
+      throw new ForbiddenException(
+        'La ventana de edición de 3 días ha expirado',
+      );
     }
 
     const order = await this.orderRepository.findOne({
@@ -166,6 +189,48 @@ export class ReviewService {
   }
 
   /**
+   * Da o quita 'Me Gusta' (Like) a una OrderReview de manera atómica.
+   */
+  async toggleOrderReviewLike(
+    reviewId: string,
+    userId: string,
+  ): Promise<{ liked: boolean; likesCount: number }> {
+    const review = await this.orderReviewRepository.findOne({
+      where: { id: reviewId },
+    });
+    if (!review) throw new NotFoundException('Reseña no encontrada');
+
+    return this.dataSource.transaction(async (manager) => {
+      const existing = await manager.findOne(OrderReviewLike, {
+        where: { reviewId, userId },
+      });
+
+      let liked: boolean;
+      if (existing) {
+        await manager.remove(OrderReviewLike, existing);
+        await manager.decrement(OrderReview, { id: reviewId }, 'likesCount', 1);
+        liked = false;
+      } else {
+        const newLike = manager.create(OrderReviewLike, { reviewId, userId });
+        await manager.save(OrderReviewLike, newLike);
+        await manager.increment(OrderReview, { id: reviewId }, 'likesCount', 1);
+        liked = true;
+      }
+
+      const updated = await manager.findOne(OrderReview, {
+        where: { id: reviewId },
+        select: ['id', 'likesCount'],
+      });
+      const likesCount = Math.max(0, updated?.likesCount ?? 0);
+      if (updated && updated.likesCount < 0) {
+        await manager.update(OrderReview, reviewId, { likesCount: 0 });
+      }
+
+      return { liked, likesCount };
+    });
+  }
+
+  /**
    * Agrega la única respuesta del vendedor a una OrderReview.
    */
   async addVendorReply(
@@ -177,16 +242,27 @@ export class ReviewService {
       where: { id: reviewId },
     });
     if (!review) throw new NotFoundException('Reseña no encontrada');
-    if (review.vendorReply) throw new ConflictException('Ya existe una respuesta para esta reseña');
+    if (review.vendorReply)
+      throw new ConflictException('Ya existe una respuesta para esta reseña');
 
-    // Verificar que el usuario es dueño de la tienda asociada a la orden
+    // Verificar que el usuario es dueño de la tienda o de la empresa asociada a la orden
     const order = await this.orderRepository.findOne({
       where: { id: review.orderId },
-      relations: ['store', 'store.owner', 'user'],
+      relations: [
+        'store',
+        'store.owner',
+        'store.company',
+        'store.company.owner',
+        'user',
+      ],
     });
     if (!order) throw new NotFoundException('Orden no encontrada');
-    if (order.store?.owner?.id !== vendorUserId) {
-      throw new ForbiddenException('Solo el dueño de la tienda puede responder la reseña');
+    const isStoreOwner = order.store?.owner?.id === vendorUserId;
+    const isCompanyOwner = order.store?.company?.owner?.id === vendorUserId;
+    if (!isStoreOwner && !isCompanyOwner) {
+      throw new ForbiddenException(
+        'Solo el dueño de la tienda o empresa puede responder la reseña',
+      );
     }
 
     review.vendorReply = dto.reply;
@@ -214,19 +290,23 @@ export class ReviewService {
         );
       }
     } catch (rankErr) {
-      this.logger.error(`Error processing ranking review reply event: ${rankErr.message}`);
+      this.logger.error(
+        `Error processing ranking review reply event: ${rankErr.message}`,
+      );
     }
 
     return saved;
   }
 
   /**
-   * Retorna reseñas paginadas de las órdenes de un ítem (solo visibles).
+   * Retorna reseñas paginadas de las órdenes de un ítem (solo visibles),
+   * incluyendo likesCount y el estado isLikedByMe si se envía currentUserId.
    */
   async getOrderReviews(
     itemId: string,
     page = 1,
     limit = 10,
+    currentUserId?: string,
   ): Promise<{ items: OrderReview[]; total: number }> {
     // Obtener todas las ordenes que tienen ese ítem en sus orderItems
     const [items, total] = await this.orderReviewRepository
@@ -240,7 +320,90 @@ export class ReviewService {
       .take(limit)
       .getManyAndCount();
 
+    if (currentUserId && items.length > 0) {
+      const reviewIds = items.map((i) => i.id);
+      const userLikes = await this.orderReviewLikeRepository
+        .createQueryBuilder('l')
+        .where('l."reviewId" IN (:...reviewIds)', { reviewIds })
+        .andWhere('l."userId" = :currentUserId', { currentUserId })
+        .getMany();
+
+      const likedReviewIds = new Set(userLikes.map((l) => l.reviewId));
+      for (const item of items) {
+        item.isLikedByMe = likedReviewIds.has(item.id);
+      }
+    } else {
+      for (const item of items) {
+        item.isLikedByMe = false;
+      }
+    }
+
     return { items, total };
+  }
+
+  /**
+   * Retorna el resumen de métricas de calificación y conteo de reseñas de una tienda.
+   */
+  async getStoreReviewsSummary(
+    storeId: string,
+  ): Promise<{ averageRating: number; totalReviews: number }> {
+    const result = await this.orderReviewRepository
+      .createQueryBuilder('r')
+      .innerJoin('orders', 'o', 'o.id = r."orderId"')
+      .where('o."storeId" = :storeId', { storeId })
+      .andWhere('r."isVisible" = true')
+      .select('AVG(r.rating)', 'avg')
+      .addSelect('COUNT(r.id)', 'count')
+      .getRawOne();
+
+    const avg = result?.avg ? parseFloat(parseFloat(result.avg).toFixed(1)) : 0;
+    const count = result?.count ? parseInt(result.count, 10) : 0;
+
+    return { averageRating: avg, totalReviews: count };
+  }
+
+  /**
+   * Retorna las OrderReview de una tienda paginadas (público),
+   * incluyendo likesCount y el estado isLikedByMe si se envía currentUserId.
+   */
+  async getStoreReviews(
+    storeId: string,
+    page = 1,
+    limit = 10,
+    currentUserId?: string,
+  ): Promise<{ items: OrderReview[]; total: number; averageRating: number }> {
+    const [items, total] = await this.orderReviewRepository
+      .createQueryBuilder('r')
+      .innerJoin('orders', 'o', 'o.id = r."orderId"')
+      .where('o."storeId" = :storeId', { storeId })
+      .andWhere('r."isVisible" = true')
+      .leftJoinAndMapOne('r.author', User, 'author', 'author.id = r."authorId"')
+      .orderBy('r.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    if (currentUserId && items.length > 0) {
+      const reviewIds = items.map((i) => i.id);
+      const userLikes = await this.orderReviewLikeRepository
+        .createQueryBuilder('l')
+        .where('l."reviewId" IN (:...reviewIds)', { reviewIds })
+        .andWhere('l."userId" = :currentUserId', { currentUserId })
+        .getMany();
+
+      const likedReviewIds = new Set(userLikes.map((l) => l.reviewId));
+      for (const item of items) {
+        item.isLikedByMe = likedReviewIds.has(item.id);
+      }
+    } else {
+      for (const item of items) {
+        item.isLikedByMe = false;
+      }
+    }
+
+    const summary = await this.getStoreReviewsSummary(storeId);
+
+    return { items, total, averageRating: summary.averageRating };
   }
 
   /**
@@ -262,13 +425,27 @@ export class ReviewService {
   }
 
   /**
-   * Obtiene la OrderReview de una orden (si existe).
+   * Obtiene la OrderReview de una orden (si existe), calculando isLikedByMe.
    */
-  async getOrderReviewByOrder(orderId: string): Promise<OrderReview | null> {
-    return this.orderReviewRepository.findOne({
+  async getOrderReviewByOrder(
+    orderId: string,
+    currentUserId?: string,
+  ): Promise<OrderReview | null> {
+    const review = await this.orderReviewRepository.findOne({
       where: { orderId },
       relations: ['author'],
     });
+
+    if (review && currentUserId) {
+      const like = await this.orderReviewLikeRepository.findOne({
+        where: { reviewId: review.id, userId: currentUserId },
+      });
+      review.isLikedByMe = !!like;
+    } else if (review) {
+      review.isLikedByMe = false;
+    }
+
+    return review;
   }
 
   /**
@@ -293,20 +470,38 @@ export class ReviewService {
   ): Promise<BuyerReview> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['store', 'store.owner', 'user'],
+      relations: [
+        'store',
+        'store.owner',
+        'store.company',
+        'store.company.owner',
+        'user',
+      ],
     });
     if (!order) throw new NotFoundException(`Orden ${orderId} no encontrada`);
     if (order.status !== OrderStatus.FULLY_PAID) {
-      throw new ForbiddenException('Solo se pueden calificar compradores de órdenes completadas');
+      throw new ForbiddenException(
+        'Solo se pueden calificar compradores de órdenes completadas',
+      );
     }
-    if (order.store?.owner?.id !== vendorUserId) {
-      throw new ForbiddenException('Solo el dueño de la tienda puede calificar al comprador');
+    const isStoreOwner = order.store?.owner?.id === vendorUserId;
+    const isCompanyOwner = order.store?.company?.owner?.id === vendorUserId;
+    if (!isStoreOwner && !isCompanyOwner) {
+      throw new ForbiddenException(
+        'Solo el dueño de la tienda o empresa puede calificar al comprador',
+      );
     }
 
-    const existing = await this.buyerReviewRepository.findOne({ where: { orderId } });
-    if (existing) throw new ConflictException('Ya existe una calificación para el comprador de esta orden');
+    const existing = await this.buyerReviewRepository.findOne({
+      where: { orderId },
+    });
+    if (existing)
+      throw new ConflictException(
+        'Ya existe una calificación para el comprador de esta orden',
+      );
 
-    if (!order.user) throw new BadRequestException('No se pudo identificar al comprador');
+    if (!order.user)
+      throw new BadRequestException('No se pudo identificar al comprador');
 
     const review = await this.dataSource.transaction(async (manager) => {
       const newReview = manager.create(BuyerReview, {
@@ -343,11 +538,16 @@ export class ReviewService {
     vendorUserId: string,
     dto: UpdateBuyerReviewDto,
   ): Promise<BuyerReview> {
-    const review = await this.buyerReviewRepository.findOne({ where: { id: reviewId } });
+    const review = await this.buyerReviewRepository.findOne({
+      where: { id: reviewId },
+    });
     if (!review) throw new NotFoundException('Calificación no encontrada');
-    if (review.authorId !== vendorUserId) throw new ForbiddenException('No autorizado');
+    if (review.authorId !== vendorUserId)
+      throw new ForbiddenException('No autorizado');
     if (Date.now() - review.createdAt.getTime() > THREE_DAYS_MS) {
-      throw new ForbiddenException('La ventana de edición de 3 días ha expirado');
+      throw new ForbiddenException(
+        'La ventana de edición de 3 días ha expirado',
+      );
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -365,7 +565,9 @@ export class ReviewService {
     reviewId: string,
     dto: UpdateReviewVisibilityDto,
   ): Promise<OrderReview> {
-    const review = await this.orderReviewRepository.findOne({ where: { id: reviewId } });
+    const review = await this.orderReviewRepository.findOne({
+      where: { id: reviewId },
+    });
     if (!review) throw new NotFoundException('Reseña no encontrada');
 
     review.isVisible = dto.isVisible;
@@ -386,12 +588,16 @@ export class ReviewService {
     reviewId: string,
     dto: UpdateReviewVisibilityDto,
   ): Promise<BuyerReview> {
-    const review = await this.buyerReviewRepository.findOne({ where: { id: reviewId } });
+    const review = await this.buyerReviewRepository.findOne({
+      where: { id: reviewId },
+    });
     if (!review) throw new NotFoundException('Calificación no encontrada');
 
     review.isVisible = dto.isVisible;
     const saved = await this.buyerReviewRepository.save(review);
-    await this.dataSource.transaction((m) => this.recalcBuyerRating(m, review.targetUserId));
+    await this.dataSource.transaction((m) =>
+      this.recalcBuyerRating(m, review.targetUserId),
+    );
     return saved;
   }
 
@@ -403,22 +609,26 @@ export class ReviewService {
     limit = 20,
   ) {
     if (!type || type === 'ORDER_REVIEW') {
-      const qb = this.orderReviewRepository.createQueryBuilder('r')
+      const qb = this.orderReviewRepository
+        .createQueryBuilder('r')
         .leftJoinAndSelect('r.author', 'author')
         .orderBy('r.createdAt', 'DESC')
         .skip((page - 1) * limit)
         .take(limit);
-      if (isVisible !== undefined) qb.andWhere('r.isVisible = :isVisible', { isVisible });
+      if (isVisible !== undefined)
+        qb.andWhere('r.isVisible = :isVisible', { isVisible });
       const [items, total] = await qb.getManyAndCount();
       return { type: 'ORDER_REVIEW', items, total };
     }
-    const qb = this.buyerReviewRepository.createQueryBuilder('r')
+    const qb = this.buyerReviewRepository
+      .createQueryBuilder('r')
       .leftJoinAndSelect('r.author', 'author')
       .leftJoinAndSelect('r.targetUser', 'targetUser')
       .orderBy('r.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
-    if (isVisible !== undefined) qb.andWhere('r.isVisible = :isVisible', { isVisible });
+    if (isVisible !== undefined)
+      qb.andWhere('r.isVisible = :isVisible', { isVisible });
     const [items, total] = await qb.getManyAndCount();
     return { type: 'BUYER_REVIEW', items, total };
   }
@@ -444,6 +654,7 @@ export class ReviewService {
       if (order.store?.owner?.id) {
         await this.notificationService.create({
           userId: order.store.owner.id,
+          storeId: order.store.id,
           title: '👤 Califica a tu comprador',
           body: 'Una orden fue completada. Puedes calificar al cliente.',
           type: NotificationType.BUYER_REVIEW_PROMPT,
@@ -452,7 +663,9 @@ export class ReviewService {
         });
       }
     } catch (err) {
-      this.logger.error(`Error sending review prompt notifications: ${err.message}`);
+      this.logger.error(
+        `Error sending review prompt notifications: ${err.message}`,
+      );
     }
   }
 
@@ -489,7 +702,10 @@ export class ReviewService {
   /**
    * Recalcula y persiste averageBuyerRating y totalBuyerReviews en el User comprador.
    */
-  private async recalcBuyerRating(manager: any, targetUserId: string): Promise<void> {
+  private async recalcBuyerRating(
+    manager: any,
+    targetUserId: string,
+  ): Promise<void> {
     const result = await manager
       .getRepository(BuyerReview)
       .createQueryBuilder('r')

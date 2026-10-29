@@ -51,10 +51,10 @@ export class CreateUserDto {
   })
   password: string;
 
-  @IsEnum({
-    enum: UserRole,
+  @IsEnum(UserRole, {
     message: 'El rol no es valido',
   })
+  @IsOptional()
   role?: UserRole;
 
   @IsUUID('4', { message: 'El ID de la empresa debe ser un UUID válido' })

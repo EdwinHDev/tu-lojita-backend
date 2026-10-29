@@ -39,16 +39,13 @@ export class StoreController {
   }
 
   @Get('latest')
-  findLatestWithItems(
-    @Query('limit') limit?: number,
-    @GetUser() user?: User,
-  ) {
+  findLatestWithItems(@Query('limit') limit?: number, @GetUser() user?: User) {
     return this.storeService.findLatestWithItems(limit, user);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.storeService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: User) {
+    return this.storeService.findOne(id, user);
   }
 
   @Get(':id/dashboard')
@@ -139,4 +136,3 @@ export class StoreController {
     );
   }
 }
-

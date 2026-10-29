@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { IsRif } from '../decorators/is-rif.decorator';
 
 export class CreateCompanyDto {
@@ -14,4 +21,18 @@ export class CreateCompanyDto {
   @IsString({ message: 'El logo debe ser una cadena de texto' })
   @MinLength(1, { message: 'El logo no puede estar vacío' })
   logo: string;
+
+  @IsUUID('4', { message: 'El ID de la subcategoría debe ser un UUID válido' })
+  @IsOptional()
+  subcategoryId?: string;
+
+  @IsString({ message: 'El teléfono debe ser una cadena de texto' })
+  @IsOptional()
+  @MaxLength(30, { message: 'El teléfono debe tener menos de 30 caracteres' })
+  phone?: string;
+
+  @IsString({ message: 'La descripción debe ser una cadena de texto' })
+  @IsOptional()
+  @MaxLength(500, { message: 'La descripción debe tener menos de 500 caracteres' })
+  description?: string;
 }

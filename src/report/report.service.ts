@@ -6,11 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
-import {
-  Report,
-  ReportAction,
-  ReportStatus,
-} from './entities/report.entity';
+import { Report, ReportAction, ReportStatus } from './entities/report.entity';
 import { CreateReportDto } from './dto/create-report.dto';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 import { ReportPaginationDto } from './dto/report-pagination.dto';
@@ -51,7 +47,20 @@ export class ReportService {
     });
 
     const savedReport = await this.reportRepository.save(report);
-    this.notificationService.notifyAdminBadgesChanged().catch(() => {});
+    this.notificationService
+      .notifyAdminActionRequired({
+        type: 'REPORT_CREATED',
+        title: 'Nueva denuncia recibida',
+        message: `Se ha registrado un reporte de conducta (${savedReport.type}: ${savedReport.category || 'General'})`,
+        entityId: savedReport.id,
+        link: '/reports',
+        metadata: {
+          reportId: savedReport.id,
+          type: savedReport.type,
+          category: savedReport.category,
+        },
+      })
+      .catch(() => {});
     return savedReport;
   }
 
@@ -156,7 +165,10 @@ export class ReportService {
         report.targetUserId === user.id ||
         report.targetChatMessage?.sender?.id === user.id;
 
-      if (!isReporter && !(isTarget && report.status !== ReportStatus.PENDING)) {
+      if (
+        !isReporter &&
+        !(isTarget && report.status !== ReportStatus.PENDING)
+      ) {
         throw new ForbiddenException('No tienes permiso para ver este reporte');
       }
     }
@@ -191,13 +203,15 @@ export class ReportService {
     let activeStrikes = 0;
 
     // Acción: Ocultar artículo
-    if (
-      dto.actionTaken === ReportAction.ITEM_HIDDEN &&
-      report.targetItemId
-    ) {
+    if (dto.actionTaken === ReportAction.ITEM_HIDDEN && report.targetItemId) {
       targetItem = await this.itemRepository.findOne({
         where: { id: report.targetItemId },
-        relations: ['store', 'store.owner', 'store.company', 'store.company.owner'],
+        relations: [
+          'store',
+          'store.owner',
+          'store.company',
+          'store.company.owner',
+        ],
       });
       if (targetItem) {
         targetItem.isActive = false;
@@ -258,7 +272,9 @@ export class ReportService {
           { reason: strike.reason },
         );
       } catch (rankErr) {
-        console.error(`Error processing ranking strike event: ${rankErr.message}`);
+        console.error(
+          `Error processing ranking strike event: ${rankErr.message}`,
+        );
       }
 
       // Calcular número de strikes activos (< 90 días y no revocados)
@@ -350,7 +366,10 @@ export class ReportService {
                   .catch(() => {});
               }
             }
-          } else if (dto.actionTaken === ReportAction.ITEM_HIDDEN && targetItem) {
+          } else if (
+            dto.actionTaken === ReportAction.ITEM_HIDDEN &&
+            targetItem
+          ) {
             await this.notificationService.create({
               userId: ownerId,
               storeId: storeToNotify.id,

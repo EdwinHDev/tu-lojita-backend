@@ -25,7 +25,9 @@ export class SubscriptionCron {
 
   @Cron('0 0 * * *', { timeZone: 'America/Caracas' })
   async handleDailySubscriptionChecks() {
-    this.logger.log('Ejecutando revisión diaria de suscripciones B2B (00:00 VET)...');
+    this.logger.log(
+      'Ejecutando revisión diaria de suscripciones B2B (00:00 VET)...',
+    );
 
     const now = new Date();
     const settings = await this.settingsRepository.findOne({ where: {} });
@@ -43,7 +45,9 @@ export class SubscriptionCron {
     for (const sub of activeExpired) {
       sub.status = SubscriptionStatus.GRACE_PERIOD;
       await this.subscriptionRepository.save(sub);
-      this.logger.log(`Suscripción de ${sub.owner.email} pasó a período de gracia.`);
+      this.logger.log(
+        `Suscripción de ${sub.owner.email} pasó a período de gracia.`,
+      );
 
       if (sub.owner?.email) {
         await this.mailService.sendSubscriptionGracePeriodNotice(
@@ -65,7 +69,8 @@ export class SubscriptionCron {
 
     for (const sub of graceExpired) {
       sub.status = SubscriptionStatus.SUSPENDED;
-      sub.accumulatedDebt = parseFloat(sub.accumulatedDebt?.toString() || '0') + lateFee;
+      sub.accumulatedDebt =
+        parseFloat(sub.accumulatedDebt?.toString() || '0') + lateFee;
       await this.subscriptionRepository.save(sub);
 
       // Suspender tiendas asociadas a la empresa

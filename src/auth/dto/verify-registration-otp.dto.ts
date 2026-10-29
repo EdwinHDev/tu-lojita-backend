@@ -5,8 +5,12 @@ export class VerifyRegistrationOtpDto {
   @IsNotEmpty({ message: 'El token de registro es requerido.' })
   registrationToken: string;
 
-  @IsString({ message: 'El código de verificación debe ser una cadena de texto.' })
-  @Length(6, 6, { message: 'El código de verificación debe contener exactamente 6 dígitos.' })
+  @IsString({
+    message: 'El código de verificación debe ser una cadena de texto.',
+  })
+  @Length(6, 6, {
+    message: 'El código de verificación debe contener exactamente 6 dígitos.',
+  })
   @IsNotEmpty({ message: 'El código de verificación es requerido.' })
   otp: string;
 }

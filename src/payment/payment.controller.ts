@@ -45,14 +45,22 @@ export class PaymentController {
   verify(
     @Param('id') id: string,
     @Body() verifyPaymentDto: VerifyPaymentDto,
-    @GetUser() user: User,
+    @GetUser() user: any,
   ) {
     return this.paymentService.verifyPayment(
       id,
       verifyPaymentDto.status,
       user.id,
       verifyPaymentDto.rejectionReason,
+      verifyPaymentDto.receiptImage,
+      false,
+      user,
     );
+  }
+
+  @Post(':id/confirm-refund')
+  confirmRefund(@Param('id') id: string, @GetUser() user: User) {
+    return this.paymentService.confirmRefund(id, user);
   }
 
   @Get()

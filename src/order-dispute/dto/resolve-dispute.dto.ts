@@ -1,17 +1,49 @@
-import { IsEnum, IsNotEmpty, IsString, MinLength } from 'class-validator';
-import { DisputeResolution, DisputeStatus } from '../types';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
+import {
+  DisputePenaltyType,
+  DisputeResolution,
+  DisputeStatus,
+  DisputeVerdict,
+} from '../types';
 
 export class ResolveDisputeDto {
   @IsEnum(DisputeResolution, { message: 'El tipo de resolución no es válido.' })
-  @IsNotEmpty({ message: 'El tipo de resolución es obligatorio.' })
-  resolution: DisputeResolution;
+  @IsOptional()
+  resolution?: DisputeResolution;
 
   @IsEnum(DisputeStatus, { message: 'El estado final no es válido.' })
-  @IsNotEmpty({ message: 'El estado final es obligatorio.' })
-  status: DisputeStatus;
+  @IsOptional()
+  status?: DisputeStatus;
 
-  @IsString({ message: 'La nota del administrador debe ser un texto.' })
-  @IsNotEmpty({ message: 'La nota del administrador es obligatoria.' })
-  @MinLength(5, { message: 'La nota del administrador debe tener al menos 5 caracteres.' })
+  @IsEnum(DisputeVerdict, { message: 'El dictamen arbitral no es válido.' })
+  @IsOptional()
+  verdict?: DisputeVerdict;
+
+  @IsEnum(DisputePenaltyType, {
+    message: 'La sanción al comprador no es válida.',
+  })
+  @IsOptional()
+  buyerPenalty?: DisputePenaltyType = DisputePenaltyType.NONE;
+
+  @IsEnum(DisputePenaltyType, {
+    message: 'La sanción al comercio no es válida.',
+  })
+  @IsOptional()
+  merchantPenalty?: DisputePenaltyType = DisputePenaltyType.NONE;
+
+  @IsString({
+    message: 'La justificación del equipo de soporte debe ser un texto.',
+  })
+  @IsNotEmpty({ message: 'La justificación del equipo de soporte es obligatoria.' })
+  @MinLength(5, {
+    message:
+      'La justificación del equipo de soporte debe tener al menos 5 caracteres.',
+  })
   adminNote: string;
 }

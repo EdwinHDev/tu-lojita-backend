@@ -18,3 +18,13 @@ export class PlatformSettingsController {
     return this.service.set(key, value);
   }
 }
+
+@Controller('platform-settings')
+export class PublicPlatformSettingsController {
+  constructor(private readonly service: PlatformSettingsService) {}
+
+  @Get('public')
+  getPublicSettings() {
+    return this.service.getPublicSettings();
+  }
+}

@@ -4,6 +4,7 @@ import {
   Entity,
   ManyToOne,
   OneToMany,
+  ManyToMany,
   OneToOne,
   BeforeInsert,
   BeforeUpdate,
@@ -12,6 +13,7 @@ import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 import { Company } from 'src/company/entities/company.entity';
+import { CompanyCollaborator } from 'src/company/entities/company-collaborator.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Item } from 'src/item/entities/item.entity';
 import { StoreAddress } from 'src/store-address/entities/store-address.entity';
@@ -34,6 +36,9 @@ export class Store extends TimestampEntity {
   @Column('text', { nullable: true })
   branchName?: string;
 
+  hasMultipleBranches?: boolean;
+  productsCount?: number;
+
   @Column('text')
   description: string;
 
@@ -48,6 +53,12 @@ export class Store extends TimestampEntity {
 
   @Column('text', { nullable: true })
   coverImage?: string;
+
+  @Column('text', { nullable: true })
+  instagram?: string;
+
+  @Column('text', { nullable: true })
+  tiktok?: string;
 
   // Relación con la empresa a la que pertenece la tienda (Opcional)
   @ManyToOne(() => Company, (company) => company.stores, { nullable: true })
@@ -93,6 +104,9 @@ export class Store extends TimestampEntity {
 
   @OneToOne(() => StoreRanking, (ranking) => ranking.store, { nullable: true })
   ranking?: StoreRanking;
+
+  @ManyToMany(() => CompanyCollaborator, (collaborator) => collaborator.stores)
+  collaborators: CompanyCollaborator[];
 
   // Configuración de Pagos Parciales
   @Column('boolean', { default: false })

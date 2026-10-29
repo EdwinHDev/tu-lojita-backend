@@ -6,6 +6,7 @@ import {
   Param,
   Body,
   Query,
+  Headers,
 } from '@nestjs/common';
 import { ReviewService } from './review.service';
 import { Auth } from 'src/auth/decorators/auth.decorator';
@@ -60,21 +61,88 @@ export class ReviewController {
     return this.reviewService.addVendorReply(reviewId, user.id, dto);
   }
 
+  /** POST /reviews/order/:reviewId/like — Dar o quitar 'Me Gusta' a una reseña */
+  @Auth()
+  @Post('order/:reviewId/like')
+  toggleOrderReviewLike(
+    @Param('reviewId') reviewId: string,
+    @GetUser() user: User,
+  ) {
+    return this.reviewService.toggleOrderReviewLike(reviewId, user.id);
+  }
+
   /** GET /reviews/order/item/:itemId — Reseñas de un ítem (público, paginado) */
   @Get('order/item/:itemId')
   getOrderReviews(
     @Param('itemId') itemId: string,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
+    @Headers('authorization') authHeader?: string,
   ) {
-    return this.reviewService.getOrderReviews(itemId, +page, +limit);
+    let currentUserId: string | undefined;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(
+            Buffer.from(parts[1], 'base64').toString('utf8'),
+          );
+          currentUserId = payload.sub;
+        }
+      } catch (_) {}
+    }
+    return this.reviewService.getOrderReviews(
+      itemId,
+      +page,
+      +limit,
+      currentUserId,
+    );
+  }
+
+  /** GET /reviews/store/:storeId/summary — Resumen de calificación de una tienda (público) */
+  @Get('store/:storeId/summary')
+  getStoreReviewsSummary(@Param('storeId') storeId: string) {
+    return this.reviewService.getStoreReviewsSummary(storeId);
+  }
+
+  /** GET /reviews/store/:storeId — Reseñas de una tienda (público, paginado) */
+  @Get('store/:storeId')
+  getStoreReviews(
+    @Param('storeId') storeId: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 10,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    let currentUserId: string | undefined;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(
+            Buffer.from(parts[1], 'base64').toString('utf8'),
+          );
+          currentUserId = payload.sub;
+        }
+      } catch (_) {}
+    }
+    return this.reviewService.getStoreReviews(
+      storeId,
+      +page,
+      +limit,
+      currentUserId,
+    );
   }
 
   /** GET /reviews/order/by-order/:orderId — Obtiene la reseña de una orden */
   @Auth()
   @Get('order/by-order/:orderId')
-  getOrderReviewByOrder(@Param('orderId') orderId: string) {
-    return this.reviewService.getOrderReviewByOrder(orderId);
+  getOrderReviewByOrder(
+    @Param('orderId') orderId: string,
+    @GetUser() user: User,
+  ) {
+    return this.reviewService.getOrderReviewByOrder(orderId, user.id);
   }
 
   // ─── BuyerReview ────────────────────────────────────────────────────────────

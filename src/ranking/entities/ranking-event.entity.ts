@@ -30,7 +30,14 @@ export class RankingEvent {
   eventType: RankingEventType;
 
   @Column('int')
-  lpDelta: number;
+  prDelta: number;
+
+  get lpDelta(): number {
+    return this.prDelta;
+  }
+  set lpDelta(value: number) {
+    this.prDelta = value;
+  }
 
   @Column('text', { nullable: true })
   referenceId?: string;

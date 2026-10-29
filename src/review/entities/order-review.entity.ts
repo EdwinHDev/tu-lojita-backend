@@ -7,6 +7,7 @@ import {
   Index,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
 import { Order } from 'src/order/entities/order.entity';
 import { User } from 'src/user/entities/user.entity';
@@ -54,6 +55,16 @@ export class OrderReview {
   /** Control de moderación del admin */
   @Column('boolean', { default: true })
   isVisible: boolean;
+
+  /** Contador de 'Me Gusta' (Likes) */
+  @Column('int', { default: 0 })
+  likesCount: number;
+
+  @OneToMany('OrderReviewLike', 'review')
+  likes: any[];
+
+  /** Campo dinámico/virtual para indicar si el usuario actual dio like */
+  isLikedByMe?: boolean;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

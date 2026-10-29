@@ -78,6 +78,17 @@ export class PaymentMethodShareDto {
   transactionCount: number;
 }
 
+export class TopDesiredProductDto {
+  itemId: string;
+  title: string;
+  mainImage: string | null;
+  favoritesCount: number;
+  price: number;
+  stockQuantity: number | null;
+  trackInventory: boolean;
+  hasVariants?: boolean;
+}
+
 export class DashboardAnalyticsResponseDto {
   period: string;
   startDate: string;
@@ -88,5 +99,6 @@ export class DashboardAnalyticsResponseDto {
   salesChart: SalesChartPointDto[];
   storesPerformance: StorePerformanceDto[];
   topProducts: TopProductDto[];
+  topDesiredProducts?: TopDesiredProductDto[];
   paymentMethods: PaymentMethodShareDto[];
 }

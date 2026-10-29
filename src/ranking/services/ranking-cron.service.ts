@@ -146,7 +146,7 @@ export class RankingCronService {
           r.inDangerZone &&
           r.dangerZoneExpiresAt &&
           new Date(r.dangerZoneExpiresAt) <= now &&
-          r.currentLP <= 0
+          r.currentPR <= 0
         ) {
           const normDiv = normalizeDivision(r.division);
           const currentIdx = DIVISION_ORDER.indexOf(normDiv);
@@ -182,7 +182,9 @@ export class RankingCronService {
           const ret = settings.retention || DEFAULT_RANKING_SETTINGS.retention;
           const decayDays = ret.eliteDecayDays ?? 5;
           const decayPenalty = ret.eliteDecayPenalty ?? 10;
-          const decayDate = new Date(now.getTime() - decayDays * 24 * 60 * 60 * 1000);
+          const decayDate = new Date(
+            now.getTime() - decayDays * 24 * 60 * 60 * 1000,
+          );
 
           const recentOrder = await this.orderRepo.findOne({
             where: {
@@ -302,7 +304,7 @@ export class RankingCronService {
 
         if (events.length === 0) continue;
 
-        const weeklyPR = events.reduce((sum, e) => sum + e.lpDelta, 0);
+        const weeklyPR = events.reduce((sum, e) => sum + e.prDelta, 0);
         const ranking = await this.rankingService.getOrCreateStoreRanking(
           store.id,
         );
@@ -313,7 +315,7 @@ export class RankingCronService {
           storeId: store.id,
           type: NotificationType.WEEKLY_RANKING_SUMMARY,
           title: 'Resumen Semanal de Rendimiento 📊',
-          body: `Esta semana sumaste ${weeklyPR >= 0 ? `+${weeklyPR}` : weeklyPR} PR. Tu rango actual es ${DIVISION_TITLES[normDiv]} (${ranking.currentLP} PR).`,
+          body: `Esta semana sumaste ${weeklyPR >= 0 ? `+${weeklyPR}` : weeklyPR} PR. Tu rango actual es ${DIVISION_TITLES[normDiv]} (${ranking.currentPR} PR).`,
           targetId: store.id,
         });
       } catch (err: unknown) {

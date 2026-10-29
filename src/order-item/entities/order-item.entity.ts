@@ -1,6 +1,7 @@
 import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { Order } from '../../order/entities/order.entity';
 import { Item } from '../../item/entities/item.entity';
+import { ItemVariant } from '../../item/entities/item-variant.entity';
 
 @Entity('order_items')
 export class OrderItem {
@@ -26,9 +27,21 @@ export class OrderItem {
   @Column('jsonb', { nullable: true })
   selectedOptions?: Record<string, string[]>;
 
+  @Column('uuid', { nullable: true })
+  variantId?: string;
+
+  @Column('text', { nullable: true })
+  variantLabel?: string; // Snapshot de la combinación (ej: "Azul / M")
+
   @ManyToOne(() => Order, (order) => order.orderItems, { onDelete: 'CASCADE' })
   order: Order;
 
   @ManyToOne(() => Item)
   item: Item;
+
+  @ManyToOne(() => ItemVariant, (variant) => variant.orderItems, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  variant?: ItemVariant;
 }

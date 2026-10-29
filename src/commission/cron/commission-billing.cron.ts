@@ -29,11 +29,15 @@ export class CommissionBillingCron {
   // 1. Corte Semanal: Todos los lunes a las 00:00 hora de Venezuela (America/Caracas)
   @Cron('0 0 * * 1', { timeZone: 'America/Caracas' })
   async handleWeeklyCommissionCut() {
-    this.logger.log('Iniciando corte semanal de comisiones (Lunes 00:00 VET)...');
+    this.logger.log(
+      'Iniciando corte semanal de comisiones (Lunes 00:00 VET)...',
+    );
 
     const settings = await this.settingsRepository.findOne({ where: {} });
     if (!settings || !settings.isEnabled) {
-      this.logger.log('Las comisiones están desactivadas globalmente. Se omite corte.');
+      this.logger.log(
+        'Las comisiones están desactivadas globalmente. Se omite corte.',
+      );
       return;
     }
 
@@ -53,7 +57,9 @@ export class CommissionBillingCron {
     for (const store of stores) {
       if (store.isCommissionExempt) continue;
 
-      const debt = parseFloat(store.accumulatedCommissionDebt?.toString() || '0');
+      const debt = parseFloat(
+        store.accumulatedCommissionDebt?.toString() || '0',
+      );
       if (debt <= 0) continue;
 
       // Buscar órdenes del período
@@ -104,7 +110,9 @@ export class CommissionBillingCron {
   // 2. Recordatorio de Vencimiento de Gracia: Miércoles a las 09:00 hora de Venezuela
   @Cron('0 9 * * 3', { timeZone: 'America/Caracas' })
   async handleGracePeriodReminder() {
-    this.logger.log('Enviando recordatorios de gracia de comisiones (Miércoles 09:00 VET)...');
+    this.logger.log(
+      'Enviando recordatorios de gracia de comisiones (Miércoles 09:00 VET)...',
+    );
 
     const pendingBillings = await this.billingRepository.find({
       where: { status: BillingStatus.PENDING },
@@ -125,7 +133,9 @@ export class CommissionBillingCron {
   // 3. Suspensión y Aplicación de Multas: Miércoles a las 23:59 hora de Venezuela
   @Cron('59 23 * * 3', { timeZone: 'America/Caracas' })
   async handleCommissionSuspensionAndFines() {
-    this.logger.log('Aplicando suspensiones y multas por comisiones (Miércoles 23:59 VET)...');
+    this.logger.log(
+      'Aplicando suspensiones y multas por comisiones (Miércoles 23:59 VET)...',
+    );
 
     const settings = await this.settingsRepository.findOne({ where: {} });
     const fineType = settings?.fineType || FineType.PERCENTAGE;
@@ -157,8 +167,11 @@ export class CommissionBillingCron {
       // Suspender la tienda y sumarle la multa a la deuda
       const store = billing.store;
       store.status = StoreStatus.SUSPENDED;
-      const currentDebt = parseFloat(store.accumulatedCommissionDebt?.toString() || '0');
-      store.accumulatedCommissionDebt = Math.round((currentDebt + fine) * 100) / 100;
+      const currentDebt = parseFloat(
+        store.accumulatedCommissionDebt?.toString() || '0',
+      );
+      store.accumulatedCommissionDebt =
+        Math.round((currentDebt + fine) * 100) / 100;
       await this.storeRepository.save(store);
 
       this.logger.warn(

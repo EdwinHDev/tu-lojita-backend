@@ -1,4 +1,12 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MinLength,
+} from 'class-validator';
 import { DisputeType } from '../types';
 
 export class CreateDisputeDto {
@@ -12,7 +20,9 @@ export class CreateDisputeDto {
 
   @IsString({ message: 'La descripción debe ser un texto.' })
   @IsOptional()
-  @MinLength(10, { message: 'La descripción debe tener al menos 10 caracteres.' })
+  @MinLength(10, {
+    message: 'La descripción debe tener al menos 10 caracteres.',
+  })
   description?: string;
 
   @IsString({ message: 'El motivo debe ser un texto.' })

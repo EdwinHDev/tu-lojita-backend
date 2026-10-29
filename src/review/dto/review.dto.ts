@@ -22,7 +22,7 @@ export class CreateOrderReviewDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5)
-  @IsUrl({}, { each: true })
+  @IsString({ each: true })
   imageUrls?: string[];
 }
 
@@ -40,7 +40,7 @@ export class UpdateOrderReviewDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5)
-  @IsUrl({}, { each: true })
+  @IsString({ each: true })
   imageUrls?: string[];
 }
 

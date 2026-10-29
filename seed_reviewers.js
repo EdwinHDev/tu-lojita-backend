@@ -33,7 +33,7 @@ async function main() {
         `INSERT INTO users (
           id, "firstName", "lastName", email, password, "isActive", confirm, role, "createdAt", "updatedAt"
         ) VALUES (
-          gen_random_uuid(), 'Cliente', 'Demo', 'demo.client@tulojita.com', $1, true, true, 'USER', NOW(), NOW()
+          gen_random_uuid(), 'Carlos', 'Mendoza', 'demo.client@tulojita.com', $1, true, true, 'USER', NOW(), NOW()
         ) RETURNING id`,
         [hashedPassword]
       );
@@ -43,7 +43,7 @@ async function main() {
       clientUserId = clientRes.rows[0].id;
       await client.query(
         `UPDATE users 
-         SET password = $1, "isActive" = true, confirm = true, role = 'USER', "updatedAt" = NOW()
+         SET "firstName" = 'Carlos', "lastName" = 'Mendoza', password = $1, "isActive" = true, confirm = true, role = 'USER', "updatedAt" = NOW()
          WHERE id = $2`,
         [hashedPassword, clientUserId]
       );
@@ -65,7 +65,7 @@ async function main() {
         `INSERT INTO users (
           id, "firstName", "lastName", email, password, "isActive", confirm, role, "createdAt", "updatedAt"
         ) VALUES (
-          gen_random_uuid(), 'Empresa', 'Demo', 'demo.business@tulojita.com', $1, true, true, 'COMPANY', NOW(), NOW()
+          gen_random_uuid(), 'Gerencia', 'Ferretería El Tornillo', 'demo.business@tulojita.com', $1, true, true, 'COMPANY', NOW(), NOW()
         ) RETURNING id, "companyId", "storeId"`,
         [hashedPassword]
       );
@@ -79,7 +79,7 @@ async function main() {
       bizStoreId = bizRes.rows[0].storeId;
       await client.query(
         `UPDATE users 
-         SET password = $1, "isActive" = true, confirm = true, role = 'COMPANY', "updatedAt" = NOW()
+         SET "firstName" = 'Gerencia', "lastName" = 'Ferretería El Tornillo', password = $1, "isActive" = true, confirm = true, role = 'COMPANY', "updatedAt" = NOW()
          WHERE id = $2`,
         [hashedPassword, bizUserId]
       );
@@ -87,113 +87,145 @@ async function main() {
     }
 
     console.log('3. Provisioning Company for Business Reviewer...');
-    if (!bizCompanyId) {
-      let compRes = await client.query(
-        'SELECT id FROM companies WHERE "ownerId" = $1 OR name = $2 LIMIT 1',
-        [bizUserId, 'Empresa Demo Google Review']
-      );
+    const compLogo = '/img/5187dd95-dc5a-45d8-8062-810280a174fb';
+    const compName = 'Ferretería El Tornillo, C.A.';
+    const compRif = 'J-40918234-1';
 
-      if (compRes.rows.length === 0) {
-        const insertComp = await client.query(
-          `INSERT INTO companies (
-            id, name, rif, logo, "ownerId", "createdAt", "updatedAt"
-          ) VALUES (
-            gen_random_uuid(), 'Empresa Demo Google Review', 'J-50000000-1', 'https://images.tulojita.com/default-logo.png', $1, NOW(), NOW()
-          ) RETURNING id`,
-          [bizUserId]
-        );
-        bizCompanyId = insertComp.rows[0].id;
-        console.log('   -> Demo Company created with ID:', bizCompanyId);
-      } else {
-        bizCompanyId = compRes.rows[0].id;
-        console.log('   -> Existing Demo Company found with ID:', bizCompanyId);
-      }
-
-      await client.query(
-        'UPDATE users SET "companyId" = $1 WHERE id = $2',
-        [bizCompanyId, bizUserId]
-      );
-    }
-
-    console.log('4. Provisioning Store for Business Reviewer...');
-    if (!bizStoreId) {
-      let storeRes = await client.query(
-        'SELECT id FROM stores WHERE "companyId" = $1 OR "ownerId" = $2 LIMIT 1',
-        [bizCompanyId, bizUserId]
-      );
-
-      if (storeRes.rows.length === 0) {
-        let subcatRes = await client.query('SELECT id FROM subcategories LIMIT 1');
-        let subcatId = subcatRes.rows.length > 0 ? subcatRes.rows[0].id : null;
-
-        if (!subcatId) {
-          console.warn('   -> No subcategory found, creating a default one...');
-          let catRes = await client.query('SELECT id FROM categories LIMIT 1');
-          let catId = catRes.rows.length > 0 ? catRes.rows[0].id : null;
-          if (!catId) {
-            const insCat = await client.query(
-              "INSERT INTO categories (id, name, icon, \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'General', 'store', NOW(), NOW()) RETURNING id"
-            );
-            catId = insCat.rows[0].id;
-          }
-          const insSub = await client.query(
-            "INSERT INTO subcategories (id, name, \"categoryId\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), 'General', $1, NOW(), NOW()) RETURNING id",
-            [catId]
-          );
-          subcatId = insSub.rows[0].id;
-        }
-
-        const insertStore = await client.query(
-          `INSERT INTO stores (
-            id, name, slug, description, rif, phone, logo, "companyId", "ownerId", "subcategoryId", status, "createdAt", "updatedAt"
-          ) VALUES (
-            gen_random_uuid(), 'Tienda Demo Google Review', 'tienda-demo-google-review', 
-            'Tienda de demostración para revisión de Google Play Store', 'J-50000000-1', 
-            '+584120000000', 'https://images.tulojita.com/default-logo.png', 
-            $1, $2, $3, 'ACTIVE', NOW(), NOW()
-          ) RETURNING id`,
-          [bizCompanyId, bizUserId, subcatId]
-        );
-        bizStoreId = insertStore.rows[0].id;
-        console.log('   -> Demo Store created with ID:', bizStoreId);
-      } else {
-        bizStoreId = storeRes.rows[0].id;
-        console.log('   -> Existing Demo Store found with ID:', bizStoreId);
-      }
-
-      await client.query(
-        'UPDATE users SET "storeId" = $1 WHERE id = $2',
-        [bizStoreId, bizUserId]
-      );
-    }
-
-    console.log('5. Provisioning Sample Product for Store...');
-    const itemRes = await client.query(
-      'SELECT id FROM items WHERE "storeId" = $1 LIMIT 1',
-      [bizStoreId]
+    let compRes = await client.query(
+      'SELECT id FROM companies WHERE "ownerId" = $1 OR id = $2 OR name ILIKE $3 LIMIT 1',
+      [bizUserId, bizCompanyId || '00000000-0000-0000-0000-000000000000', '%Tornillo%']
     );
 
-    if (itemRes.rows.length === 0) {
+    if (compRes.rows.length === 0) {
+      const insertComp = await client.query(
+        `INSERT INTO companies (
+          id, name, rif, logo, "ownerId", "createdAt", "updatedAt"
+        ) VALUES (
+          gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW()
+        ) RETURNING id`,
+        [compName, compRif, compLogo, bizUserId]
+      );
+      bizCompanyId = insertComp.rows[0].id;
+      console.log('   -> Demo Company created with ID:', bizCompanyId);
+    } else {
+      bizCompanyId = compRes.rows[0].id;
+      await client.query(
+        `UPDATE companies 
+         SET name = $1, rif = $2, logo = $3, "ownerId" = $4, "updatedAt" = NOW()
+         WHERE id = $5`,
+        [compName, compRif, compLogo, bizUserId, bizCompanyId]
+      );
+      console.log('   -> Existing Demo Company updated with ID:', bizCompanyId);
+    }
+
+    await client.query(
+      'UPDATE users SET "companyId" = $1 WHERE id = $2',
+      [bizCompanyId, bizUserId]
+    );
+
+    console.log('4. Finding Ferretería Subcategory...');
+    let subcatRes = await client.query(
+      "SELECT id FROM subcategories WHERE name ILIKE '%Ferreter%' LIMIT 1"
+    );
+    let subcatId = subcatRes.rows.length > 0 ? subcatRes.rows[0].id : null;
+
+    if (!subcatId) {
+      console.log('   -> Subcategory Ferretería not found, finding any subcategory...');
+      let anySub = await client.query('SELECT id FROM subcategories LIMIT 1');
+      subcatId = anySub.rows.length > 0 ? anySub.rows[0].id : null;
+    }
+    console.log('   -> Using Subcategory ID:', subcatId);
+
+    console.log('5. Provisioning Store for Business Reviewer...');
+    const storeName = 'Ferretería El Tornillo';
+    const storeSlug = 'ferreteria-el-tornillo';
+    const storeDesc = 'Herramientas profesionales, tornillería, plomería, electricidad y materiales para la construcción y el hogar.';
+    const storePhone = '+584145551234';
+
+    let storeRes = await client.query(
+      'SELECT id FROM stores WHERE "companyId" = $1 OR "ownerId" = $2 OR slug = $3 LIMIT 1',
+      [bizCompanyId, bizUserId, storeSlug]
+    );
+
+    if (storeRes.rows.length === 0) {
+      const insertStore = await client.query(
+        `INSERT INTO stores (
+          id, name, slug, description, rif, phone, logo, "companyId", "ownerId", "subcategoryId", status, "createdAt", "updatedAt"
+        ) VALUES (
+          gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, 'ACTIVE', NOW(), NOW()
+        ) RETURNING id`,
+        [storeName, storeSlug, storeDesc, compRif, storePhone, compLogo, bizCompanyId, bizUserId, subcatId]
+      );
+      bizStoreId = insertStore.rows[0].id;
+      console.log('   -> Demo Store created with ID:', bizStoreId);
+    } else {
+      bizStoreId = storeRes.rows[0].id;
+      await client.query(
+        `UPDATE stores 
+         SET name = $1, slug = $2, description = $3, rif = $4, phone = $5, logo = $6, "companyId" = $7, "ownerId" = $8, "subcategoryId" = $9, status = 'ACTIVE', "updatedAt" = NOW()
+         WHERE id = $10`,
+        [storeName, storeSlug, storeDesc, compRif, storePhone, compLogo, bizCompanyId, bizUserId, subcatId, bizStoreId]
+      );
+      console.log('   -> Existing Demo Store updated with ID:', bizStoreId);
+    }
+
+    await client.query(
+      'UPDATE users SET "storeId" = $1 WHERE id = $2',
+      [bizStoreId, bizUserId]
+    );
+
+    console.log('6. Provisioning 4 Realistic Catalog Products for Store...');
+    // Clean old demo items for this store
+    await client.query('DELETE FROM items WHERE "storeId" = $1', [bizStoreId]);
+
+    const products = [
+      {
+        title: 'Taladro Percutor Inalámbrico 20V',
+        description: 'Taladro percutor de alto rendimiento con batería de litio 20V Max, selector de 2 velocidades, mandril metálico de ajuste rápido y luz LED frontal.',
+        price: 48.00,
+        mainImage: '/img/fd5accbe-db6d-4d69-98a0-f8048d0627fa',
+        stock: 15
+      },
+      {
+        title: 'Juego de Herramientas Mecánicas 48 Piezas',
+        description: 'Maletín organizador de alta resistencia con rache profesional, dados de cromo vanadio, llaves combinadas, alicates y destornilladores.',
+        price: 35.00,
+        mainImage: '/img/977bc357-908a-47cf-baaa-527b5196b376',
+        stock: 20
+      },
+      {
+        title: 'Martillo de Uña Curva 16oz Mango Fibra',
+        description: 'Martillo forjado en acero templado con cabeza pulida, uña curva para extracción precisa y mango ergonómico antideslizante amortiguador de golpes.',
+        price: 9.50,
+        mainImage: '/img/148e8ed6-119d-47c2-82ee-44f4fcd63950',
+        stock: 30
+      },
+      {
+        title: 'Cinta Métrica Profesional 5 Metros',
+        description: 'Cinta métrica metálica de 5 metros con carcasa blindada, botón de freno automático, gancho magnético y graduación en milímetros y pulgadas.',
+        price: 6.00,
+        mainImage: '/img/b38bcad1-d3d3-4791-8639-328e6e4796b1',
+        stock: 40
+      }
+    ];
+
+    for (const p of products) {
       await client.query(
         `INSERT INTO items (
           id, title, description, price, "priceType", "mainImage", images, "storeId", "itemType", "trackInventory", "stockQuantity", "createdAt", "updatedAt"
         ) VALUES (
-          gen_random_uuid(), 'Producto Demo Google Review', 
-          'Producto de muestra verificado para la revisión en Google Play Console.', 
-          15.00, 'FIXED', 'https://images.tulojita.com/default-logo.png', 
-          ARRAY['https://images.tulojita.com/default-logo.png'], 
-          $1, 'PRODUCT', true, 100, NOW(), NOW()
+          gen_random_uuid(), $1, $2, $3, 'FIXED', $4, ARRAY[$4], $5, 'PRODUCT', true, $6, NOW(), NOW()
         )`,
-        [bizStoreId]
+        [p.title, p.description, p.price, p.mainImage, bizStoreId, p.stock]
       );
-      console.log('   -> Sample demo product created.');
-    } else {
-      console.log('   -> Store already has products.');
+      console.log(`   -> Created item: ${p.title} ($${p.price})`);
     }
 
-    console.log('\n✅ Reviewer Demo accounts successfully provisioned:');
-    console.log('   - Client:   demo.client@tulojita.com   / DemoReview2026! (Role: USER)');
-    console.log('   - Business: demo.business@tulojita.com / DemoReview2026! (Role: COMPANY, Active Store & Product)');
+    console.log('\n✅ Reviewer Hardware Store successfully provisioned:');
+    console.log('   - Client:   demo.client@tulojita.com   / DemoReview2026! (Carlos Mendoza)');
+    console.log('   - Business: demo.business@tulojita.com / DemoReview2026! (Ferretería El Tornillo)');
+    console.log('   - Company:  Ferretería El Tornillo, C.A.');
+    console.log('   - Store:    Ferretería El Tornillo (4 productos activos con stock y fotos)');
 
   } catch (err) {
     console.error('❌ Error provisioning reviewer accounts:', err);

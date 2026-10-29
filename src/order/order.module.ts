@@ -6,6 +6,7 @@ import { Order } from './entities/order.entity';
 import { Installment } from './entities/installment.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Item } from 'src/item/entities/item.entity';
+import { ItemVariant } from 'src/item/entities/item-variant.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { User } from 'src/user/entities/user.entity';
 import { NotificationModule } from 'src/notification/notification.module';
@@ -16,6 +17,10 @@ import { DebtCollectionCron } from './cron/debt-collection.cron';
 import { OrderAutoCancellationCron } from './cron/order-auto-cancellation.cron';
 import { CommissionModule } from 'src/commission/commission.module';
 import { RankingModule } from 'src/ranking/ranking.module';
+import { OrderDisputeModule } from 'src/order-dispute/order-dispute.module';
+import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
+import { OrderSlotBooking } from './entities/order-slot-booking.entity';
+import { CompanyModule } from 'src/company/company.module';
 
 @Module({
   imports: [
@@ -24,15 +29,20 @@ import { RankingModule } from 'src/ranking/ranking.module';
       Installment,
       Store,
       Item,
+      ItemVariant,
       OrderItem,
       User,
       Payment,
       OrderReview,
       BuyerReview,
+      OrderDispute,
+      OrderSlotBooking,
     ]),
     NotificationModule,
     CommissionModule,
     RankingModule,
+    OrderDisputeModule,
+    CompanyModule,
   ],
   controllers: [OrderController],
   providers: [OrderService, DebtCollectionCron, OrderAutoCancellationCron],

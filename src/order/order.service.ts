@@ -1,21 +1,24 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, In, Not } from 'typeorm';
+import { DataSource, Repository, In, Not, MoreThan } from 'typeorm';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ValidateCartDto } from './dto/validate-cart.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { ManualPaymentDto } from './dto/manual-payment.dto';
-import { Order } from './entities/order.entity';
+import { CancelOrderDto } from './dto/cancel-order.dto';
+import { Order, CancellationResolutionStatus } from './entities/order.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreStatus } from 'src/store/types/status.enum';
 import { StoreCustomerBlock } from 'src/store/entities/store-customer-block.entity';
 import { Item } from 'src/item/entities/item.entity';
+import { ItemVariant } from 'src/item/entities/item-variant.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
@@ -25,6 +28,8 @@ import { OrderPaginationDto } from './dto/order-pagination.dto';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
 import { MailService } from 'src/common/mail/mail.service';
+import { CompanyActivityLogService } from 'src/company/services/company-activity-log.service';
+import { ActivityLogModule } from 'src/company/entities/company-activity-log.entity';
 import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
 import { Payment } from 'src/payment/entities/payment.entity';
 import { PaymentStatus } from 'src/payment/types/payment-status.enum';
@@ -33,6 +38,15 @@ import { OrderReview } from 'src/review/entities/order-review.entity';
 import { BuyerReview } from 'src/review/entities/buyer-review.entity';
 import { RankingService } from 'src/ranking/services/ranking.service';
 import { RankingEventType } from 'src/ranking/types';
+import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
+import { DisputeStatus } from 'src/order-dispute/types/dispute.enum';
+import { BookingType } from 'src/item/types/booking-type.enum';
+import { ItemType } from 'src/item/types/item-type.enum';
+import { ItemPreorderConfig } from 'src/item/entities/item-preorder-config.entity';
+import { PreOrderStatus } from './types/preorder-status.enum';
+import { OrderSlotBooking } from './entities/order-slot-booking.entity';
+import { SlotBookingStatus } from './types/slot-booking-status.enum';
+import { ItemTimeSlot } from 'src/item/entities/item-time-slot.entity';
 
 @Injectable()
 export class OrderService {
@@ -46,6 +60,9 @@ export class OrderService {
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
 
+    @InjectRepository(ItemVariant)
+    private readonly itemVariantRepository: Repository<ItemVariant>,
+
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
 
@@ -55,11 +72,15 @@ export class OrderService {
     @InjectRepository(BuyerReview)
     private readonly buyerReviewRepository: Repository<BuyerReview>,
 
+    @InjectRepository(OrderDispute)
+    private readonly orderDisputeRepository: Repository<OrderDispute>,
+
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
     private readonly mailService: MailService,
     private readonly commissionService: CommissionService,
     private readonly rankingService: RankingService,
+    private readonly activityLogService: CompanyActivityLogService,
   ) {}
 
   private readonly logger = new Logger(OrderService.name);
@@ -88,6 +109,22 @@ export class OrderService {
     const user = await this.userRepository.findOneBy({ id: userId });
     if (!user)
       throw new NotFoundException(`Usuario con ID ${userId} no encontrado`);
+
+    if (
+      user.accountSuspendedUntil &&
+      new Date(user.accountSuspendedUntil) > new Date()
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ACCOUNT_SUSPENDED',
+        message:
+          'No puedes crear pedidos porque tu cuenta está suspendida temporalmente.',
+        suspendedUntil: user.accountSuspendedUntil,
+        reason:
+          user.accountSuspensionReason ||
+          'Infracción reiterada de normas de pago.',
+      });
+    }
 
     // Iniciar Transacción Atómica
     const queryRunner = this.dataSource.createQueryRunner();
@@ -125,16 +162,22 @@ export class OrderService {
         }
       }
 
-      // 3. Validar items duplicados en la petición (Seguridad de Datos)
-      const itemIds = itemsDto.map((i) => i.itemId);
-      const uniqueItemIds = new Set(itemIds);
-      if (uniqueItemIds.size !== itemIds.length) {
+      // 3. Validar items duplicados en la petición (Seguridad de Datos: unicidad compuesta itemId:variantId)
+      const compositeKeys = itemsDto.map(
+        (i) => `${i.itemId}:${i.variantId || 'base'}`,
+      );
+      const uniqueCompositeKeys = new Set(compositeKeys);
+      if (uniqueCompositeKeys.size !== itemsDto.length) {
         throw new BadRequestException(
-          'La orden contiene items duplicados. Por favor, agrupa las cantidades.',
+          'La orden contiene items o variantes duplicadas. Por favor, agrupa las cantidades.',
         );
       }
 
       let subtotal = 0;
+      let hasPreOrderItem = false;
+      let hasProductItem = false;
+      let hasServiceItem = false;
+      let bookedServicesCount = 0;
       const orderItemsToSave: OrderItem[] = [];
 
       // 4. Procesar items y validar stock
@@ -145,6 +188,7 @@ export class OrderService {
             'store',
             'customizationGroupsRel',
             'customizationGroupsRel.options',
+            'preorderConfig',
           ],
         });
         if (!item)
@@ -159,19 +203,122 @@ export class OrderService {
           );
         }
 
-        // Comprobar inventario si el item lo requiere (Producto físico)
-        if (item.trackInventory) {
-          const currentStock = parseFloat(
-            item.stockQuantity?.toString() || '0',
-          );
-          if (currentStock < itemDto.quantity) {
+        if (item.itemType === ItemType.PRODUCT) {
+          hasProductItem = true;
+        } else if (item.itemType === ItemType.SERVICE) {
+          hasServiceItem = true;
+        }
+
+        const isServiceWithSlots =
+          item.itemType === ItemType.SERVICE &&
+          (item.bookingType === BookingType.TIME_SLOT || item.requiresBooking);
+        if (isServiceWithSlots) {
+          bookedServicesCount++;
+        }
+
+        // Manejo y validación de Variante (Task 3.3)
+        let variant: ItemVariant | undefined;
+        let variantLabel: string | undefined;
+
+        if (item.hasVariants) {
+          if (!itemDto.variantId) {
             throw new BadRequestException(
-              `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+              `Debes seleccionar una variante para el artículo "${item.title}".`,
             );
           }
-          // Restar stock
-          item.stockQuantity = currentStock - itemDto.quantity;
-          await queryRunner.manager.save(item);
+          variant =
+            (await queryRunner.manager.findOne(ItemVariant, {
+              where: { id: itemDto.variantId, item: { id: item.id } },
+            })) ?? undefined;
+
+          if (!variant || !variant.isActive) {
+            throw new BadRequestException(
+              `La variante seleccionada para "${item.title}" no está disponible o no existe.`,
+            );
+          }
+          variantLabel = Object.values(variant.axisValues || {})
+            .map((v: any) =>
+              typeof v === 'string' && v.includes('|') ? v.split('|')[0] : v,
+            )
+            .join(' / ');
+        }
+
+        // Comprobar inventario y deducción atómica (Tasks 3.1 & 3.2 y Pre-orders)
+        if (item.bookingType === BookingType.PRE_ORDER) {
+          hasPreOrderItem = true;
+          const preorderConfig = await queryRunner.manager.findOne(
+            ItemPreorderConfig,
+            {
+              where: { itemId: item.id },
+              lock: { mode: 'pessimistic_write' },
+            },
+          );
+          if (preorderConfig) {
+            if (
+              preorderConfig.reservedPreOrderUnits + itemDto.quantity >
+              preorderConfig.maxPreOrderUnits
+            ) {
+              throw new BadRequestException(
+                `Cupo máximo de preventa alcanzado para "${item.title}". Disponibles: ${Math.max(0, preorderConfig.maxPreOrderUnits - preorderConfig.reservedPreOrderUnits)}`,
+              );
+            }
+            preorderConfig.reservedPreOrderUnits += itemDto.quantity;
+            await queryRunner.manager.save(preorderConfig);
+          }
+        } else if (item.trackInventory) {
+          if (item.hasVariants && variant) {
+            const currentStock = parseFloat(
+              variant.stockQuantity?.toString() || '0',
+            );
+            if (currentStock < itemDto.quantity) {
+              throw new BadRequestException(
+                `Stock insuficiente para la variante (${variantLabel || 'seleccionada'}) de "${item.title}". Disponible: ${currentStock}`,
+              );
+            }
+            const updateResult = await queryRunner.manager
+              .createQueryBuilder()
+              .update(ItemVariant)
+              .set({
+                stockQuantity: () => `stockQuantity - ${itemDto.quantity}`,
+              })
+              .where('id = :variantId AND stockQuantity >= :quantity', {
+                variantId: variant.id,
+                quantity: itemDto.quantity,
+              })
+              .execute();
+
+            if (updateResult.affected === 0) {
+              throw new BadRequestException(
+                `Stock insuficiente para la variante (${variantLabel || 'seleccionada'}) de "${item.title}".`,
+              );
+            }
+          } else {
+            const currentStock = parseFloat(
+              item.stockQuantity?.toString() || '0',
+            );
+            if (currentStock < itemDto.quantity) {
+              throw new BadRequestException(
+                `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+              );
+            }
+            const updateResult = await queryRunner.manager
+              .createQueryBuilder()
+              .update(Item)
+              .set({
+                stockQuantity: () => `stockQuantity - ${itemDto.quantity}`,
+              })
+              .where('id = :itemId AND stockQuantity >= :quantity', {
+                itemId: item.id,
+                quantity: itemDto.quantity,
+              })
+              .execute();
+
+            if (updateResult.affected === 0) {
+              throw new BadRequestException(
+                `Stock insuficiente para "${item.title}".`,
+              );
+            }
+          }
         }
 
         // Validar opciones (minSelect y maxSelect) e individuales (minQuantity y maxQuantity)
@@ -246,10 +393,25 @@ export class OrderService {
           }
         }
 
-        // Determinar precio base (prioridad a discountPrice si existe)
-        const basePrice = item.discountPrice
-          ? parseFloat(item.discountPrice.toString())
-          : parseFloat(item.price.toString());
+        // Determinar precio base (prioridad a variant si tiene variantes, sustitutivo NO aditivo - Task 3.8)
+        let basePrice: number;
+        if (item.hasVariants && variant) {
+          const vDiscount =
+            variant.discountPrice !== null &&
+            variant.discountPrice !== undefined
+              ? parseFloat(variant.discountPrice.toString())
+              : null;
+          const vPrice =
+            variant.price !== null && variant.price !== undefined
+              ? parseFloat(variant.price.toString())
+              : parseFloat(item.price.toString());
+          basePrice =
+            vDiscount !== null && vDiscount < vPrice ? vDiscount : vPrice;
+        } else {
+          basePrice = item.discountPrice
+            ? parseFloat(item.discountPrice.toString())
+            : parseFloat(item.price.toString());
+        }
 
         const totalLinePrice =
           basePrice * itemDto.quantity + customizationExtra;
@@ -261,15 +423,30 @@ export class OrderService {
         // Usar redondeo a 2 decimales para evitar errores de coma flotante en el subtotal
         subtotal = Math.round((subtotal + totalLinePrice) * 100) / 100;
 
-        // Preparar OrderItem (Snapshot)
+        // Preparar OrderItem (Snapshot con variantId y variantLabel - Task 3.5)
         const orderItem = queryRunner.manager.create(OrderItem, {
           item,
           title: item.title, // Snapshot del nombre
           quantity: itemDto.quantity,
           price: priceAtOrder,
           selectedOptions: itemDto.selectedOptions,
+          variantId: item.hasVariants ? variant?.id : undefined,
+          variantLabel: item.hasVariants ? variantLabel : undefined,
+          variant: item.hasVariants ? variant : undefined,
         });
         orderItemsToSave.push(orderItem);
+      }
+
+      if (hasProductItem && hasServiceItem) {
+        throw new BadRequestException(
+          'No es posible combinar artículos físicos con servicios en la misma orden por razones de logística y despacho.',
+        );
+      }
+
+      if (bookedServicesCount > 1) {
+        throw new BadRequestException(
+          'Cada servicio con reserva de turno debe tramitarse en un pedido individual.',
+        );
       }
 
       // 5. Lógica de recargos por pago parcial (Fase 4 extendida)
@@ -381,6 +558,9 @@ export class OrderService {
         finalAmount,
         balance: finalAmount, // Deuda inicial
         isPartialPayment,
+        preOrderStatus: hasPreOrderItem
+          ? PreOrderStatus.AWAITING_STOCK
+          : PreOrderStatus.NONE,
         status: OrderStatus.PENDING,
       });
 
@@ -417,6 +597,94 @@ export class OrderService {
       for (const oi of orderItemsToSave) {
         oi.order = savedOrder;
         await queryRunner.manager.save(oi);
+      }
+
+      // 7.1 Confirmar y asociar el turno agendado (por hold previo o por creación directa al ordenar)
+      let resolvedSlotId = createOrderDto.timeSlotId;
+      let resolvedBookingDate = createOrderDto.bookingDate;
+
+      if (!resolvedSlotId || !resolvedBookingDate) {
+        for (const itemDto of createOrderDto.items) {
+          if (itemDto.timeSlotId && itemDto.bookingDate) {
+            resolvedSlotId = itemDto.timeSlotId;
+            resolvedBookingDate = itemDto.bookingDate;
+            break;
+          }
+        }
+      }
+
+      if (createOrderDto.bookingSlotHoldId) {
+        const slotBooking = await queryRunner.manager.findOne(
+          OrderSlotBooking,
+          {
+            where: { id: createOrderDto.bookingSlotHoldId },
+          },
+        );
+        if (slotBooking) {
+          slotBooking.status = SlotBookingStatus.CONFIRMED;
+          slotBooking.order = savedOrder;
+          slotBooking.orderId = savedOrder.id;
+          await queryRunner.manager.save(slotBooking);
+        }
+      } else if (resolvedSlotId && resolvedBookingDate) {
+        const slot = await queryRunner.manager.findOne(ItemTimeSlot, {
+          where: { id: resolvedSlotId },
+          relations: ['slotConfig'],
+        });
+
+        if (slot && slot.isActive) {
+          const maxCapacity = slot.slotConfig?.maxConcurrentBookings || 1;
+
+          const confirmedCount = await queryRunner.manager.count(
+            OrderSlotBooking,
+            {
+              where: {
+                timeSlotId: slot.id,
+                bookingDate: resolvedBookingDate,
+                status: SlotBookingStatus.CONFIRMED,
+              },
+            },
+          );
+
+          const activeHoldsCount = await queryRunner.manager.count(
+            OrderSlotBooking,
+            {
+              where: {
+                timeSlotId: slot.id,
+                bookingDate: resolvedBookingDate,
+                status: SlotBookingStatus.HOLD,
+                lockedUntil: MoreThan(new Date()),
+              },
+            },
+          );
+
+          if (confirmedCount + activeHoldsCount >= maxCapacity) {
+            throw new ConflictException(
+              `El horario seleccionado (${slot.startTime} - ${slot.endTime}) para la fecha ${resolvedBookingDate} ya no tiene cupos disponibles.`,
+            );
+          }
+
+          const confirmedBooking = queryRunner.manager.create(
+            OrderSlotBooking,
+            {
+              bookingDate: resolvedBookingDate,
+              slotStartTime: slot.startTime,
+              slotEndTime: slot.endTime,
+              slotLabel: slot.label,
+              status: SlotBookingStatus.CONFIRMED,
+              timeSlot: slot,
+              timeSlotId: slot.id,
+              customer: user,
+              customerId: user.id,
+              store,
+              storeId: store.id,
+              order: savedOrder,
+              orderId: savedOrder.id,
+            },
+          );
+
+          await queryRunner.manager.save(OrderSlotBooking, confirmedBooking);
+        }
       }
 
       // 8. Generar Cronograma de Cuotas si es pago parcial
@@ -517,17 +785,14 @@ export class OrderService {
           .sendOrderConfirmation(finalOrder)
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
-            this.logger.error(
-              `Error sending confirmation email: ${msg}`,
-            );
+            this.logger.error(`Error sending confirmation email: ${msg}`);
           });
       }
 
       // Notificar al dueño del comercio sobre la nueva orden y actualizar tiempo real
       try {
         const storeOwnerId =
-          finalOrder.store?.owner?.id ||
-          (finalOrder.store?.company as any)?.owner?.id;
+          finalOrder.store?.owner?.id || finalOrder.store?.company?.owner?.id;
         if (storeOwnerId) {
           const installmentSuffix = finalOrder.isPartialPayment
             ? ` (en ${finalOrder.installments?.length || 0} cuotas)`
@@ -541,9 +806,12 @@ export class OrderService {
             orderId: finalOrder.id,
           });
         }
-        this.notificationService.notifyStoreInstallmentsUpdated(finalOrder.store.id, {
-          orderId: finalOrder.id,
-        });
+        this.notificationService.notifyStoreInstallmentsUpdated(
+          finalOrder.store.id,
+          {
+            orderId: finalOrder.id,
+          },
+        );
       } catch (notifyErr) {
         this.logger.error(
           `Error notifying store owner on order create: ${notifyErr}`,
@@ -573,6 +841,7 @@ export class OrderService {
         'user.addresses',
         'orderItems',
         'orderItems.item',
+        'orderItems.variant',
         'orderItems.item.store',
         'orderItems.item.store.subcategory',
         'orderItems.item.customizationGroupsRel',
@@ -580,6 +849,8 @@ export class OrderService {
         'installments',
         'disputes',
         'disputes.requestedBy',
+        'slotBookings',
+        'slotBookings.timeSlot',
       ],
       order: {
         installments: {
@@ -634,6 +905,7 @@ export class OrderService {
       .leftJoinAndSelect('user.addresses', 'addresses')
       .leftJoinAndSelect('order.orderItems', 'orderItems')
       .leftJoinAndSelect('orderItems.item', 'item')
+      .leftJoinAndSelect('orderItems.variant', 'variant')
       .leftJoinAndSelect(
         'item.customizationGroupsRel',
         'customizationGroupsRel',
@@ -641,7 +913,9 @@ export class OrderService {
       .leftJoinAndSelect('customizationGroupsRel.options', 'options')
       .leftJoinAndSelect('order.payments', 'payments')
       .leftJoinAndSelect('order.installments', 'installments')
-      .leftJoinAndSelect('order.disputes', 'disputes');
+      .leftJoinAndSelect('order.disputes', 'disputes')
+      .leftJoinAndSelect('order.slotBookings', 'slotBookings')
+      .leftJoinAndSelect('slotBookings.timeSlot', 'timeSlot');
 
     if (status) {
       queryBuilder.andWhere('order.status = :status', { status });
@@ -725,9 +999,34 @@ export class OrderService {
         if (!requestingUser.company) {
           throw new ForbiddenException('No tienes una empresa asignada');
         }
-        queryBuilder.andWhere('store.companyId = :authCompanyId', {
-          authCompanyId: requestingUser.company.id,
-        });
+
+        // Si el actor es un colaborador, restringir estrictamente a sus sucursales autorizadas
+        if ((requestingUser as any).isCollaborator) {
+          const collab = requestingUser as any;
+          if (!collab.hasFullBranchAccess) {
+            const allowed: string[] = collab.allowedBranchIds || [];
+            if (storeId && !allowed.includes(storeId)) {
+              throw new ForbiddenException(
+                'No tienes autorización para ver pedidos de esta sucursal',
+              );
+            }
+            if (allowed.length === 0) {
+              queryBuilder.andWhere('1 = 0');
+            } else {
+              queryBuilder.andWhere('store.id IN (:...collabAllowedBranchIds)', {
+                collabAllowedBranchIds: allowed,
+              });
+            }
+          } else {
+            queryBuilder.andWhere('store.companyId = :authCompanyId', {
+              authCompanyId: requestingUser.company.id,
+            });
+          }
+        } else {
+          queryBuilder.andWhere('store.companyId = :authCompanyId', {
+            authCompanyId: requestingUser.company.id,
+          });
+        }
       }
     }
 
@@ -781,11 +1080,17 @@ export class OrderService {
     };
   }
 
-  async cancelOrder(id: string, userId: string) {
+  async cancelOrder(
+    id: string,
+    userId: string,
+    cancelOrderDto?: CancelOrderDto,
+    requestingUser?: User,
+  ) {
     const order = await this.findOne(id);
 
-    // Validar Seguridad: Solo el dueño de la orden puede cancelarla
-    if (order.user.id !== userId) {
+    // Validar Seguridad: Solo el dueño de la orden o un Administrador puede cancelarla
+    const isAdmin = requestingUser?.role === UserRole.ADMIN;
+    if (order.user.id !== userId && !isAdmin) {
       throw new BadRequestException(
         'No tienes permiso para cancelar esta orden',
       );
@@ -795,9 +1100,19 @@ export class OrderService {
       throw new BadRequestException('Esta orden ya está cancelada');
     }
 
-    if (order.status === OrderStatus.FULLY_PAID) {
+    if (order.status === OrderStatus.FULLY_PAID && !isAdmin) {
       throw new BadRequestException(
         'No se puede cancelar una orden que ya ha sido pagada en su totalidad',
+      );
+    }
+
+    // Validar que ningún pago haya sido ya verificado/aprobado por el comercio (a menos que sea el Admin)
+    const hasApprovedPayment = order.payments?.some(
+      (p) => p.status === PaymentStatus.APPROVED,
+    );
+    if (!isAdmin && hasApprovedPayment) {
+      throw new BadRequestException(
+        'No puedes cancelar una orden cuyo pago ya ha sido verificado y aprobado por la tienda.',
       );
     }
 
@@ -809,17 +1124,105 @@ export class OrderService {
       // 1. Devolver Stock
       for (const orderItem of order.orderItems) {
         const item = orderItem.item;
-        if (item.trackInventory) {
-          const currentStock = parseFloat(
-            item.stockQuantity?.toString() || '0',
-          );
-          item.stockQuantity = currentStock + orderItem.quantity;
-          await queryRunner.manager.save(item);
+        if (item && item.trackInventory) {
+          if (item.hasVariants && orderItem.variantId) {
+            const variant = await queryRunner.manager.findOne(ItemVariant, {
+              where: { id: orderItem.variantId },
+            });
+            if (variant) {
+              const currentStock = parseFloat(
+                variant.stockQuantity?.toString() || '0',
+              );
+              variant.stockQuantity = currentStock + orderItem.quantity;
+              await queryRunner.manager.save(variant);
+            } else {
+              const currentStock = parseFloat(
+                item.stockQuantity?.toString() || '0',
+              );
+              item.stockQuantity = currentStock + orderItem.quantity;
+              await queryRunner.manager.save(item);
+            }
+          } else {
+            const currentStock = parseFloat(
+              item.stockQuantity?.toString() || '0',
+            );
+            item.stockQuantity = currentStock + orderItem.quantity;
+            await queryRunner.manager.save(item);
+          }
         }
       }
 
-      // 2. Cambiar estado
+      // 1b. Si el cliente declaró no requerir reembolso, rechazar pagos reportados directamente sin sumar fraude
+      if (cancelOrderDto?.cancellationAction === 'NO_REFUND') {
+        const orderPayments = await queryRunner.manager.find(Payment, {
+          where: { order: { id: order.id } },
+        });
+        for (const p of orderPayments) {
+          if (
+            p.status === PaymentStatus.WAITING_VERIFICATION ||
+            p.status === PaymentStatus.PENDING
+          ) {
+            p.status = PaymentStatus.REJECTED;
+            p.rejectionReason =
+              'Cliente canceló declarando no haber transferido / no requerir reembolso';
+            await queryRunner.manager.save(Payment, p);
+          }
+        }
+      }
+
+      // 1c. Si es preventa, liberar cupos reservados
+      if (order.preOrderStatus !== PreOrderStatus.NONE) {
+        order.preOrderStatus = PreOrderStatus.CANCELLED;
+        for (const orderItem of order.orderItems) {
+          if (
+            orderItem.item &&
+            orderItem.item.bookingType === BookingType.PRE_ORDER
+          ) {
+            const preorderConfig = await queryRunner.manager.findOne(
+              ItemPreorderConfig,
+              { where: { item: { id: orderItem.item.id } } },
+            );
+            if (preorderConfig && preorderConfig.reservedPreOrderUnits > 0) {
+              preorderConfig.reservedPreOrderUnits = Math.max(
+                0,
+                preorderConfig.reservedPreOrderUnits - orderItem.quantity,
+              );
+              await queryRunner.manager.save(preorderConfig);
+            }
+          }
+        }
+      }
+
+      // 1d. Si tiene reservas de turnos (slotBookings), marcarlos como cancelados
+      if (order.slotBookings && order.slotBookings.length > 0) {
+        for (const sb of order.slotBookings) {
+          sb.status = SlotBookingStatus.CANCELLED;
+          await queryRunner.manager.save(sb);
+        }
+      }
+
+      // 2. Cambiar estado y registrar motivo
       order.status = OrderStatus.CANCELLED;
+      order.cancelledAt = new Date();
+      if (cancelOrderDto?.cancellationAction === 'NO_REFUND') {
+        order.cancellationResolutionStatus =
+          CancellationResolutionStatus.RESOLVED;
+      }
+      let finalReason = cancelOrderDto?.reason?.trim();
+      const cancellationNotes = cancelOrderDto?.cancellationNotes?.trim();
+      const refundNotes = cancelOrderDto?.refundNotes?.trim();
+      const notes = cancellationNotes || refundNotes;
+      if (notes) {
+        const label = cancellationNotes ? 'Nota' : 'Reembolso';
+        finalReason = finalReason
+          ? `${finalReason} | ${label}: ${notes}`
+          : `${label}: ${notes}`;
+      }
+      order.rejectionReason =
+        finalReason ||
+        (isAdmin
+          ? 'Cancelada por el equipo de soporte'
+          : 'Cancelada por el cliente');
       await queryRunner.manager.save(order);
 
       // Anular comisión de la plataforma
@@ -829,13 +1232,262 @@ export class OrderService {
       );
 
       await queryRunner.commitTransaction();
-      return {
-        message: 'Orden cancelada y stock devuelto exitosamente',
-        orderId: id,
-      };
+
+      const companyId =
+        order.store?.company?.id ||
+        order.store?.companyId ||
+        (requestingUser as any)?.company?.id;
+      if (companyId && requestingUser) {
+        this.activityLogService.log({
+          companyId,
+          storeId: order.store?.id,
+          user: requestingUser,
+          module: ActivityLogModule.ORDERS,
+          action: 'ORDER_CANCELLED',
+          description: `Canceló la orden #${order.id.split('-')[0].toUpperCase()} (Motivo: ${finalReason || 'Sin motivo'}).`,
+          metadata: {
+            orderId: order.id,
+            reason: finalReason,
+            totalAmount: order.totalAmount,
+          },
+        });
+      }
+
+      // Notificar al dueño de la tienda para que esté al tanto
+      try {
+        if (order.store?.owner?.id) {
+          const hasPendingPayments = order.payments?.some(
+            (p) =>
+              p.status === PaymentStatus.WAITING_VERIFICATION ||
+              p.status === PaymentStatus.APPROVED ||
+              p.status === PaymentStatus.REFUND_PENDING,
+          );
+          const bodyMsg = hasPendingPayments
+            ? `El cliente ha cancelado la orden #${order.id.split('-')[0].toUpperCase()}. Hay pagos pendientes de verificación/reembolso. Motivo: ${order.rejectionReason}`
+            : `El cliente ha cancelado la orden #${order.id.split('-')[0].toUpperCase()}. No requiere reembolso. Motivo: ${order.rejectionReason}`;
+
+          await this.notificationService.create({
+            userId: order.store.owner.id,
+            storeId: order.store.id,
+            title: 'Orden cancelada por el cliente',
+            body: bodyMsg,
+            type: NotificationType.GENERAL,
+            orderId: order.id,
+          });
+        }
+      } catch (notifErr) {
+        this.logger.warn(
+          `Could not notify store owner of cancellation: ${notifErr}`,
+        );
+      }
+
+      return this.findOne(id);
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async acceptPaymentNotReceived(orderId: string, userId: string) {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: [
+        'user',
+        'store',
+        'store.owner',
+        'orderItems',
+        'orderItems.item',
+        'payments',
+      ],
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Orden #${orderId} no encontrada`);
+    }
+
+    if (order.user.id !== userId) {
+      throw new ForbiddenException(
+        'No tienes permiso para realizar esta acción en esta orden',
+      );
+    }
+
+    const hasApproved = order.payments?.some(
+      (p) => p.status === PaymentStatus.APPROVED,
+    );
+    if (hasApproved) {
+      throw new BadRequestException(
+        'No se puede aceptar el reporte porque la orden ya tiene pagos aprobados',
+      );
+    }
+
+    const activeDispute = await this.orderDisputeRepository.findOne({
+      where: {
+        orderId,
+        status: In([
+          DisputeStatus.OPEN,
+          DisputeStatus.MERCHANT_RESPONDED,
+          DisputeStatus.ADMIN_REVIEW,
+        ]),
+      },
+    });
+    if (activeDispute) {
+      throw new BadRequestException(
+        'No se puede cerrar la orden porque tiene una disputa o reclamo activo en proceso de revisión.',
+      );
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. Si la orden aún tiene inventario tomado (no cancelada previamente), devolverlo
+      if (order.status !== OrderStatus.CANCELLED) {
+        for (const orderItem of order.orderItems) {
+          const item = orderItem.item;
+          if (item && item.trackInventory) {
+            if (item.hasVariants && orderItem.variantId) {
+              const variant = await queryRunner.manager.findOne(ItemVariant, {
+                where: { id: orderItem.variantId },
+              });
+              if (variant) {
+                const currentStock = parseFloat(
+                  variant.stockQuantity?.toString() || '0',
+                );
+                variant.stockQuantity = currentStock + orderItem.quantity;
+                await queryRunner.manager.save(variant);
+              } else {
+                const currentStock = parseFloat(
+                  item.stockQuantity?.toString() || '0',
+                );
+                item.stockQuantity = currentStock + orderItem.quantity;
+                await queryRunner.manager.save(item);
+              }
+            } else {
+              const currentStock = parseFloat(
+                item.stockQuantity?.toString() || '0',
+              );
+              item.stockQuantity = currentStock + orderItem.quantity;
+              await queryRunner.manager.save(item);
+            }
+          }
+        }
+      }
+
+      // 2. Marcar pagos pendientes como rechazados
+      if (order.payments) {
+        for (const payment of order.payments) {
+          if (
+            payment.status === PaymentStatus.WAITING_VERIFICATION ||
+            payment.status === PaymentStatus.PENDING
+          ) {
+            payment.status = PaymentStatus.REJECTED;
+            payment.rejectionReason =
+              'Cliente aceptó que el pago no fue recibido por la tienda';
+            await queryRunner.manager.save(Payment, payment);
+          }
+        }
+      }
+
+      // 3. Cerrar la orden pacíficamente
+      order.status = OrderStatus.CANCELLED;
+      order.cancelledAt = new Date();
+      order.cancellationResolutionConfirmed = true;
+      order.cancellationResolvedAt = new Date();
+      order.cancellationResolutionStatus =
+        CancellationResolutionStatus.RESOLVED;
+      order.rejectionReason =
+        'Cliente aceptó que el pago no fue recibido. Orden cerrada de común acuerdo.';
+      await queryRunner.manager.save(Order, order);
+
+      // Anular comisión si la hubiere
+      await this.commissionService.voidOrderCommission(
+        order,
+        queryRunner.manager,
+      );
+
+      // 4. Si el cliente tenía acumulado rechazo por este reporte de la tienda, restituir / no penalizar
+      const customer = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
+      if (customer && customer.consecutiveRejectedPaymentsCount > 0) {
+        customer.consecutiveRejectedPaymentsCount = Math.max(
+          0,
+          customer.consecutiveRejectedPaymentsCount - 1,
+        );
+        if (
+          customer.consecutiveRejectedPaymentsCount < 3 &&
+          customer.accountSuspendedUntil
+        ) {
+          customer.accountSuspendedUntil = null;
+          customer.accountSuspensionReason = null;
+        }
+        await queryRunner.manager.save(User, customer);
+      }
+
+      await queryRunner.commitTransaction();
+
+      const companyId =
+        order.store?.company?.id || (order.store as any)?.companyId;
+      if (companyId) {
+        this.activityLogService.log({
+          companyId,
+          storeId: order.store?.id,
+          user: order.store?.owner || customer,
+          module: ActivityLogModule.ORDERS,
+          action: 'ORDER_BILATERAL_CLOSED',
+          description: `Cerró de común acuerdo la orden #${order.id.split('-')[0].toUpperCase()} (Pago no recibido).`,
+          metadata: {
+            orderId: order.id,
+            totalAmount: order.totalAmount,
+          },
+        });
+      }
+
+      // Notificar a la tienda
+      try {
+        if (order.store?.owner?.id) {
+          await this.notificationService.create({
+            userId: order.store.owner.id,
+            storeId: order.store.id,
+            title: 'Orden cerrada de común acuerdo',
+            body: `El cliente ha aceptado que el pago de la orden #${order.id.split('-')[0].toUpperCase()} no llegó. La orden ha sido cerrada sin reclamos.`,
+            type: NotificationType.GENERAL,
+            orderId: order.id,
+          });
+        }
+      } catch (e) {
+        this.logger.warn(
+          `Could not notify store owner of accepted non-payment: ${e}`,
+        );
+      }
+
+      // Sincronizar en tiempo real el nuevo estado resuelto
+      try {
+        this.notificationService.notifyOrderUpdated(order.id, {
+          orderId: order.id,
+          storeId: order.store?.id,
+          userId: order.user?.id || userId,
+          type: 'ORDER_UPDATED',
+          cancellationResolutionStatus: order.cancellationResolutionStatus,
+          cancellationResolutionConfirmed: true,
+        });
+      } catch (e) {
+        this.logger.warn(
+          `Could not broadcast order_updated for order ${order.id}: ${e}`,
+        );
+      }
+
+      return {
+        message:
+          'Has aceptado que el pago no fue recibido. La orden se cerró exitosamente.',
+        order,
+      };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
     } finally {
       await queryRunner.release();
     }
@@ -930,11 +1582,33 @@ export class OrderService {
         for (const orderItem of order.orderItems) {
           const item = orderItem.item;
           if (item && item.trackInventory) {
-            const currentStock = parseFloat(
-              item.stockQuantity?.toString() || '0',
-            );
-            item.stockQuantity = currentStock + orderItem.quantity;
-            await cancelQueryRunner.manager.save(item);
+            if (item.hasVariants && orderItem.variantId) {
+              const variant = await cancelQueryRunner.manager.findOne(
+                ItemVariant,
+                {
+                  where: { id: orderItem.variantId },
+                },
+              );
+              if (variant) {
+                const currentStock = parseFloat(
+                  variant.stockQuantity?.toString() || '0',
+                );
+                variant.stockQuantity = currentStock + orderItem.quantity;
+                await cancelQueryRunner.manager.save(variant);
+              } else {
+                const currentStock = parseFloat(
+                  item.stockQuantity?.toString() || '0',
+                );
+                item.stockQuantity = currentStock + orderItem.quantity;
+                await cancelQueryRunner.manager.save(item);
+              }
+            } else {
+              const currentStock = parseFloat(
+                item.stockQuantity?.toString() || '0',
+              );
+              item.stockQuantity = currentStock + orderItem.quantity;
+              await cancelQueryRunner.manager.save(item);
+            }
           }
         }
         // Guardar la orden con el nuevo estado dentro de la misma transacción
@@ -1018,7 +1692,9 @@ export class OrderService {
               );
             }
           } catch (rankErr) {
-            this.logger.error(`Error processing ranking completed order event: ${rankErr.message}`);
+            this.logger.error(
+              `Error processing ranking completed order event: ${rankErr.message}`,
+            );
           }
 
           try {
@@ -1035,6 +1711,7 @@ export class OrderService {
             if (order.store?.owner?.id) {
               await this.notificationService.create({
                 userId: order.store.owner.id,
+                storeId: order.store.id,
                 title: '👤 Califica a tu comprador',
                 body: 'Una orden fue completada. Puedes calificar al cliente.',
                 type: NotificationType.BUYER_REVIEW_PROMPT,
@@ -1043,7 +1720,9 @@ export class OrderService {
               });
             }
           } catch (err) {
-            this.logger.error(`Error sending review prompt notifications: ${err.message}`);
+            this.logger.error(
+              `Error sending review prompt notifications: ${err.message}`,
+            );
           }
         }
 
@@ -1058,7 +1737,9 @@ export class OrderService {
               );
             }
           } catch (rankErr) {
-            this.logger.error(`Error processing ranking cancellation event: ${rankErr.message}`);
+            this.logger.error(
+              `Error processing ranking cancellation event: ${rankErr.message}`,
+            );
           }
         }
       }
@@ -1165,6 +1846,7 @@ export class OrderService {
           `${installment.order.user.firstName} ${installment.order.user.lastName}`.trim();
         await this.notificationService.create({
           userId: ownerId,
+          storeId: store.id,
           title: 'Solicitud de Prórroga',
           body: `El cliente ${clientName} ha solicitado una prórroga de ${requestedDays} días para una cuota de la orden #${installment.order.id.split('-')[0].toUpperCase()}.`,
           type: NotificationType.GENERAL,
@@ -1173,9 +1855,7 @@ export class OrderService {
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.logger.error(
-        `Error sending notification to store owner: ${msg}`,
-      );
+      this.logger.error(`Error sending notification to store owner: ${msg}`);
     }
 
     return saved;
@@ -1305,6 +1985,10 @@ export class OrderService {
 
     // 2. Validar artículos y stock
     let calculatedSubtotal = 0;
+    let hasProductItem = false;
+    let hasServiceItem = false;
+    let bookedServicesCount = 0;
+
     for (const itemDto of itemsDto) {
       const item = await this.itemRepository.findOne({
         where: { id: itemDto.itemId },
@@ -1332,28 +2016,94 @@ export class OrderService {
         });
       }
 
-      // Validar stock
-      if (item.trackInventory) {
-        const currentStock = parseFloat(item.stockQuantity?.toString() || '0');
-        if (currentStock < itemDto.quantity) {
+      if (item.itemType === ItemType.PRODUCT) {
+        hasProductItem = true;
+      } else if (item.itemType === ItemType.SERVICE) {
+        hasServiceItem = true;
+      }
+
+      const isServiceWithSlots =
+        item.itemType === ItemType.SERVICE &&
+        (item.bookingType === BookingType.TIME_SLOT || item.requiresBooking);
+      if (isServiceWithSlots) {
+        bookedServicesCount++;
+      }
+
+      // Validar Variante si aplica
+      let variant: ItemVariant | null = null;
+      if (item.hasVariants) {
+        if (!itemDto.variantId) {
           errors.push({
             itemId: itemDto.itemId,
-            code: 'OUT_OF_STOCK',
-            message: `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+            code: 'VARIANT_REQUIRED',
+            message: `Debes seleccionar una variante para "${item.title}".`,
           });
+        } else {
+          variant = await this.itemVariantRepository.findOne({
+            where: { id: itemDto.variantId, item: { id: item.id } },
+          });
+          if (!variant || !variant.isActive) {
+            errors.push({
+              itemId: itemDto.itemId,
+              code: 'VARIANT_NOT_AVAILABLE',
+              message: `La variante seleccionada para "${item.title}" no está disponible.`,
+            });
+          }
+        }
+      }
+
+      // Validar stock
+      if (item.trackInventory) {
+        if (item.hasVariants && variant) {
+          const currentStock = parseFloat(
+            variant.stockQuantity?.toString() || '0',
+          );
+          if (currentStock < itemDto.quantity) {
+            errors.push({
+              itemId: itemDto.itemId,
+              code: 'OUT_OF_STOCK',
+              message: `Stock insuficiente para la opción seleccionada de "${item.title}". Disponible: ${currentStock}`,
+            });
+          }
+        } else if (!item.hasVariants) {
+          const currentStock = parseFloat(
+            item.stockQuantity?.toString() || '0',
+          );
+          if (currentStock < itemDto.quantity) {
+            errors.push({
+              itemId: itemDto.itemId,
+              code: 'OUT_OF_STOCK',
+              message: `Stock insuficiente para "${item.title}". Disponible: ${currentStock}`,
+            });
+          }
+        }
+      }
+
+      // Determinar precio efectivo
+      let effectivePrice = item.discountPrice
+        ? parseFloat(item.discountPrice.toString())
+        : parseFloat(item.price.toString());
+
+      if (item.hasVariants && variant) {
+        if (
+          variant.discountPrice !== null &&
+          variant.discountPrice !== undefined
+        ) {
+          effectivePrice = parseFloat(variant.discountPrice.toString());
+        } else if (variant.price !== null && variant.price !== undefined) {
+          effectivePrice = parseFloat(variant.price.toString());
         }
       }
 
       // Validar cambio de precio
       if (itemDto.priceAtCart !== undefined && itemDto.priceAtCart !== null) {
-        const currentPrice = parseFloat(item.price?.toString() || '0');
         const cartPrice = parseFloat(itemDto.priceAtCart.toString());
-        if (Math.abs(currentPrice - cartPrice) > 0.001) {
+        if (Math.abs(effectivePrice - cartPrice) > 0.001) {
           errors.push({
             itemId: itemDto.itemId,
             code: 'PRICE_CHANGED',
-            message: `El precio de "${item.title}" cambió de $${cartPrice.toFixed(2)} a $${currentPrice.toFixed(2)}.`,
-            currentPrice,
+            message: `El precio de "${item.title}" cambió de $${cartPrice.toFixed(2)} a $${effectivePrice.toFixed(2)}.`,
+            currentPrice: effectivePrice,
           });
         }
       }
@@ -1414,12 +2164,26 @@ export class OrderService {
         }
       }
 
-      const basePrice = item.discountPrice
-        ? parseFloat(item.discountPrice.toString())
-        : parseFloat(item.price.toString());
+      const basePrice = effectivePrice;
       const totalLinePrice = basePrice * itemDto.quantity + customizationExtra;
       calculatedSubtotal =
         Math.round((calculatedSubtotal + totalLinePrice) * 100) / 100;
+    }
+
+    if (hasProductItem && hasServiceItem) {
+      errors.push({
+        code: 'INCOMPATIBLE_ITEM_TYPES',
+        message:
+          'No es posible combinar artículos físicos con servicios en la misma orden por razones de logística y despacho.',
+      });
+    }
+
+    if (bookedServicesCount > 1) {
+      errors.push({
+        code: 'MULTIPLE_BOOKINGS_NOT_ALLOWED',
+        message:
+          'Cada servicio con reserva de turno debe tramitarse en un pedido individual.',
+      });
     }
 
     // 3. Validar políticas de pagos parciales (si aplica)
@@ -1631,13 +2395,7 @@ export class OrderService {
     try {
       const order = await queryRunner.manager.findOne(Order, {
         where: { id: orderId },
-        relations: [
-          'store',
-          'store.owner',
-          'user',
-          'payments',
-          'installments',
-        ],
+        relations: ['store', 'store.owner', 'store.company', 'user', 'payments', 'installments'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -1668,7 +2426,9 @@ export class OrderService {
       );
 
       if (currentBalance <= 0 || order.isFullyPaid) {
-        throw new BadRequestException('Esta orden ya está completamente pagada');
+        throw new BadRequestException(
+          'Esta orden ya está completamente pagada',
+        );
       }
 
       const paymentAmount =
@@ -1801,6 +2561,24 @@ export class OrderService {
       await queryRunner.manager.save(order);
       await queryRunner.commitTransaction();
 
+      const companyId =
+        order.store?.company?.id || (order.store as any)?.companyId;
+      if (companyId) {
+        this.activityLogService.log({
+          companyId,
+          storeId: order.store?.id,
+          user: order.store?.owner || { id: storeOwnerId, firstName: 'Comercio' },
+          module: ActivityLogModule.ORDERS,
+          action: 'ORDER_PAYMENT_REGISTERED',
+          description: `Registró un pago manual de \$${paymentAmount.toFixed(2)} en la orden #${order.id.split('-')[0].toUpperCase()}. Estado: ${order.status}.`,
+          metadata: {
+            orderId: order.id,
+            amount: paymentAmount,
+            status: order.status,
+          },
+        });
+      }
+
       try {
         if (newBalance === 0 && order.store?.id) {
           await this.rankingService.processEvent(
@@ -1811,14 +2589,19 @@ export class OrderService {
           );
         }
       } catch (rankErr) {
-        this.logger.error(`Error processing ranking on manual payment completion: ${rankErr.message}`);
+        this.logger.error(
+          `Error processing ranking on manual payment completion: ${rankErr.message}`,
+        );
       }
 
       try {
-        this.notificationService.notifyStoreInstallmentsUpdated(order.store.id, {
-          orderId: order.id,
-          paymentId: savedPayment.id,
-        });
+        this.notificationService.notifyStoreInstallmentsUpdated(
+          order.store.id,
+          {
+            orderId: order.id,
+            paymentId: savedPayment.id,
+          },
+        );
       } catch (notifyErr) {
         this.logger.error(
           `Error emitting store installments updated on manual payment: ${notifyErr}`,
@@ -1839,5 +2622,62 @@ export class OrderService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  async markPreOrderStockArrived(orderId: string, user: User) {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: [
+        'store',
+        'store.owner',
+        'user',
+        'orderItems',
+        'orderItems.item',
+        'orderItems.item.preorderConfig',
+      ],
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Orden con ID ${orderId} no encontrada`);
+    }
+
+    if (order.store?.owner?.id !== user.id) {
+      throw new ForbiddenException(
+        'No tienes permiso para actualizar esta orden',
+      );
+    }
+
+    const preorderItem = order.orderItems?.find(
+      (oi) => oi.item?.preorderConfig,
+    );
+    const settlementHours =
+      preorderItem?.item?.preorderConfig?.settlementWindowHours || 48;
+
+    order.preOrderStatus = PreOrderStatus.READY_FOR_SETTLEMENT;
+    order.settlementDeadline = new Date(
+      Date.now() + settlementHours * 3600 * 1000,
+    );
+
+    const savedOrder = await this.orderRepository.save(order);
+
+    try {
+      if (order.user?.id) {
+        await this.notificationService.create({
+          userId: order.user.id,
+          storeId: order.store.id,
+          orderId: order.id,
+          type: NotificationType.GENERAL,
+          title: '¡Tu pedido bajo demanda ya llegó!',
+          body: `Tu artículo en la tienda "${order.store.name}" ya está listo para retiro o liquidación. Tienes ${settlementHours} horas para completar tu orden.`,
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Error enviando notificación de llegada de stock: ${msg}`,
+      );
+    }
+
+    return savedOrder;
   }
 }

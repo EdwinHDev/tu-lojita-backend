@@ -78,7 +78,7 @@ export class RankingService {
     if (!ranking) {
       ranking = this.storeRankingRepo.create({
         storeId,
-        currentLP: 0,
+        currentPR: 0,
         division: Division.PUESTO_AMBULANTE,
         isCalibrating: true,
         calibrationOrdersCompleted: 0,
@@ -269,7 +269,7 @@ export class RankingService {
     const event = this.rankingEventRepo.create({
       storeId,
       eventType,
-      lpDelta,
+      prDelta: lpDelta,
       referenceId,
       buyerAccountId,
       isVoided: false,
@@ -283,12 +283,12 @@ export class RankingService {
     });
     const savedEvent = await this.rankingEventRepo.save(event);
 
-    // Update StoreRanking currentLP (PR)
-    const oldLP = storeRanking.currentLP;
+    // Update StoreRanking currentPR
+    const oldLP = storeRanking.currentPR;
     const oldDivision = normalizeDivision(storeRanking.division);
     const newLP = Math.max(0, oldLP + lpDelta);
 
-    storeRanking.currentLP = newLP;
+    storeRanking.currentPR = newLP;
     storeRanking.lastActivityDate = new Date();
 
     // Recover from Danger Zone if positive delta earned
@@ -388,14 +388,14 @@ export class RankingService {
     if (lp >= thresholdImperio) {
       const maxMagnateStores = settings.maestro?.maxStores || 50;
       const topStores = await this.storeRankingRepo.find({
-        order: { currentLP: 'DESC' },
+        order: { currentPR: 'DESC' },
         take: maxMagnateStores,
       });
 
       const isStoreInTopN = topStores.some((s) => s.storeId === storeId);
       const isTopNFull = topStores.length >= maxMagnateStores;
       const lowestMagnateLP = isTopNFull
-        ? topStores[topStores.length - 1].currentLP
+        ? topStores[topStores.length - 1].currentPR
         : 0;
 
       if (!isTopNFull || isStoreInTopN || lp >= lowestMagnateLP) {
@@ -469,7 +469,7 @@ export class RankingService {
           storeId: store.id,
           type: NotificationType.DIVISION_UP,
           title: '¡Ascenso de Rango! 🚀',
-          body: `¡Felicidades! Tu tienda ha ascendido al rango ${DIVISION_TITLES[newNorm]}. PR actual: ${storeRanking.currentLP}. ¡Tu Escudo de Rango de ${shieldHours} horas está activo!`,
+          body: `¡Felicidades! Tu tienda ha ascendido al rango ${DIVISION_TITLES[newNorm]}. PR actual: ${storeRanking.currentPR}. ¡Tu Escudo de Rango de ${shieldHours} horas está activo!`,
           targetId: store.id,
         });
       }
@@ -506,7 +506,7 @@ export class RankingService {
       .innerJoinAndSelect('s.owner', 'owner')
       .where('s.subcategoryId = :subId', { subId: store.subcategory.id })
       .andWhere('sr.storeId != :storeId', { storeId: store.id })
-      .andWhere('sr.currentLP >= :oldLP AND sr.currentLP < :newLP', {
+      .andWhere('sr.currentPR >= :oldLP AND sr.currentPR < :newLP', {
         oldLP,
         newLP,
       })
@@ -665,10 +665,18 @@ export class RankingService {
       settings.divisionEmblems[emblemKey] ||
       `/uploads/emblems/${normDiv.toLowerCase()}.png`;
 
+    const frameKey =
+      settings.divisionFrames && normDiv in settings.divisionFrames
+        ? normDiv
+        : ranking.division;
+    const frameUrl =
+      (settings.divisionFrames && settings.divisionFrames[frameKey]) ||
+      `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
+
     // Calculate position in leaderboard
     const betterStoresCount = await this.storeRankingRepo
       .createQueryBuilder('sr')
-      .where('sr.currentLP > :lp', { lp: ranking.currentLP })
+      .where('sr.currentPR > :lp', { lp: ranking.currentPR })
       .getCount();
     const position = betterStoresCount + 1;
 
@@ -683,7 +691,7 @@ export class RankingService {
       ? (thresholds[nextDivision as unknown as keyof typeof thresholds] ?? 0)
       : null;
     const pointsToNextTier = nextThreshold
-      ? Math.max(0, Number(nextThreshold) - ranking.currentLP)
+      ? Math.max(0, Number(nextThreshold) - ranking.currentPR)
       : 0;
 
     // Calculate current streak multiplier
@@ -705,11 +713,12 @@ export class RankingService {
 
     return {
       storeId,
-      currentPR: ranking.currentLP,
-      currentLP: ranking.currentLP, // Backward compatibility
+      currentPR: ranking.currentPR,
+      currentLP: ranking.currentPR, // Backward compatibility
       division: normDiv,
       divisionTitle: DIVISION_TITLES[normDiv] || normDiv,
       divisionEmblemUrl: emblemUrl,
+      divisionFrameUrl: frameUrl,
       position,
       isCalibrating: ranking.isCalibrating,
       calibrationOrdersCompleted: ranking.calibrationOrdersCompleted,
@@ -762,7 +771,7 @@ export class RankingService {
     }
 
     query
-      .orderBy('sr.currentLP', 'DESC')
+      .orderBy('sr.currentPR', 'DESC')
       .addOrderBy('sr.createdAt', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -774,6 +783,13 @@ export class RankingService {
       const normDiv = normalizeDivision(r.division);
       const emblemKey =
         normDiv in settings.divisionEmblems ? normDiv : r.division;
+      const frameKey =
+        settings.divisionFrames && normDiv in settings.divisionFrames
+          ? normDiv
+          : r.division;
+      const frameUrl =
+        (settings.divisionFrames && settings.divisionFrames[frameKey]) ||
+        `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
       return {
         position: (page - 1) * limit + idx + 1,
         storeId: r.storeId,
@@ -784,11 +800,13 @@ export class RankingService {
         divisionEmblemUrl:
           settings.divisionEmblems[emblemKey] ||
           `/uploads/emblems/${normDiv.toLowerCase()}.png`,
-        currentPR: r.currentLP,
-        currentLP: r.currentLP,
+        divisionFrameUrl: frameUrl,
+        currentPR: r.currentPR,
+        currentLP: r.currentPR,
         consecutiveSalesDays: r.consecutiveSalesDays || 0,
         isCalibrating: r.isCalibrating,
         subcategoryName: r.store?.subcategory?.name || null,
+        isAgeRestricted: r.store?.isAgeRestricted ?? false,
       };
     });
 
@@ -808,12 +826,16 @@ export class RankingService {
       const emblemUrl =
         settings.divisionEmblems[normDiv] ||
         `/uploads/emblems/${normDiv.toLowerCase()}.png`;
+      const frameUrl =
+        (settings.divisionFrames && settings.divisionFrames[normDiv]) ||
+        `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
 
       return {
         division: normDiv,
         title: DIVISION_TITLES[normDiv] || normDiv,
         threshold,
         emblemUrl,
+        frameUrl,
       };
     });
   }
@@ -869,9 +891,9 @@ export class RankingService {
       },
     });
 
-    const totalLP = nonVoidedEvents.reduce((sum, e) => sum + e.lpDelta, 0);
+    const totalLP = nonVoidedEvents.reduce((sum, e) => sum + e.prDelta, 0);
     const newLP = Math.max(0, totalLP);
-    storeRanking.currentLP = newLP;
+    storeRanking.currentPR = newLP;
 
     const settings = await this.settingsService.getSettings();
     storeRanking.division = await this.calculateDivision(

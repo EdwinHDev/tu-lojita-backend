@@ -26,4 +26,8 @@ export class CreateSubcategoryDto {
   @IsBoolean({ message: 'isActive debe ser un valor booleano' })
   @IsOptional()
   isActive?: boolean;
+
+  @IsBoolean({ message: 'isAgeRestricted debe ser un valor booleano' })
+  @IsOptional()
+  isAgeRestricted?: boolean;
 }

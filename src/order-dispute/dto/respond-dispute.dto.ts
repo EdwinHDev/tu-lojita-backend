@@ -1,4 +1,10 @@
-import { IsArray, IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
 export class RespondDisputeDto {
   @IsString({ message: 'La respuesta del comercio debe ser un texto.' })

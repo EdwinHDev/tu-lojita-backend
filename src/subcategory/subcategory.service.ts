@@ -6,6 +6,7 @@ import { UpdateSubcategoryDto } from './dto/update-subcategory.dto';
 import { SubcategoryQueryDto } from './dto/subcategory-query.dto';
 import { Subcategory } from './entities/subcategory.entity';
 import { Category } from 'src/category/entities/category.entity';
+import { User, isUserAdult } from 'src/user/entities/user.entity';
 
 @Injectable()
 export class SubcategoryService {
@@ -28,15 +29,19 @@ export class SubcategoryService {
       );
     }
 
+    const isAgeRestricted =
+      category.isAgeRestricted || Boolean(subcategoryData.isAgeRestricted);
+
     const subcategory = this.subcategoryRepository.create({
       ...subcategoryData,
+      isAgeRestricted,
       category,
     });
 
     return await this.subcategoryRepository.save(subcategory);
   }
 
-  async findAll(queryDto: SubcategoryQueryDto) {
+  async findAll(queryDto: SubcategoryQueryDto, user?: User | null) {
     const {
       categoryId,
       inUse,
@@ -52,6 +57,11 @@ export class SubcategoryService {
     const queryBuilder = this.subcategoryRepository
       .createQueryBuilder('subCategory')
       .leftJoinAndSelect('subCategory.category', 'category');
+
+    if (!isUserAdult(user)) {
+      queryBuilder.andWhere('subCategory.isAgeRestricted = false');
+      queryBuilder.andWhere('category.isAgeRestricted = false');
+    }
 
     if (categoryId) {
       queryBuilder.andWhere('category.id = :categoryId', { categoryId });
@@ -106,6 +116,11 @@ export class SubcategoryService {
         );
       }
       subcategory.category = category;
+    }
+
+    // Si la categoría padre es +18, la subcategoría hereda obligatoriamente +18
+    if (subcategory.category && subcategory.category.isAgeRestricted) {
+      updateData.isAgeRestricted = true;
     }
 
     this.subcategoryRepository.merge(subcategory, updateData);

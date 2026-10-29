@@ -1,4 +1,12 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MinLength,
+} from 'class-validator';
 
 export enum ChatPenaltyTier {
   WARNING = 'WARNING',
@@ -14,7 +22,8 @@ export class PenalizeChatUserDto {
   userId: string;
 
   @IsEnum(ChatPenaltyTier, {
-    message: 'tier must be WARNING, SUSPEND_72H, SUSPEND_15D, SUSPEND_30D, or BAN_PERMANENT',
+    message:
+      'tier must be WARNING, SUSPEND_72H, SUSPEND_15D, SUSPEND_30D, or BAN_PERMANENT',
   })
   tier: ChatPenaltyTier;
 

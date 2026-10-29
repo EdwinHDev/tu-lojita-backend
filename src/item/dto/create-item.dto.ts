@@ -7,15 +7,23 @@ import {
   IsObject,
   IsOptional,
   IsString,
-  IsUrl,
   IsUUID,
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ItemType } from '../types/item-type.enum';
+import { BookingType } from '../types/booking-type.enum';
 import { PriceType } from '../types/price-type.enum';
 import { ItemAttributes } from '../types/item-attributes.interface';
+import {
+  CreateSlotConfigDto,
+  CreatePreorderConfigDto,
+} from './booking-config.dto';
+import { VariantAxisDto } from './variant-axis.dto';
+import { ItemVariantDto } from './item-variant.dto';
 
 export class CreateItemDto {
   @IsString({ message: 'El título debe ser una cadena de texto' })
@@ -89,6 +97,23 @@ export class CreateItemDto {
   @IsOptional()
   requiresBooking?: boolean;
 
+  @IsEnum(BookingType, {
+    message:
+      'bookingType debe ser un valor válido (NONE, TIME_SLOT, PRE_ORDER)',
+  })
+  @IsOptional()
+  bookingType?: BookingType;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateSlotConfigDto)
+  slotConfig?: CreateSlotConfigDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreatePreorderConfigDto)
+  preorderConfig?: CreatePreorderConfigDto;
+
   /**
    * Atributos dinámicos.
    * Nota: Para una validación estricta por tipo (Food, Service, etc.)
@@ -127,4 +152,20 @@ export class CreateItemDto {
   @IsBoolean({ message: 'isAgeRestricted debe ser un valor booleano' })
   @IsOptional()
   isAgeRestricted?: boolean;
+
+  @IsBoolean({ message: 'hasVariants debe ser un valor booleano' })
+  @IsOptional()
+  hasVariants?: boolean;
+
+  @IsArray({ message: 'variantAxes debe ser un array' })
+  @ValidateNested({ each: true })
+  @Type(() => VariantAxisDto)
+  @IsOptional()
+  variantAxes?: VariantAxisDto[];
+
+  @IsArray({ message: 'variants debe ser un array' })
+  @ValidateNested({ each: true })
+  @Type(() => ItemVariantDto)
+  @IsOptional()
+  variants?: ItemVariantDto[];
 }

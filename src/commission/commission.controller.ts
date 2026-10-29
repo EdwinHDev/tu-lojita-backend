@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { Auth } from 'src/auth/decorators/auth.decorator';
@@ -15,12 +16,12 @@ import { User } from 'src/user/entities/user.entity';
 import { FinancialAdminGuard } from 'src/financial-auth/guards/financial-admin.guard';
 import { StoreCommissionBillingService } from './commission-billing.service';
 import { PaymentReportStatus } from './types';
+import { CommissionMetricsResponseDto } from './dto/commission-metrics-response.dto';
+import { SalesLedgerQueryDto } from './dto/sales-ledger-query.dto';
 
 @Controller('commissions')
 export class CommissionController {
-  constructor(
-    private readonly billingService: StoreCommissionBillingService,
-  ) {}
+  constructor(private readonly billingService: StoreCommissionBillingService) {}
 
   // ----------------------------------------------------
   // RUTAS PÚBLICAS / COMERCIOS (ACCESO A RANGOS ACTIVOS)
@@ -106,8 +107,14 @@ export class CommissionController {
 
   @Auth(UserRole.ADMIN)
   @Get('metrics')
-  getCommissionMetrics() {
+  getCommissionMetrics(): Promise<CommissionMetricsResponseDto> {
     return this.billingService.getCommissionMetrics();
+  }
+
+  @Auth(UserRole.ADMIN)
+  @Get('sales-ledger')
+  getSalesLedger(@Query() query: SalesLedgerQueryDto) {
+    return this.billingService.getSalesLedger(query);
   }
 
   // ----------------------------------------------------

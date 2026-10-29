@@ -8,6 +8,7 @@ import {
   InactivityConfig,
   MaestroConfig,
   DivisionEmblemsConfig,
+  DivisionFramesConfig,
   RetentionConfig,
   MissionsConfig,
 } from '../types/ranking-settings.interface';
@@ -37,6 +38,9 @@ export class RankingSettings extends TimestampEntity {
 
   @Column('jsonb')
   divisionEmblems: DivisionEmblemsConfig;
+
+  @Column('jsonb', { nullable: true })
+  divisionFrames?: DivisionFramesConfig;
 
   @Column('jsonb', { nullable: true })
   retention: RetentionConfig;

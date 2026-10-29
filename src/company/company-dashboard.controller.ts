@@ -31,10 +31,10 @@ export class CompanyDashboardController {
   @Get('analytics')
   async getAnalytics(
     @Param('companyId') companyId: string,
-    @GetUser() user: User,
+    @GetUser() user: any,
     @Query() queryDto: DashboardAnalyticsQueryDto,
   ): Promise<DashboardAnalyticsResponseDto> {
-    return this.dashboardService.getAnalytics(companyId, user.id, queryDto);
+    return this.dashboardService.getAnalytics(companyId, user, queryDto);
   }
 
   /**
@@ -44,9 +44,9 @@ export class CompanyDashboardController {
   @Get('stats')
   async getStats(
     @Param('companyId') companyId: string,
-    @GetUser() user: User,
+    @GetUser() user: any,
   ): Promise<DashboardStatsDto> {
-    return this.dashboardService.getDashboardStats(companyId, user.id);
+    return this.dashboardService.getDashboardStats(companyId, user);
   }
 
   /**
@@ -56,10 +56,10 @@ export class CompanyDashboardController {
   @Get('recent-sales')
   async getRecentSales(
     @Param('companyId') companyId: string,
-    @GetUser() user: User,
+    @GetUser() user: any,
     @Query('limit', new DefaultValuePipe(5), ParseIntPipe) limit: number,
   ): Promise<RecentSalesResponseDto> {
-    return this.dashboardService.getRecentSales(companyId, user.id, limit);
+    return this.dashboardService.getRecentSales(companyId, user, limit);
   }
 
   /**
@@ -69,9 +69,9 @@ export class CompanyDashboardController {
   @Get('stores-summary')
   async getStoresSummary(
     @Param('companyId') companyId: string,
-    @GetUser() user: User,
+    @GetUser() user: any,
   ): Promise<StoresSummaryResponseDto> {
-    return this.dashboardService.getStoresSummary(companyId, user.id);
+    return this.dashboardService.getStoresSummary(companyId, user);
   }
 
   /**
@@ -81,8 +81,8 @@ export class CompanyDashboardController {
   @Get('stores')
   async getCompanyStores(
     @Param('companyId') companyId: string,
-    @GetUser() user: User,
+    @GetUser() user: any,
   ): Promise<CompanyStoresResponseDto> {
-    return this.dashboardService.getCompanyStores(companyId, user.id);
+    return this.dashboardService.getCompanyStores(companyId, user);
   }
 }

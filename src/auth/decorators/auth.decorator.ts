@@ -5,9 +5,16 @@ import { RoleProtected } from './role-protected.decorator';
 import { UserRoleGuard } from '../guards/user-role.guard';
 import { PlatformAccessGuard } from 'src/common/guards/platform-access.guard';
 
+import { PermissionsGuard } from '../guards/permissions.guard';
+
 export function Auth(...roles: UserRole[]) {
   return applyDecorators(
     RoleProtected(...roles), // 1. Etiqueta la ruta con los roles
-    UseGuards(AuthGuard('jwt'), UserRoleGuard, PlatformAccessGuard), // 2. Ejecuta JWT, roles y validación de plataforma
+    UseGuards(
+      AuthGuard('jwt'),
+      UserRoleGuard,
+      PlatformAccessGuard,
+      PermissionsGuard,
+    ), // 2. Ejecuta JWT, roles, validación de plataforma y permisos
   );
 }

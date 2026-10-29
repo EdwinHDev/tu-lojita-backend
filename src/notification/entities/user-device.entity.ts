@@ -2,13 +2,10 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
-  ManyToOne,
-  JoinColumn,
   Unique,
   Index,
 } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
-import { User } from 'src/user/entities/user.entity';
 
 @Entity('user_devices')
 @Unique(['userId', 'deviceId'])
@@ -17,12 +14,8 @@ export class UserDevice extends TimestampEntity {
   id: string;
 
   @Index()
-  @Column()
+  @Column({ type: 'uuid' })
   userId: string;
-
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
 
   @Column({ type: 'text' })
   fcmToken: string;

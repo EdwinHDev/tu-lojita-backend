@@ -11,6 +11,7 @@ import { CompanySubscriptionService } from './subscription.service';
 import { SubscriptionController } from './subscription.controller';
 import { FinancialAuthModule } from 'src/financial-auth/financial-auth.module';
 import { MailModule } from 'src/common/mail/mail.module';
+import { NotificationModule } from 'src/notification/notification.module';
 import { SubscriptionCron } from './cron/subscription.cron';
 
 @Module({
@@ -26,6 +27,7 @@ import { SubscriptionCron } from './cron/subscription.cron';
     ]),
     FinancialAuthModule,
     MailModule,
+    NotificationModule,
   ],
   controllers: [SubscriptionController],
   providers: [CompanySubscriptionService, SubscriptionCron],

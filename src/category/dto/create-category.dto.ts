@@ -29,4 +29,8 @@ export class CreateCategoryDto {
   @IsBoolean({ message: 'El estado activo debe ser un valor booleano' })
   @IsOptional()
   isActive?: boolean;
+
+  @IsBoolean({ message: 'isAgeRestricted debe ser un valor booleano' })
+  @IsOptional()
+  isAgeRestricted?: boolean;
 }

@@ -96,6 +96,15 @@ export class AdminRankingController {
     return this.settingsService.updateDivisionEmblem(division, imageUrl);
   }
 
+  // Reemplazar imagen de marco ornamental de división desde admin
+  @Put('ranking/frames/:division')
+  updateFrame(
+    @Param('division') division: Division,
+    @Body('imageUrl') imageUrl: string,
+  ) {
+    return this.settingsService.updateDivisionFrame(division, imageUrl);
+  }
+
   // 6.12 Listar definiciones de logros
   @Get('achievements')
   getAchievements() {

@@ -15,6 +15,8 @@ export enum NotificationType {
   PAYMENT_REPORTED = 'PAYMENT_REPORTED',
   PAYMENT_APPROVED = 'PAYMENT_APPROVED',
   PAYMENT_REJECTED = 'PAYMENT_REJECTED',
+  REFUND_REPORTED = 'REFUND_REPORTED',
+  REFUND_CONFIRMED = 'REFUND_CONFIRMED',
   PROMO = 'PROMO',
   GENERAL = 'GENERAL',
   CHAT_MESSAGE = 'CHAT_MESSAGE',
@@ -22,6 +24,7 @@ export enum NotificationType {
   REPORT_RESOLUTION = 'REPORT_RESOLUTION',
   MEDIATION_REQUEST = 'MEDIATION_REQUEST',
   MEDIATION_RESPONSE = 'MEDIATION_RESPONSE',
+  DISPUTE_ESCALATED = 'DISPUTE_ESCALATED',
   CUSTOMER_BLOCKED = 'CUSTOMER_BLOCKED',
   CUSTOMER_UNBLOCKED = 'CUSTOMER_UNBLOCKED',
   STORE_SUSPENDED = 'STORE_SUSPENDED',
@@ -64,6 +67,12 @@ export class Notification extends TimestampEntity {
 
   @Column({ nullable: true })
   targetId: string; // e.g. orderId
+
+  @Column({ type: 'uuid', nullable: true })
+  storeId?: string;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  channelType?: string;
 
   @Column({ default: false })
   isRead: boolean;

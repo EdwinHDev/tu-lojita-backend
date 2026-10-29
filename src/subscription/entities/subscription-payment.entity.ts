@@ -1,4 +1,10 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { User } from 'src/user/entities/user.entity';
 import { PlatformPaymentMethod } from 'src/commission/entities/platform-payment-method.entity';

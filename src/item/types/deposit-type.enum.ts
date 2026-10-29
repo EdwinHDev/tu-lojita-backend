@@ -1,0 +1,6 @@
+export enum DepositType {
+  FULL_PAYMENT = 'FULL_PAYMENT',
+  PERCENTAGE = 'PERCENTAGE',
+  FIXED_AMOUNT = 'FIXED_AMOUNT',
+  FREE = 'FREE',
+}

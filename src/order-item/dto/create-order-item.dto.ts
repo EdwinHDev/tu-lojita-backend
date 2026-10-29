@@ -11,4 +11,15 @@ export class CreateOrderItemDto {
 
   @IsOptional()
   selectedOptions?: Record<string, string[]>;
+
+  @IsUUID('4', { message: 'El ID de la variante debe ser un UUID válido (v4)' })
+  @IsOptional()
+  variantId?: string;
+
+  @IsUUID('4', { message: 'El ID del turno debe ser un UUID válido (v4)' })
+  @IsOptional()
+  timeSlotId?: string;
+
+  @IsOptional()
+  bookingDate?: string;
 }

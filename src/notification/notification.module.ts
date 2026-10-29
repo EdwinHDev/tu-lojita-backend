@@ -12,7 +12,9 @@ import { User } from 'src/user/entities/user.entity';
 import { Report } from 'src/report/entities/report.entity';
 import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { CompanyCollaborator } from 'src/company/entities/company-collaborator.entity';
 import { CommissionPaymentReport } from 'src/commission/entities/commission-payment-report.entity';
+import { CompanySubscription } from 'src/subscription/entities/company-subscription.entity';
 import { envs } from '../config/envs';
 import { FirebaseAdminProvider } from './firebase-admin.provider';
 
@@ -27,7 +29,9 @@ import { FirebaseAdminProvider } from './firebase-admin.provider';
       Report,
       OrderDispute,
       Store,
+      CompanyCollaborator,
       CommissionPaymentReport,
+      CompanySubscription,
     ]),
     JwtModule.register({
       secret: envs.jwtSecret,
@@ -39,4 +43,3 @@ import { FirebaseAdminProvider } from './firebase-admin.provider';
   exports: [NotificationService, NotificationGateway],
 })
 export class NotificationModule {}
-

@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
 } from '@nestjs/common';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -45,9 +46,20 @@ export class CompanyController {
     return this.companyService.update(id, updateCompanyDto, user);
   }
 
+  @Post(':id/request-delete-otp')
+  @Auth(UserRole.ADMIN)
+  requestDeleteOtp(@Param('id') id: string, @GetUser() user: User) {
+    return this.companyService.requestDeleteOtp(id, user);
+  }
+
   @Delete(':id')
   @Auth(UserRole.ADMIN)
-  remove(@Param('id') id: string) {
-    return this.companyService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body('otpCode') otpCode?: string,
+    @Query('otpCode') queryOtpCode?: string,
+  ) {
+    return this.companyService.remove(id, user, otpCode || queryOtpCode);
   }
 }

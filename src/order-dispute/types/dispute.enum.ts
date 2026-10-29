@@ -25,3 +25,18 @@ export enum DisputeResolution {
   RESOLVED = 'RESOLVED',
   REJECTED = 'REJECTED',
 }
+
+export enum DisputeVerdict {
+  BUYER_FAVOR = 'BUYER_FAVOR',
+  MERCHANT_FAVOR = 'MERCHANT_FAVOR',
+  MUTUAL_RESOLUTION = 'MUTUAL_RESOLUTION',
+}
+
+export enum DisputePenaltyType {
+  NONE = 'NONE',
+  STRIKE = 'STRIKE',
+  SUSPEND_7_DAYS = 'SUSPEND_7_DAYS',
+  SUSPEND_15_DAYS = 'SUSPEND_15_DAYS',
+  SUSPEND_30_DAYS = 'SUSPEND_30_DAYS',
+  BAN = 'BAN',
+}

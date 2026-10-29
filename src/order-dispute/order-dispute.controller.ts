@@ -14,6 +14,7 @@ import {
   RespondDisputeDto,
   ResolveDisputeDto,
   QueryDisputeDto,
+  ForwardEvidenceDto,
 } from './dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
@@ -47,8 +48,8 @@ export class OrderDisputeController {
 
   @Auth()
   @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.disputeService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @GetUser() user: User) {
+    return this.disputeService.findOne(id, user);
   }
 
   @Auth(UserRole.VENDOR, UserRole.ADMIN, UserRole.COMPANY)
@@ -63,19 +64,13 @@ export class OrderDisputeController {
 
   @Auth()
   @Patch(':id/mark-resolved')
-  markResolved(
-    @Param('id', ParseUUIDPipe) id: string,
-    @GetUser() user: User,
-  ) {
+  markResolved(@Param('id', ParseUUIDPipe) id: string, @GetUser() user: User) {
     return this.disputeService.markResolved(id, user);
   }
 
   @Auth()
   @Patch(':id/escalate')
-  escalate(
-    @Param('id', ParseUUIDPipe) id: string,
-    @GetUser() user: User,
-  ) {
+  escalate(@Param('id', ParseUUIDPipe) id: string, @GetUser() user: User) {
     return this.disputeService.escalate(id, user);
   }
 
@@ -87,5 +82,15 @@ export class OrderDisputeController {
     @GetUser() adminUser: User,
   ) {
     return this.disputeService.resolve(id, dto, adminUser);
+  }
+
+  @Auth(UserRole.ADMIN)
+  @Post(':id/forward-evidence')
+  forwardEvidence(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ForwardEvidenceDto,
+    @GetUser() adminUser: User,
+  ) {
+    return this.disputeService.forwardEvidence(id, dto, adminUser);
   }
 }

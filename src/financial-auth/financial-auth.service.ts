@@ -25,7 +25,9 @@ export class FinancialAuthService {
 
   async requestOtp(user: User): Promise<{ message: string }> {
     if (user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('Solo los administradores pueden solicitar acceso financiero');
+      throw new ForbiddenException(
+        'Solo los administradores pueden solicitar acceso financiero',
+      );
     }
 
     // Invalidate previous unused OTPs for this user
@@ -52,7 +54,9 @@ export class FinancialAuthService {
     const adminName = `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`;
     await this.mailService.sendFinancialOtpEmail(user.email, adminName, code);
 
-    return { message: `Código de verificación enviado al correo ${user.email}` };
+    return {
+      message: `Código de verificación enviado al correo ${user.email}`,
+    };
   }
 
   async verifyOtp(
@@ -60,7 +64,9 @@ export class FinancialAuthService {
     code: string,
   ): Promise<{ financialAccessToken: string; expiresInMinutes: number }> {
     if (user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('Solo los administradores pueden acceder a este módulo');
+      throw new ForbiddenException(
+        'Solo los administradores pueden acceder a este módulo',
+      );
     }
 
     const activeOtp = await this.otpRepository.findOne({
@@ -73,7 +79,9 @@ export class FinancialAuthService {
     });
 
     if (!activeOtp) {
-      throw new UnauthorizedException('No hay un código OTP activo o ya ha expirado. Solicita uno nuevo.');
+      throw new UnauthorizedException(
+        'No hay un código OTP activo o ya ha expirado. Solicita uno nuevo.',
+      );
     }
 
     const isValid = bcrypt.compareSync(code.trim(), activeOtp.codeHash);

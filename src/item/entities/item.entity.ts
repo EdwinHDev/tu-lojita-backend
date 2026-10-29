@@ -3,16 +3,22 @@ import {
   Entity,
   ManyToOne,
   OneToMany,
+  OneToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { ItemType } from '../types/item-type.enum';
+import { BookingType } from '../types/booking-type.enum';
 import { PriceType } from '../types/price-type.enum';
 import { ItemAttributes } from '../types/item-attributes.interface';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { CustomizationGroup } from './customization-group.entity';
 import { ItemAttributeValue } from './item-attribute-value.entity';
+import { VariantAxis } from './variant-axis.entity';
+import { ItemVariant } from './item-variant.entity';
+import { ItemSlotConfig } from './item-slot-config.entity';
+import { ItemPreorderConfig } from './item-preorder-config.entity';
 
 /**
  * Entidad núcleo de la plataforma comercial.
@@ -126,6 +132,13 @@ export class Item extends TimestampEntity {
   })
   requiresBooking: boolean;
 
+  @Column({
+    type: 'enum',
+    enum: BookingType,
+    default: BookingType.NONE,
+  })
+  bookingType: BookingType;
+
   @Column('jsonb', { nullable: true, default: {} })
   attributes: ItemAttributes;
 
@@ -165,11 +178,23 @@ export class Item extends TimestampEntity {
   @Column('int', { default: 0 })
   totalReviews: number;
 
+  @Column('int', { default: 0 })
+  favoritesCount: number;
+
+  @Column('boolean', { default: false })
+  hasVariants: boolean;
+
   @OneToMany(() => CustomizationGroup, (group) => group.item, { cascade: true })
   customizationGroupsRel: CustomizationGroup[];
 
   @OneToMany(() => ItemAttributeValue, (attr) => attr.item, { cascade: true })
   attributesRel: ItemAttributeValue[];
+
+  @OneToMany(() => VariantAxis, (axis) => axis.item, { cascade: true })
+  variantAxes: VariantAxis[];
+
+  @OneToMany(() => ItemVariant, (variant) => variant.item, { cascade: true })
+  variants: ItemVariant[];
 
   @ManyToOne(() => Store, (store) => store.items)
   store: Store;
@@ -179,4 +204,14 @@ export class Item extends TimestampEntity {
     onDelete: 'SET NULL',
   })
   category: StoreCategory;
+
+  @OneToOne(() => ItemSlotConfig, (slotConfig) => slotConfig.item, {
+    cascade: true,
+  })
+  slotConfig?: ItemSlotConfig;
+
+  @OneToOne(() => ItemPreorderConfig, (preorderConfig) => preorderConfig.item, {
+    cascade: true,
+  })
+  preorderConfig?: ItemPreorderConfig;
 }

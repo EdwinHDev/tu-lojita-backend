@@ -68,3 +68,8 @@ postgres/
 # Uploads & local media
 /uploads/
 uploads/
+
+# TypeScript build cache & local VPS deploy scripts
+*.tsbuildinfo
+deploy_*.js
+sync_full_backend_vps.js

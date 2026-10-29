@@ -26,6 +26,9 @@ export class Subcategory extends TimestampEntity {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isAgeRestricted: boolean;
+
   @ManyToOne(() => Category, (category) => category.subcategories, {
     nullable: false,
   })

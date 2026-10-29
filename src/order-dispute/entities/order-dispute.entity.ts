@@ -8,7 +8,13 @@ import {
 import { TimestampEntity } from 'src/common/entities/timestamp.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { User } from 'src/user/entities/user.entity';
-import { DisputeType, DisputeStatus, DisputeResolution } from '../types';
+import {
+  DisputeType,
+  DisputeStatus,
+  DisputeResolution,
+  DisputeVerdict,
+  DisputePenaltyType,
+} from '../types';
 
 @Entity({ name: 'order_disputes' })
 export class OrderDispute extends TimestampEntity {
@@ -79,4 +85,34 @@ export class OrderDispute extends TimestampEntity {
 
   @Column('timestamp with time zone', { nullable: true })
   clientMarkedResolvedAt?: Date | null;
+
+  @Column({
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
+  verdict?: DisputeVerdict | null;
+
+  @Column({
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+    default: DisputePenaltyType.NONE,
+  })
+  buyerPenalty?: DisputePenaltyType | null;
+
+  @Column({
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+    default: DisputePenaltyType.NONE,
+  })
+  merchantPenalty?: DisputePenaltyType | null;
+
+  @Column('uuid', { nullable: true })
+  resolvedByUserId?: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'resolvedByUserId' })
+  resolvedByUser?: User | null;
 }
