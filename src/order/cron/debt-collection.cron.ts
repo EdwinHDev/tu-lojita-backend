@@ -114,6 +114,7 @@ export class DebtCollectionCron {
           body: `Tu cuota de $${installment.amount} ha vencido y se ha aplicado un recargo de $${feeAmount}.`,
           type: NotificationType.GENERAL,
           targetId: order.id,
+          orderId: order.id,
         });
       }
     }

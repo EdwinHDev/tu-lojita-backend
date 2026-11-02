@@ -67,6 +67,63 @@ export class StoreController {
     return this.storeService.remove(id);
   }
 
+  // --- Branch Lifecycle Endpoints (Deactivation & Scheduled Deletion) ---
+
+  @Post(':id/lifecycle/validate-preflight')
+  validateLifecyclePreflight(
+    @Param('id') storeId: string,
+    @GetUser() user: User,
+  ) {
+    return this.storeService.validateLifecyclePreflight(storeId, user);
+  }
+
+  @Post(':id/lifecycle/request-otp')
+  requestLifecycleOtp(
+    @Param('id') storeId: string,
+    @Body('actionType') actionType: 'DEACTIVATE' | 'SCHEDULE_DELETION',
+    @GetUser() user: User,
+  ) {
+    return this.storeService.requestLifecycleOtp(storeId, actionType, user);
+  }
+
+  @Post(':id/lifecycle/deactivate')
+  deactivateBranch(
+    @Param('id') storeId: string,
+    @Body('otpCode') otpCode: string,
+    @GetUser() user: User,
+  ) {
+    return this.storeService.executeDeactivateBranch(storeId, otpCode, user);
+  }
+
+  @Post(':id/lifecycle/reactivate')
+  reactivateBranch(
+    @Param('id') storeId: string,
+    @GetUser() user: User,
+  ) {
+    return this.storeService.executeReactivateBranch(storeId, user);
+  }
+
+  @Post(':id/lifecycle/schedule-deletion')
+  scheduleBranchDeletion(
+    @Param('id') storeId: string,
+    @Body('otpCode') otpCode: string,
+    @GetUser() user: User,
+  ) {
+    return this.storeService.executeScheduleBranchDeletion(
+      storeId,
+      otpCode,
+      user,
+    );
+  }
+
+  @Post(':id/lifecycle/cancel-deletion')
+  cancelScheduledDeletion(
+    @Param('id') storeId: string,
+    @GetUser() user: User,
+  ) {
+    return this.storeService.executeCancelScheduledDeletion(storeId, user);
+  }
+
   // --- Customer Blocking & Mediation Endpoints ---
 
   @Post(':id/blocks')

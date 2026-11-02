@@ -171,6 +171,16 @@ export class Store extends TimestampEntity {
   @Column('text', { default: 'America/Caracas' })
   timezone: string;
 
+  // Ciclo de vida y baja programada (período de gracia de 7 días y soft-delete)
+  @Column({ type: 'timestamptz', nullable: true })
+  deletionScheduledAt?: Date | null;
+
+  @Column('boolean', { default: false })
+  isDeleted: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  deletedAt?: Date | null;
+
   @BeforeInsert()
   checkSlugInsert() {
     const slugBase = this.branchName

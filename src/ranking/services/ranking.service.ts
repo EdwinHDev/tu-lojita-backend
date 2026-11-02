@@ -111,7 +111,7 @@ export class RankingService {
     const storeRanking = await this.getOrCreateStoreRanking(storeId);
     const store = await this.storeRepo.findOne({
       where: { id: storeId },
-      relations: ['owner', 'subcategory'],
+      relations: ['owner', 'company', 'company.owner', 'subcategory'],
     });
 
     if (!store) {
@@ -322,9 +322,10 @@ export class RankingService {
           Date.now() + dangerHours * 60 * 60 * 1000,
         );
 
-        if (store.owner?.id) {
+        const storeOwnerId = store.owner?.id || store.company?.owner?.id;
+        if (storeOwnerId) {
           await this.notificationService.create({
-            userId: store.owner.id,
+            userId: storeOwnerId,
             storeId: store.id,
             type: NotificationType.DANGER_ZONE_ALERT,
             title: '¡Zona de Peligro! 🚨',
@@ -463,9 +464,10 @@ export class RankingService {
       storeRanking.dangerZoneExpiresAt = undefined;
       await this.storeRankingRepo.save(storeRanking);
 
-      if (store.owner?.id) {
+      const storeOwnerId = store.owner?.id || store.company?.owner?.id;
+      if (storeOwnerId) {
         await this.notificationService.create({
-          userId: store.owner.id,
+          userId: storeOwnerId,
           storeId: store.id,
           type: NotificationType.DIVISION_UP,
           title: '¡Ascenso de Rango! 🚀',
@@ -479,9 +481,10 @@ export class RankingService {
       storeRanking.dangerZoneExpiresAt = undefined;
       await this.storeRankingRepo.save(storeRanking);
 
-      if (store.owner?.id) {
+      const storeOwnerId = store.owner?.id || store.company?.owner?.id;
+      if (storeOwnerId) {
         await this.notificationService.create({
-          userId: store.owner.id,
+          userId: storeOwnerId,
           storeId: store.id,
           type: NotificationType.DIVISION_DOWN,
           title: 'Descenso de Rango ⚠️',
@@ -502,8 +505,10 @@ export class RankingService {
     // Find rival stores in same subcategory that this store just passed
     const rivalsOvertaken = await this.storeRankingRepo
       .createQueryBuilder('sr')
-      .innerJoin('sr.store', 's')
-      .innerJoinAndSelect('s.owner', 'owner')
+      .innerJoinAndSelect('sr.store', 's')
+      .leftJoinAndSelect('s.owner', 'owner')
+      .leftJoinAndSelect('s.company', 'company')
+      .leftJoinAndSelect('company.owner', 'companyOwner')
       .where('s.subcategoryId = :subId', { subId: store.subcategory.id })
       .andWhere('sr.storeId != :storeId', { storeId: store.id })
       .andWhere('sr.currentPR >= :oldLP AND sr.currentPR < :newLP', {
@@ -513,9 +518,11 @@ export class RankingService {
       .getMany();
 
     for (const rival of rivalsOvertaken) {
-      if (rival.store?.owner?.id) {
+      const rivalOwnerId =
+        rival.store?.owner?.id || rival.store?.company?.owner?.id;
+      if (rivalOwnerId) {
         await this.notificationService.create({
-          userId: rival.store.owner.id,
+          userId: rivalOwnerId,
           storeId: rival.storeId,
           type: NotificationType.CATEGORY_RIVALRY,
           title: '¡Alerta de Rival Comercial! 🔥',

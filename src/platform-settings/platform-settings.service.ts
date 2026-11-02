@@ -14,6 +14,12 @@ export const PLATFORM_KEYS = {
   MAX_PREORDER_LEAD_DAYS: 'max_preorder_lead_days',
   OFFICIAL_SUPPORT_WHATSAPP: 'official_support_whatsapp',
   WHATSAPP_SUPPORT_ENABLED: 'whatsapp_support_enabled',
+  FEATURED_SECTION_ENABLED: 'featured_section_enabled',
+  FEATURED_SECTION_TITLE: 'featured_section_title',
+  FEATURED_CAROUSEL_SECONDS: 'featured_carousel_seconds',
+  FEATURED_MAX_ITEMS: 'featured_max_items',
+  FEATURED_FILL_BESTSELLERS: 'featured_fill_bestsellers',
+  FEATURED_PRICE_PER_DAY: 'featured_price_per_day',
 } as const;
 
 @Injectable()
@@ -36,6 +42,12 @@ export class PlatformSettingsService {
       [PLATFORM_KEYS.MAX_PREORDER_LEAD_DAYS]: '60',
       [PLATFORM_KEYS.OFFICIAL_SUPPORT_WHATSAPP]: '',
       [PLATFORM_KEYS.WHATSAPP_SUPPORT_ENABLED]: 'false',
+      [PLATFORM_KEYS.FEATURED_SECTION_ENABLED]: 'true',
+      [PLATFORM_KEYS.FEATURED_SECTION_TITLE]: 'Artículos Destacados',
+      [PLATFORM_KEYS.FEATURED_CAROUSEL_SECONDS]: '5',
+      [PLATFORM_KEYS.FEATURED_MAX_ITEMS]: '10',
+      [PLATFORM_KEYS.FEATURED_FILL_BESTSELLERS]: 'true',
+      [PLATFORM_KEYS.FEATURED_PRICE_PER_DAY]: '2.00',
     };
 
     for (const [key, value] of Object.entries(defaults)) {
@@ -111,17 +123,54 @@ export class PlatformSettingsService {
     return val === 'true';
   }
 
+  async getFeaturedShowcaseConfig(): Promise<{
+    enabled: boolean;
+    title: string;
+    carouselSeconds: number;
+    maxItems: number;
+    fillWithBestSellers: boolean;
+    pricePerDay: number;
+  }> {
+    const [enabled, title, seconds, maxItems, fill, price] = await Promise.all([
+      this.get(PLATFORM_KEYS.FEATURED_SECTION_ENABLED),
+      this.get(PLATFORM_KEYS.FEATURED_SECTION_TITLE),
+      this.get(PLATFORM_KEYS.FEATURED_CAROUSEL_SECONDS),
+      this.get(PLATFORM_KEYS.FEATURED_MAX_ITEMS),
+      this.get(PLATFORM_KEYS.FEATURED_FILL_BESTSELLERS),
+      this.get(PLATFORM_KEYS.FEATURED_PRICE_PER_DAY),
+    ]);
+
+    return {
+      enabled: enabled !== 'false',
+      title: title || 'Artículos Destacados',
+      carouselSeconds: seconds ? Math.max(1, parseInt(seconds, 10)) : 5,
+      maxItems: maxItems ? Math.max(1, parseInt(maxItems, 10)) : 10,
+      fillWithBestSellers: fill !== 'false',
+      pricePerDay: price ? parseFloat(price) : 2.0,
+    };
+  }
+
   async getPublicSettings(): Promise<{
     officialSupportWhatsapp: string;
     whatsappSupportEnabled: boolean;
+    featuredShowcase: {
+      enabled: boolean;
+      title: string;
+      carouselSeconds: number;
+      maxItems: number;
+      fillWithBestSellers: boolean;
+      pricePerDay: number;
+    };
   }> {
-    const [whatsapp, enabled] = await Promise.all([
+    const [whatsapp, enabled, featuredShowcase] = await Promise.all([
       this.getOfficialSupportWhatsapp(),
       this.isWhatsappSupportEnabled(),
+      this.getFeaturedShowcaseConfig(),
     ]);
     return {
       officialSupportWhatsapp: whatsapp,
       whatsappSupportEnabled: enabled,
+      featuredShowcase,
     };
   }
 

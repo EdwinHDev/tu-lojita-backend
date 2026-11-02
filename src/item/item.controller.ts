@@ -21,6 +21,18 @@ import {
   CreatePreorderConfigDto,
 } from './dto/booking-config.dto';
 import { UserRole } from 'src/user/types/user-role.enum';
+import { RequestPromotionDto } from './dto/request-promotion.dto';
+import { ItemPromotionStatus } from './types/item-promotion-status.enum';
+
+@Controller('items')
+export class PublicItemController {
+  constructor(private readonly itemService: ItemService) {}
+
+  @Get('featured-showcase')
+  getFeaturedShowcase() {
+    return this.itemService.getFeaturedShowcase();
+  }
+}
 
 @Auth()
 @Controller('items')
@@ -90,6 +102,48 @@ export class ItemController {
   @Auth(UserRole.ADMIN)
   findAllForAdmin(@Query() query: any) {
     return this.itemService.findAllForAdmin(query);
+  }
+
+  @Get('admin/promotions')
+  @Auth(UserRole.ADMIN)
+  getPromotionsForAdmin(@Query('status') status?: ItemPromotionStatus) {
+    return this.itemService.getPromotionsForAdmin(status);
+  }
+
+  @Get('admin/showcase-status')
+  @Auth(UserRole.ADMIN)
+  getShowcaseStatusForAdmin() {
+    return this.itemService.getShowcaseStatusForAdmin();
+  }
+
+  @Patch('admin/promotions/:id/approve')
+  @Auth(UserRole.ADMIN)
+  approvePromotion(@Param('id') id: string, @GetUser() user: User) {
+    return this.itemService.approvePromotion(id, user);
+  }
+
+  @Patch('admin/promotions/:id/reject')
+  @Auth(UserRole.ADMIN)
+  rejectPromotion(
+    @Param('id') id: string,
+    @Body('reason') reason: string,
+    @GetUser() user: User,
+  ) {
+    return this.itemService.rejectPromotion(id, reason, user);
+  }
+
+  @Post(':id/promote')
+  requestPromotion(
+    @Param('id') id: string,
+    @Body() dto: RequestPromotionDto,
+    @GetUser() user: User,
+  ) {
+    return this.itemService.requestPromotion(id, user, dto);
+  }
+
+  @Get(':id/promotion-status')
+  getItemPromotionStatus(@Param('id') id: string, @GetUser() user: User) {
+    return this.itemService.getItemPromotionStatus(id, user);
   }
 
   @Get(':id')

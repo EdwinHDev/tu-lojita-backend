@@ -14,6 +14,8 @@ export class CompanyStoreDto {
   instagram?: string;
   tiktok?: string;
   phone?: string;
+  deletionScheduledAt?: Date | null;
+  isDeleted?: boolean;
 }
 
 export class CompanyStoresResponseDto {

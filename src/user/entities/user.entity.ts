@@ -75,6 +75,11 @@ export class User extends TimestampEntity {
   })
   isActive: boolean;
 
+  @Column('timestamp with time zone', {
+    nullable: true,
+  })
+  deletedAt?: Date | null;
+
   @Column('bool', {
     default: false,
     select: false,

@@ -27,4 +27,9 @@ export class PublicPlatformSettingsController {
   getPublicSettings() {
     return this.service.getPublicSettings();
   }
+
+  @Get('featured-showcase-config')
+  getFeaturedShowcaseConfig() {
+    return this.service.getFeaturedShowcaseConfig();
+  }
 }

@@ -45,6 +45,7 @@ interface CustomizationGroupInput {
   options?: CustomizationOptionInput[];
 }
 import { PropertyType } from './types/property-type.enum';
+import { UserRole } from 'src/user/types/user-role.enum';
 import { CustomizationGroup } from './entities/customization-group.entity';
 import { CustomizationOption } from './entities/customization-option.entity';
 import { ItemAttributeValue } from './entities/item-attribute-value.entity';
@@ -52,11 +53,17 @@ import { VariantAxis } from './entities/variant-axis.entity';
 import { ItemVariant } from './entities/item-variant.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { OrderStatus } from 'src/order/types/order-status.enum';
+import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
+import { DisputeStatus } from 'src/order-dispute/types';
 import { VariantAxisDto } from './dto/variant-axis.dto';
 import { ItemVariantDto } from './dto/item-variant.dto';
 import { ItemType } from './types/item-type.enum';
 import { BookingType } from './types/booking-type.enum';
 import { BookingService } from './booking.service';
+import { ItemPromotion } from './entities/item-promotion.entity';
+import { ItemPromotionStatus } from './types/item-promotion-status.enum';
+import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
+import { RequestPromotionDto } from './dto/request-promotion.dto';
 
 @Injectable()
 export class ItemService {
@@ -83,6 +90,11 @@ export class ItemService {
     private readonly itemVariantRepository: Repository<ItemVariant>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(OrderDispute)
+    private readonly orderDisputeRepository: Repository<OrderDispute>,
+    @InjectRepository(ItemPromotion)
+    private readonly itemPromotionRepository: Repository<ItemPromotion>,
+    private readonly platformSettingsService: PlatformSettingsService,
     private readonly bookingService: BookingService,
     private readonly activityLogService: CompanyActivityLogService,
   ) {}
@@ -914,7 +926,8 @@ export class ItemService {
       .limit(limit)
       .offset(offset);
 
-    // Filtro estricto: Solo mostrar items pertenecientes a tiendas ACTIVAS
+    // Filtro estricto: Solo mostrar items no eliminados pertenecientes a tiendas ACTIVAS
+    queryBuilder.andWhere('item.isDeleted = false');
     queryBuilder.andWhere('store.status = :activeStatus', {
       activeStatus: StoreStatus.ACTIVE,
     });
@@ -1064,6 +1077,7 @@ export class ItemService {
       .leftJoinAndSelect('store.owner', 'owner')
       .leftJoinAndSelect('store.company', 'company')
       .leftJoinAndSelect('item.category', 'category')
+      .where('item.isDeleted = false')
       .orderBy('item.createdAt', 'DESC')
       .take(limit)
       .skip(offset);
@@ -1098,9 +1112,11 @@ export class ItemService {
     const [items, total] = await queryBuilder.getManyAndCount();
 
     // Summary metrics across platform
-    const totalItems = await this.itemRepository.count();
+    const totalItems = await this.itemRepository.count({
+      where: { isDeleted: false },
+    });
     const activeItems = await this.itemRepository.count({
-      where: { isActive: true },
+      where: { isActive: true, isDeleted: false },
     });
     const outOfStockItems = await this.itemRepository
       .createQueryBuilder('i')
@@ -1137,10 +1153,35 @@ export class ItemService {
     paginationDto: ItemPaginationDto,
     user?: User,
   ) {
-    const includeInactive =
-      paginationDto.includeInactive !== undefined
-        ? paginationDto.includeInactive
-        : true;
+    let includeInactive = false;
+
+    if (paginationDto.includeInactive === true && user) {
+      if (user.role === UserRole.ADMIN) {
+        includeInactive = true;
+      } else {
+        const isCollab =
+          (user as any)?.isCollaborator === true ||
+          (user as any)?.actorType === 'COLLABORATOR';
+
+        if (isCollab) {
+          const collab = user as any;
+          const hasBranchAccess =
+            collab.hasFullBranchAccess ||
+            (collab.allowedBranchIds || []).includes(storeId);
+          if (hasBranchAccess) {
+            includeInactive = true;
+          }
+        } else {
+          const store = await this.storeRepository.findOne({
+            where: { id: storeId },
+            relations: ['owner'],
+          });
+          if (store && store.owner?.id === user.id) {
+            includeInactive = true;
+          }
+        }
+      }
+    }
 
     return await this.findAll(
       {
@@ -1171,7 +1212,7 @@ export class ItemService {
       ],
     });
 
-    if (!item) {
+    if (!item || item.isDeleted) {
       throw new NotFoundException(`Item con ID ${id} no encontrado`);
     }
 
@@ -1204,7 +1245,7 @@ export class ItemService {
       ],
     });
 
-    if (!item) {
+    if (!item || item.isDeleted) {
       throw new NotFoundException(`Item con ID ${id} no encontrado`);
     }
 
@@ -1279,6 +1320,45 @@ export class ItemService {
       );
     } else if (updateItemDto.attributes && item.category) {
       await this.validateAttributes(item.category.id, updateItemDto.attributes);
+    }
+
+    if (updateItemDto.isActive === false && item.isActive === true) {
+      // 1. Verificación operativa: Órdenes en curso
+      const activeOrdersCount = await this.orderItemRepository
+        .createQueryBuilder('oi')
+        .innerJoin('oi.order', 'o')
+        .where('oi.itemId = :itemId', { itemId: id })
+        .andWhere('o.status IN (:...statuses)', {
+          statuses: [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID],
+        })
+        .getCount();
+
+      if (activeOrdersCount > 0) {
+        throw new BadRequestException(
+          'No se puede despublicar el artículo porque tiene compras o pedidos en curso.',
+        );
+      }
+
+      // 2. Verificación operativa: Disputas abiertas
+      const activeDisputesCount = await this.orderDisputeRepository
+        .createQueryBuilder('d')
+        .innerJoin('d.order', 'o')
+        .innerJoin('o.orderItems', 'oi')
+        .where('oi.itemId = :itemId', { itemId: id })
+        .andWhere('d.status IN (:...disputeStatuses)', {
+          disputeStatuses: [
+            DisputeStatus.OPEN,
+            DisputeStatus.MERCHANT_RESPONDED,
+            DisputeStatus.ADMIN_REVIEW,
+          ],
+        })
+        .getCount();
+
+      if (activeDisputesCount > 0) {
+        throw new BadRequestException(
+          'No se puede despublicar el artículo porque tiene una disputa o mediación abierta en revisión.',
+        );
+      }
     }
 
     const hasVariantsActive =
@@ -1408,7 +1488,7 @@ export class ItemService {
       relations: ['store', 'store.owner', 'store.company'],
     });
 
-    if (!item) {
+    if (!item || item.isDeleted) {
       throw new NotFoundException(`Item con ID ${id} no encontrado`);
     }
 
@@ -1446,7 +1526,48 @@ export class ItemService {
     const storeName = item.store.name;
     const storeId = item.store.id;
 
-    await this.itemRepository.remove(item);
+    // 1. Verificación operativa: Órdenes en curso
+    const activeOrdersCount = await this.orderItemRepository
+      .createQueryBuilder('oi')
+      .innerJoin('oi.order', 'o')
+      .where('oi.itemId = :itemId', { itemId: id })
+      .andWhere('o.status IN (:...statuses)', {
+        statuses: [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID],
+      })
+      .getCount();
+
+    if (activeOrdersCount > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar el artículo porque tiene compras o pedidos en curso.',
+      );
+    }
+
+    // 2. Verificación operativa: Disputas abiertas
+    const activeDisputesCount = await this.orderDisputeRepository
+      .createQueryBuilder('d')
+      .innerJoin('d.order', 'o')
+      .innerJoin('o.orderItems', 'oi')
+      .where('oi.itemId = :itemId', { itemId: id })
+      .andWhere('d.status IN (:...disputeStatuses)', {
+        disputeStatuses: [
+          DisputeStatus.OPEN,
+          DisputeStatus.MERCHANT_RESPONDED,
+          DisputeStatus.ADMIN_REVIEW,
+        ],
+      })
+      .getCount();
+
+    if (activeDisputesCount > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar el artículo porque tiene una disputa o mediación abierta en revisión.',
+      );
+    }
+
+    // 3. Borrado lógico (Soft Delete): Preserva la fila en BD para integridad relacional con historial
+    item.isDeleted = true;
+    item.deletedAt = new Date();
+    item.isActive = false;
+    await this.itemRepository.save(item);
 
     if (companyId) {
       this.activityLogService.log({
@@ -1461,5 +1582,391 @@ export class ItemService {
     }
 
     return { deleted: true };
+  }
+
+  /**
+   * Obtiene la vitrina de artículos destacados para el Home de la app de clientes.
+   * Prioriza los artículos con promoción activa aprobada y rellena los cupos
+   * vacíos con los más vendidos (fallback) hasta alcanzar maxItems.
+   */
+  async getFeaturedShowcase(): Promise<{
+    enabled: boolean;
+    title: string;
+    carouselSeconds: number;
+    items: any[];
+  }> {
+    const config = await this.platformSettingsService.getFeaturedShowcaseConfig();
+    if (!config.enabled) {
+      return {
+        enabled: false,
+        title: config.title,
+        carouselSeconds: config.carouselSeconds,
+        items: [],
+      };
+    }
+
+    const now = new Date();
+
+    // 1. Obtener artículos con promoción activa aprobada
+    const activePromotions = await this.itemPromotionRepository
+      .createQueryBuilder('promo')
+      .innerJoinAndSelect('promo.item', 'item')
+      .leftJoinAndSelect('item.store', 'store')
+      .leftJoinAndSelect('store.company', 'company')
+      .leftJoinAndSelect('item.category', 'category')
+      .where('promo.status = :status', { status: ItemPromotionStatus.APPROVED })
+      .andWhere('promo.startsAt <= :now', { now })
+      .andWhere('promo.expiresAt > :now', { now })
+      .andWhere('item.isActive = :isActive', { isActive: true })
+      .andWhere('item.isDeleted = :isDeleted', { isDeleted: false })
+      .andWhere('store.status = :storeStatus', { storeStatus: StoreStatus.ACTIVE })
+      .andWhere('store.isDeleted = :storeDeleted', { storeDeleted: false })
+      .andWhere(
+        '(item.trackInventory = false OR item.hasVariants = true OR (item.trackInventory = true AND item.stockQuantity > 0))',
+      )
+      .orderBy('promo.startsAt', 'DESC')
+      .take(config.maxItems)
+      .getMany();
+
+    const featuredItemsMap = new Map<string, any>();
+    for (const promo of activePromotions) {
+      if (promo.item && !featuredItemsMap.has(promo.item.id)) {
+        const mapped = await this.mapItemResponse(promo.item);
+        featuredItemsMap.set(promo.item.id, {
+          ...mapped,
+          isFeaturedAd: true,
+          badgeLabel: 'DESTACADO',
+          expiresAt: promo.expiresAt,
+        });
+      }
+    }
+
+    const featuredItems = Array.from(featuredItemsMap.values());
+    let finalItems = [...featuredItems];
+
+    // 2. Si hay cupos disponibles y fallback está activo, completar con más vendidos
+    if (finalItems.length < config.maxItems && config.fillWithBestSellers) {
+      const needed = config.maxItems - finalItems.length;
+      const excludeIds = finalItems.map((i) => i.id);
+
+      const bestSellersQuery = this.orderItemRepository
+        .createQueryBuilder('oi')
+        .innerJoin('oi.order', 'order')
+        .innerJoin('oi.item', 'item')
+        .select('item.id', 'itemId')
+        .addSelect('SUM(oi.quantity)', 'totalSold')
+        .where('order.status IN (:...completedStatuses)', {
+          completedStatuses: [
+            OrderStatus.FULLY_PAID,
+            OrderStatus.PARTIALLY_PAID,
+          ],
+        })
+        .andWhere('item.isActive = :isActive', { isActive: true })
+        .andWhere('item.isDeleted = :isDeleted', { isDeleted: false });
+
+      if (excludeIds.length > 0) {
+        bestSellersQuery.andWhere('item.id NOT IN (:...excludeIds)', { excludeIds });
+      }
+
+      const bestSellersRaw = await bestSellersQuery
+        .groupBy('item.id')
+        .orderBy('"totalSold"', 'DESC')
+        .limit(needed)
+        .getRawMany();
+
+      if (bestSellersRaw.length > 0) {
+        const itemIds = bestSellersRaw.map((r) => r.itemId);
+        const bestSellerItems = await this.itemRepository
+          .createQueryBuilder('item')
+          .leftJoinAndSelect('item.store', 'store')
+          .leftJoinAndSelect('store.company', 'company')
+          .leftJoinAndSelect('item.category', 'category')
+          .where('item.id IN (:...itemIds)', { itemIds })
+          .andWhere('item.isActive = :isActive', { isActive: true })
+          .andWhere('item.isDeleted = :isDeleted', { isDeleted: false })
+          .andWhere('store.status = :storeStatus', { storeStatus: StoreStatus.ACTIVE })
+          .andWhere('store.isDeleted = :storeDeleted', { storeDeleted: false })
+          .andWhere(
+            '(item.trackInventory = false OR item.hasVariants = true OR (item.trackInventory = true AND item.stockQuantity > 0))',
+          )
+          .getMany();
+
+        for (const it of bestSellerItems) {
+          const rawItem = bestSellersRaw.find((r) => r.itemId === it.id);
+          const mapped = await this.mapItemResponse(it);
+          finalItems.push({
+            ...mapped,
+            isFeaturedAd: false,
+            isFallback: true,
+            badgeLabel: 'TOP VENTAS',
+            totalSold: rawItem ? parseInt(rawItem.totalSold, 10) : 0,
+          });
+        }
+      }
+
+      // Si aún faltan items para completar el cupo (ej. plataforma nueva sin órdenes suficientes),
+      // complementar con los productos activos más recientes en stock
+      if (finalItems.length < config.maxItems) {
+        const remainingNeeded = config.maxItems - finalItems.length;
+        const currentExcludeIds = finalItems.map((i) => i.id);
+
+        const fallbackRecentQuery = this.itemRepository
+          .createQueryBuilder('item')
+          .leftJoinAndSelect('item.store', 'store')
+          .leftJoinAndSelect('store.company', 'company')
+          .leftJoinAndSelect('item.category', 'category')
+          .where('item.isActive = :isActive', { isActive: true })
+          .andWhere('item.isDeleted = :isDeleted', { isDeleted: false })
+          .andWhere('store.status = :storeStatus', { storeStatus: StoreStatus.ACTIVE })
+          .andWhere('store.isDeleted = :storeDeleted', { storeDeleted: false })
+          .andWhere(
+            '(item.trackInventory = false OR item.hasVariants = true OR (item.trackInventory = true AND item.stockQuantity > 0))',
+          );
+
+        if (currentExcludeIds.length > 0) {
+          fallbackRecentQuery.andWhere('item.id NOT IN (:...currentExcludeIds)', { currentExcludeIds });
+        }
+
+        const recentFallbacks = await fallbackRecentQuery
+          .orderBy('item.createdAt', 'DESC')
+          .limit(remainingNeeded)
+          .getMany();
+
+        for (const it of recentFallbacks) {
+          const mapped = await this.mapItemResponse(it);
+          finalItems.push({
+            ...mapped,
+            isFeaturedAd: false,
+            isFallback: true,
+            badgeLabel: 'DESTACADO',
+          });
+        }
+      }
+    }
+
+    // Enriquecer tiendas
+    const stores = finalItems
+      .map((i) => i.store)
+      .filter((s): s is Store => Boolean(s));
+    await this.enrichStoresWithBranchStatus(stores);
+
+    return {
+      enabled: true,
+      title: config.title,
+      carouselSeconds: config.carouselSeconds,
+      items: finalItems.slice(0, config.maxItems),
+    };
+  }
+
+  /**
+   * Registra una solicitud de promoción para un artículo por parte del comerciante.
+   */
+  async requestPromotion(
+    itemId: string,
+    user: User,
+    dto: RequestPromotionDto,
+  ): Promise<ItemPromotion> {
+    const item = await this.itemRepository.findOne({
+      where: { id: itemId, isDeleted: false },
+      relations: ['store', 'store.company', 'store.company.owner'],
+    });
+
+    if (!item) {
+      throw new NotFoundException('Artículo no encontrado.');
+    }
+
+    if (user.role !== UserRole.ADMIN) {
+      const isOwner = item.store?.company?.owner?.id === user.id;
+      const isCollaborator = user.company?.id && item.store?.company?.id === user.company.id;
+      if (!isOwner && !isCollaborator) {
+        throw new ForbiddenException('No tienes permisos sobre este artículo.');
+      }
+    }
+
+    const promotion = this.itemPromotionRepository.create({
+      itemId: item.id,
+      storeId: item.store.id,
+      durationDays: dto.durationDays,
+      amountPaid: dto.amountPaid,
+      paymentReference: dto.paymentReference,
+      paymentProofUrl: dto.paymentProofUrl,
+      status: ItemPromotionStatus.PENDING,
+    });
+
+    return this.itemPromotionRepository.save(promotion);
+  }
+
+  /**
+   * Obtiene el listado de promociones para revisión del administrador.
+   */
+  async getPromotionsForAdmin(status?: ItemPromotionStatus): Promise<ItemPromotion[]> {
+    const query = this.itemPromotionRepository
+      .createQueryBuilder('promo')
+      .leftJoinAndSelect('promo.item', 'item')
+      .leftJoinAndSelect('promo.store', 'store')
+      .leftJoinAndSelect('store.company', 'company')
+      .orderBy('promo.createdAt', 'DESC');
+
+    if (status) {
+      query.where('promo.status = :status', { status });
+    }
+
+    return query.getMany();
+  }
+
+  /**
+   * Aprueba una solicitud de promoción de un artículo.
+   */
+  async approvePromotion(promotionId: string, adminUser: User): Promise<ItemPromotion> {
+    const promo = await this.itemPromotionRepository.findOne({
+      where: { id: promotionId },
+      relations: ['item', 'store'],
+    });
+
+    if (!promo) {
+      throw new NotFoundException('Solicitud de promoción no encontrada.');
+    }
+
+    if (promo.status !== ItemPromotionStatus.PENDING) {
+      throw new BadRequestException('Esta solicitud ya fue procesada anteriormente.');
+    }
+
+    const now = new Date();
+    promo.status = ItemPromotionStatus.APPROVED;
+    promo.startsAt = now;
+    promo.expiresAt = new Date(now.getTime() + promo.durationDays * 24 * 60 * 60 * 1000);
+    promo.approvedAt = now;
+
+    const saved = await this.itemPromotionRepository.save(promo);
+
+    // Marca el artículo como destacado
+    if (promo.item) {
+      promo.item.isFeatured = true;
+      await this.itemRepository.save(promo.item);
+    }
+
+    return saved;
+  }
+
+  /**
+   * Rechaza una solicitud de promoción con motivo.
+   */
+  async rejectPromotion(
+    promotionId: string,
+    reason: string,
+    adminUser: User,
+  ): Promise<ItemPromotion> {
+    const promo = await this.itemPromotionRepository.findOne({
+      where: { id: promotionId },
+    });
+
+    if (!promo) {
+      throw new NotFoundException('Solicitud de promoción no encontrada.');
+    }
+
+    if (promo.status !== ItemPromotionStatus.PENDING) {
+      throw new BadRequestException('Esta solicitud ya fue procesada anteriormente.');
+    }
+
+    promo.status = ItemPromotionStatus.REJECTED;
+    promo.adminNote = reason || 'Rechazado por administración';
+
+    return this.itemPromotionRepository.save(promo);
+  }
+
+  /**
+   * Devuelve el estado de monitoreo de la vitrina en tiempo real para el admin web.
+   */
+  async getShowcaseStatusForAdmin(): Promise<any> {
+    const [config, showcase, pendingCount, activeCount] = await Promise.all([
+      this.platformSettingsService.getFeaturedShowcaseConfig(),
+      this.getFeaturedShowcase(),
+      this.itemPromotionRepository.count({
+        where: { status: ItemPromotionStatus.PENDING },
+      }),
+      this.itemPromotionRepository
+        .createQueryBuilder('p')
+        .where('p.status = :status', { status: ItemPromotionStatus.APPROVED })
+        .andWhere('p.expiresAt > :now', { now: new Date() })
+        .getCount(),
+    ]);
+
+    return {
+      config,
+      showcase,
+      metrics: {
+        pendingRequests: pendingCount,
+        activePromotions: activeCount,
+        totalItemsInShowcase: showcase.items.length,
+        featuredPaidCount: showcase.items.filter((i: any) => i.isFeaturedAd).length,
+        fallbackCount: showcase.items.filter((i: any) => i.isFallback).length,
+      },
+    };
+  }
+
+  /**
+   * Consulta el estado de promoción de un artículo específico para la app de empresa.
+   */
+  async getItemPromotionStatus(
+    itemId: string,
+    user: User,
+  ): Promise<{
+    hasActivePromotion: boolean;
+    activePromotion: ItemPromotion | null;
+    pendingPromotion: ItemPromotion | null;
+  }> {
+    const now = new Date();
+    const [active, pending] = await Promise.all([
+      this.itemPromotionRepository
+        .createQueryBuilder('p')
+        .where('p.itemId = :itemId', { itemId })
+        .andWhere('p.status = :status', { status: ItemPromotionStatus.APPROVED })
+        .andWhere('p.expiresAt > :now', { now })
+        .orderBy('p.expiresAt', 'DESC')
+        .getOne(),
+      this.itemPromotionRepository.findOne({
+        where: { itemId, status: ItemPromotionStatus.PENDING },
+        order: { createdAt: 'DESC' },
+      }),
+    ]);
+
+    return {
+      hasActivePromotion: Boolean(active),
+      activePromotion: active,
+      pendingPromotion: pending,
+    };
+  }
+
+  /**
+   * Marca como expiradas las promociones aprobadas cuya fecha de vencimiento haya pasado.
+   */
+  async expireExpiredPromotions(): Promise<number> {
+    const now = new Date();
+    const expiredList = await this.itemPromotionRepository
+      .createQueryBuilder('p')
+      .innerJoinAndSelect('p.item', 'item')
+      .where('p.status = :status', { status: ItemPromotionStatus.APPROVED })
+      .andWhere('p.expiresAt <= :now', { now })
+      .getMany();
+
+    if (expiredList.length === 0) return 0;
+
+    for (const promo of expiredList) {
+      promo.status = ItemPromotionStatus.EXPIRED;
+      await this.itemPromotionRepository.save(promo);
+
+      const otherActive = await this.itemPromotionRepository.count({
+        where: {
+          itemId: promo.itemId,
+          status: ItemPromotionStatus.APPROVED,
+        },
+      });
+      if (otherActive === 0 && promo.item) {
+        promo.item.isFeatured = false;
+        await this.itemRepository.save(promo.item);
+      }
+    }
+
+    return expiredList.length;
   }
 }

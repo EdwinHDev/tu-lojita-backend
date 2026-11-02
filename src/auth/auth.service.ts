@@ -16,12 +16,13 @@ import { GooglePayload } from './types';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import {
   getLoginAlertTemplate,
   getRegistrationOtpTemplate,
   getPasswordResetOtpTemplate,
+  getAccountDeletionOtpTemplate,
 } from 'src/common/templates/email-templates';
 import { RequestRegistrationOtpDto } from './dto/request-registration-otp.dto';
 import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
@@ -32,6 +33,10 @@ import { RequestForgotPasswordOtpDto } from './dto/request-forgot-password-otp.d
 import { VerifyForgotPasswordOtpDto } from './dto/verify-forgot-password-otp.dto';
 import { ResendForgotPasswordOtpDto } from './dto/resend-forgot-password-otp.dto';
 import { ResetForgotPasswordDto } from './dto/reset-forgot-password.dto';
+import { RequestAccountDeletionDto } from './dto/request-account-deletion.dto';
+import { ConfirmAccountDeletionDto } from './dto/confirm-account-deletion.dto';
+import { AccountDeletionAudit } from './entities/account-deletion-audit.entity';
+import { UserDevice } from 'src/notification/entities/user-device.entity';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { CompanyCollaborator } from 'src/company/entities/company-collaborator.entity';
@@ -61,6 +66,7 @@ export class AuthService {
     private readonly collaboratorRepository: Repository<CompanyCollaborator>,
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async seedAdmin() {
@@ -112,7 +118,29 @@ export class AuthService {
     };
   }
 
-  async renewTokens(userId: string) {
+  async renewTokens(actorOrUserId: any) {
+    if (typeof actorOrUserId === 'object' && actorOrUserId !== null) {
+      if (
+        actorOrUserId.isCollaborator ||
+        actorOrUserId.actorType === 'COLLABORATOR'
+      ) {
+        const collaborator = await this.collaboratorRepository.findOne({
+          where: { id: actorOrUserId.id },
+        });
+        if (!collaborator || !collaborator.isActive) {
+          throw new UnauthorizedException(
+            'El colaborador está bloqueado o inactivo.',
+          );
+        }
+        return this.getCollaboratorTokens(
+          collaborator.id,
+          collaborator.tokenVersion,
+        );
+      }
+      return this.renewTokens(actorOrUserId.id);
+    }
+
+    const userId = actorOrUserId;
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('El usuario está bloqueado o inactivo.');
@@ -1260,6 +1288,176 @@ export class AuthService {
 
     return {
       message: 'Contraseña actualizada exitosamente.',
+    };
+  }
+
+  async assertUserEligibleForDeletion(userId: string): Promise<void> {
+    // 1. Validar compras/créditos pendientes como comprador
+    const pendingBuyerOrders = await this.dataSource.query(
+      `SELECT id, status, "isPartialPayment" FROM orders 
+       WHERE "userId" = $1 AND status IN ('PENDING', 'PARTIALLY_PAID') 
+       LIMIT 1`,
+      [userId],
+    );
+
+    if (pendingBuyerOrders && pendingBuyerOrders.length > 0) {
+      throw new BadRequestException(
+        'No es posible dar de baja tu cuenta porque tienes compras activas o cuotas de crédito pendientes de pago. Debes liquidar estas operaciones antes de continuar.',
+      );
+    }
+
+    // 2. Validar pedidos pendientes de despacho/cobro si es dueño de tienda
+    const pendingSellerOrders = await this.dataSource.query(
+      `SELECT o.id FROM orders o
+       INNER JOIN stores s ON s.id = o."storeId"
+       WHERE s."ownerId" = $1 AND o.status IN ('PENDING', 'PARTIALLY_PAID')
+       LIMIT 1`,
+      [userId],
+    );
+
+    if (pendingSellerOrders && pendingSellerOrders.length > 0) {
+      throw new BadRequestException(
+        'No es posible dar de baja tu cuenta porque tu comercio tiene pedidos en curso pendientes de atención o entrega.',
+      );
+    }
+  }
+
+  async requestAccountDeletion(user: User, dto?: RequestAccountDeletionDto) {
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Usuario no válido o inactivo.');
+    }
+
+    // 1. Pre-check de elegibilidad (deudas, pedidos)
+    await this.assertUserEligibleForDeletion(user.id);
+
+    // 2. Generar código OTP numérico de 6 dígitos
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = bcrypt.hashSync(otp, 10);
+    const now = Date.now();
+
+    // 3. Crear token de eliminación firmado (10 min)
+    const payload = {
+      type: 'ACCOUNT_DELETION_OTP',
+      userId: user.id,
+      email: user.email,
+      otpHash,
+      reason: dto?.reason,
+      issuedAt: now,
+    };
+
+    const deletionToken = this.jwtService.sign(payload, {
+      secret: envs.jwtSecret,
+      expiresIn: '10m',
+    });
+
+    // 4. Enviar correo electrónico con plantilla
+    try {
+      await this.mailerService.sendMail({
+        to: user.email,
+        subject: 'Código de confirmación para baja de cuenta - Tu Lojita',
+        html: getAccountDeletionOtpTemplate(otp, user.firstName),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error al enviar correo de baja a ${user.email}: ${(error as Error).message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo enviar el correo de verificación. Intenta nuevamente.',
+      );
+    }
+
+    return {
+      success: true,
+      message:
+        'Se ha enviado un código de confirmación a tu correo electrónico.',
+      deletionToken,
+      expiresInMinutes: 10,
+    };
+  }
+
+  async confirmAccountDeletion(
+    user: User,
+    dto: ConfirmAccountDeletionDto,
+    ip?: string,
+    userAgent?: string,
+  ) {
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Usuario no válido o inactivo.');
+    }
+
+    // 1. Validar deletionToken
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.deletionToken, {
+        secret: envs.jwtSecret,
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        'El token de eliminación ha expirado o es inválido. Solicita un nuevo código.',
+      );
+    }
+
+    if (payload.type !== 'ACCOUNT_DELETION_OTP' || payload.userId !== user.id) {
+      throw new BadRequestException('Token de eliminación inválido.');
+    }
+
+    // 2. Validar OTP
+    const isValidOtp = bcrypt.compareSync(dto.otp, payload.otpHash);
+    if (!isValidOtp) {
+      throw new BadRequestException(
+        'El código de verificación es incorrecto o ha expirado.',
+      );
+    }
+
+    // 3. Re-validar elegibilidad
+    await this.assertUserEligibleForDeletion(user.id);
+
+    // 4. Ejecutar transacción atómica de Tombstoning
+    const timestamp = Date.now();
+    const shortId = user.id.replace(/-/g, '').slice(0, 8);
+    const archivedEmail = `deleted_${timestamp}_${shortId}@tulojita.archive`;
+    const emailHash = crypto
+      .createHash('sha256')
+      .update(user.email.toLowerCase().trim())
+      .digest('hex');
+
+    await this.dataSource.transaction(async (manager) => {
+      // a) Ofuscar usuario y liberar email y googleId
+      await manager.update(
+        User,
+        { id: user.id },
+        {
+          email: archivedEmail,
+          googleId: () => 'NULL',
+          password: () => 'NULL',
+          phone: () => 'NULL',
+          avatarUrl: () => 'NULL',
+          isActive: false,
+          deletedAt: new Date(),
+        },
+      );
+
+      // b) Eliminar dispositivos push FCM
+      await manager.delete(UserDevice, { userId: user.id });
+
+      // c) Registrar auditoría inmutable
+      const audit = new AccountDeletionAudit();
+      audit.originalUserId = user.id;
+      audit.emailHash = emailHash;
+      audit.reason = dto.reason || payload.reason || undefined;
+      audit.ipAddress = ip || undefined;
+      audit.userAgent = userAgent || undefined;
+      await manager.save(audit);
+    });
+
+    this.logger.log(
+      `Usuario ${user.id} dado de baja exitosamente. Email original liberado.`,
+    );
+
+    return {
+      success: true,
+      message:
+        'Tu cuenta ha sido dada de baja exitosamente. Tus credenciales han sido revocadas y el correo ha sido liberado.',
     };
   }
 }

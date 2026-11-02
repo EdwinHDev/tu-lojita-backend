@@ -343,6 +343,84 @@ export class MailService {
     }
   }
 
+  async sendBranchLifecycleOtpEmail(
+    email: string,
+    adminName: string,
+    branchName: string,
+    actionType: 'DEACTIVATE' | 'SCHEDULE_DELETION',
+    otpCode: string,
+  ) {
+    try {
+      const isDeletion = actionType === 'SCHEDULE_DELETION';
+      const actionLabel = isDeletion
+        ? 'Programar Eliminación'
+        : 'Desactivar Sucursal';
+      const subject = isDeletion
+        ? `⚠️ Código de seguridad para eliminar sucursal "${branchName}" - Tu Lojita`
+        : `🔒 Código de seguridad para pausar sucursal "${branchName}" - Tu Lojita`;
+
+      const text = `Hola ${adminName},\n\nHas solicitado ${actionLabel.toLowerCase()} para la sucursal "${branchName}" en Tu Lojita.\n\nTu código de verificación de 6 dígitos es: ${otpCode}\n\nEste código vence en 10 minutos.${
+        isDeletion
+          ? '\nAl confirmar, la sucursal se desactivará y tendrá un período de gracia de 7 días antes de la baja definitiva.'
+          : ''
+      }\nSi tú no iniciaste esta acción, revisa la seguridad de tu cuenta de inmediato.\n\nTu Lojita © 2026`;
+
+      const headerBg = isDeletion ? '#fef2f2' : '#fefce8';
+      const headerBorder = isDeletion ? '#fecaca' : '#fef08a';
+      const headerText = isDeletion ? '#dc2626' : '#ca8a04';
+      const boxBg = isDeletion ? '#fef2f2' : '#fefce8';
+      const boxBorder = isDeletion ? '#fca5a5' : '#fde047';
+      const codeColor = isDeletion ? '#b91c1c' : '#a16207';
+
+      const html = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #fee2e2; border-radius: 16px;">
+          <div style="margin-bottom: 20px;">
+            <div style="display: inline-block; background-color: ${headerBg}; color: ${headerText}; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; padding: 4px 10px; border-radius: 6px; border: 1px solid ${headerBorder}; margin-bottom: 12px;">
+              Seguridad Administrativa
+            </div>
+            <h1 style="font-size: 20px; font-weight: 800; color: #0f172a; margin: 0 0 6px 0;">Autorización: ${actionLabel}</h1>
+            <p style="font-size: 14px; color: #64748b; margin: 0;">Sucursal: <strong>${branchName}</strong></p>
+          </div>
+          <p style="font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">Hola <strong>${adminName}</strong>,</p>
+          <p style="font-size: 14px; color: #475569; line-height: 1.6; margin: 0 0 20px 0;">
+            Has solicitado <strong>${actionLabel.toLowerCase()}</strong> de la sucursal <strong>"${branchName}"</strong>. Para confirmar esta operación, ingresa el siguiente código de seguridad en la app:
+          </p>
+          <div style="background-color: ${boxBg}; border: 2px dashed ${boxBorder}; border-radius: 12px; padding: 18px; text-align: center; margin-bottom: 20px;">
+            <span style="font-size: 34px; font-weight: 900; letter-spacing: 8px; color: ${codeColor}; font-family: monospace;">${otpCode}</span>
+          </div>
+          <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0 0 20px 0;">
+            ⏱️ Este código vence en <strong>10 minutos</strong>. Si tú no realizaste esta solicitud, ignora este mensaje y cambia tu contraseña de inmediato.
+          </p>
+          ${
+            isDeletion
+              ? `<div style="background-color: #f8fafc; border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px;">
+                  <p style="font-size: 13px; color: #475569; margin: 0; line-height: 1.5;">
+                    ℹ️ <strong>Período de Gracia:</strong> Una vez confirmada la eliminación, la sucursal se pausará de inmediato y tendrás <strong>7 días continuos</strong> para cancelar la eliminación si cambias de opinión.
+                  </p>
+                </div>`
+              : ''
+          }
+          <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #94a3b8; margin: 0; text-align: center;">Tu Lojita © 2026 - Control Empresarial</p>
+        </div>
+      `;
+
+      await this.mailerService.sendMail({
+        to: email,
+        subject,
+        text,
+        html,
+      });
+      this.logger.log(
+        `Branch lifecycle OTP email sent to ${email} for branch ${branchName} (${actionType})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send branch lifecycle OTP email to ${email}: ${error.message}`,
+      );
+    }
+  }
+
   async sendSubscriptionReceiptReceived(email: string, userName: string) {
     try {
       const subject = `Comprobante de Suscripción Recibido - Tu Lojita Empresa`;

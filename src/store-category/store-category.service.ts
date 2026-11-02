@@ -84,10 +84,19 @@ export class StoreCategoryService {
   }
 
   async findByStore(storeId: string) {
-    return await this.storeCategoryRepository.find({
-      where: { store: { id: storeId } },
-      relations: ['items', 'propertyTemplates'],
-    });
+    return await this.storeCategoryRepository
+      .createQueryBuilder('category')
+      .leftJoinAndSelect(
+        'category.items',
+        'items',
+        'items.isActive = :isActive AND items.isDeleted = :isDeleted',
+        { isActive: true, isDeleted: false },
+      )
+      .leftJoinAndSelect('category.propertyTemplates', 'propertyTemplates')
+      .leftJoin('category.store', 'store')
+      .where('store.id = :storeId', { storeId })
+      .orderBy('category.name', 'ASC')
+      .getMany();
   }
 
   async findByStorePaginated(
@@ -98,7 +107,12 @@ export class StoreCategoryService {
   ) {
     const queryBuilder = this.storeCategoryRepository
       .createQueryBuilder('category')
-      .leftJoinAndSelect('category.items', 'items')
+      .leftJoinAndSelect(
+        'category.items',
+        'items',
+        'items.isActive = :isActive AND items.isDeleted = :isDeleted',
+        { isActive: true, isDeleted: false },
+      )
       .leftJoinAndSelect('category.propertyTemplates', 'propertyTemplates')
       .leftJoin('category.store', 'store')
       .where('store.id = :storeId', { storeId });
@@ -116,10 +130,18 @@ export class StoreCategoryService {
   }
 
   async findOne(id: string) {
-    const category = await this.storeCategoryRepository.findOne({
-      where: { id },
-      relations: ['store', 'items', 'propertyTemplates'],
-    });
+    const category = await this.storeCategoryRepository
+      .createQueryBuilder('category')
+      .leftJoinAndSelect('category.store', 'store')
+      .leftJoinAndSelect(
+        'category.items',
+        'items',
+        'items.isActive = :isActive AND items.isDeleted = :isDeleted',
+        { isActive: true, isDeleted: false },
+      )
+      .leftJoinAndSelect('category.propertyTemplates', 'propertyTemplates')
+      .where('category.id = :id', { id })
+      .getOne();
 
     if (!category) {
       throw new NotFoundException(`Categoría con ID ${id} no encontrada`);

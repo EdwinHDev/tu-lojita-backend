@@ -439,6 +439,50 @@ export function getPasswordResetOtpTemplate(
   `;
 }
 
+export function getAccountDeletionOtpTemplate(
+  otp: string,
+  firstName?: string,
+): string {
+  return `
+    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 520px; margin: 30px auto; padding: 32px; border: 1px solid #FEE2E2; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.05);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <span style="background-color: #FEE2E2; color: #DC2626; padding: 8px 16px; border-radius: 9999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+          Solicitud de Baja de Cuenta
+        </span>
+      </div>
+      <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 12px; text-align: center;">
+        Hola, ${firstName || 'Usuario'}
+      </h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-top: 0; margin-bottom: 28px;">
+        Hemos recibido una solicitud para <strong>dar de baja y eliminar tu cuenta en Tu Lojita</strong>. Esta acción cerrará tus sesiones y desactivará tu perfil.
+      </p>
+
+      <div style="background: linear-gradient(135deg, #FFF1F2 0%, #FEE2E2 100%); border: 2px dashed #FCA5A5; border-radius: 14px; padding: 24px; text-align: center; margin-bottom: 28px;">
+        <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #DC2626; text-transform: uppercase; letter-spacing: 0.1em;">
+          Código de Confirmación de Baja
+        </p>
+        <span style="font-size: 38px; font-weight: 800; color: #991B1B; letter-spacing: 8px; font-family: monospace;">
+          ${otp}
+        </span>
+        <p style="margin: 8px 0 0; font-size: 12px; color: #64748B;">
+          Válido durante <strong>10 minutos</strong>
+        </p>
+      </div>
+
+      <div style="background-color: #FEF2F2; border: 1px solid #F87171; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+        <p style="margin: 0; color: #991B1B; font-size: 13px; line-height: 1.5;">
+          <strong>Atención:</strong> Si tú no solicitaste dar de baja tu cuenta, <strong>ignora este correo y cambia tu contraseña de inmediato</strong>. Nadie del equipo de Tu Lojita te solicitará este código.
+        </p>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
+      <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
+        Tu cuenta permanecerá activa a menos que confirmes este código en la aplicación móvil o portal web.
+      </p>
+    </div>
+  `;
+}
+
 export function getStoreNewDisputeTemplate(
   storeOwnerName: string,
   storeName: string,

@@ -175,6 +175,8 @@ export class OrderAutoCancellationCron {
         'order',
         'order.store',
         'order.store.owner',
+        'order.store.company',
+        'order.store.company.owner',
         'order.user',
         'order.payments',
       ],
@@ -218,9 +220,12 @@ export class OrderAutoCancellationCron {
               orderId: order.id,
             });
           }
-          if (order.store?.owner?.id) {
+          const storeOwnerId =
+            order.store?.owner?.id || order.store?.company?.owner?.id;
+          if (storeOwnerId) {
             await this.notificationService.create({
-              userId: order.store.owner.id,
+              userId: storeOwnerId,
+              storeId: order.store?.id,
               title: 'Reembolso finalizado por inactividad',
               body: `El reembolso de la orden #${orderCode} ha finalizado automáticamente tras 48 horas sin reclamo del cliente.`,
               type: NotificationType.GENERAL,
@@ -256,7 +261,14 @@ export class OrderAutoCancellationCron {
           updatedAt: LessThan(thresholdDate),
         },
       ],
-      relations: ['user', 'store', 'store.owner', 'payments'],
+      relations: [
+        'user',
+        'store',
+        'store.owner',
+        'store.company',
+        'store.company.owner',
+        'payments',
+      ],
     });
 
     for (const order of cancelledOrders) {
@@ -307,9 +319,12 @@ export class OrderAutoCancellationCron {
         const orderCode = order.id.split('-')[0].toUpperCase();
 
         // Notificar a la tienda
-        if (order.store?.owner?.id) {
+        const storeOwnerId =
+          order.store?.owner?.id || order.store?.company?.owner?.id;
+        if (storeOwnerId) {
           await this.notificationService.create({
-            userId: order.store.owner.id,
+            userId: storeOwnerId,
+            storeId: order.store?.id,
             title: 'Disputa abierta por inactividad (72h)',
             body: `Se ha abierto una disputa para la orden #${orderCode} por falta de respuesta o procesamiento del pago tras su cancelación.`,
             type: NotificationType.GENERAL,

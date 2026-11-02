@@ -425,7 +425,7 @@ export class CompanyDashboardService {
     const { allowedStoreIds } = await this.validateUserCompany(actor, companyId);
 
     let stores = await this.storeRepository.find({
-      where: { company: { id: companyId } },
+      where: { company: { id: companyId }, isDeleted: false },
       relations: ['items', 'addresses'],
       order: { createdAt: 'DESC' },
     });
@@ -464,7 +464,7 @@ export class CompanyDashboardService {
     const { allowedStoreIds } = await this.validateUserCompany(actor, companyId);
 
     let stores = await this.storeRepository.find({
-      where: { company: { id: companyId } },
+      where: { company: { id: companyId }, isDeleted: false },
       relations: ['items', 'addresses'],
       order: { createdAt: 'DESC' },
     });
@@ -509,6 +509,8 @@ export class CompanyDashboardService {
           instagram: store.instagram,
           tiktok: store.tiktok,
           phone: store.phone,
+          deletionScheduledAt: store.deletionScheduledAt,
+          isDeleted: store.isDeleted,
         };
       }),
     );

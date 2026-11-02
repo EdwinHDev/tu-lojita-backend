@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ItemService } from './item.service';
-import { ItemController } from './item.controller';
+import { ItemController, PublicItemController } from './item.controller';
 import { Item } from './entities/item.entity';
 import { ItemPropertyTemplate } from './entities/item-property-template.entity';
 import { Store } from '../store/entities/store.entity';
@@ -18,10 +18,14 @@ import { ItemTimeSlot } from './entities/item-time-slot.entity';
 import { ItemPreorderConfig } from './entities/item-preorder-config.entity';
 import { OrderSlotBooking } from '../order/entities/order-slot-booking.entity';
 import { Order } from '../order/entities/order.entity';
+import { OrderDispute } from '../order-dispute/entities/order-dispute.entity';
+import { ItemPromotion } from './entities/item-promotion.entity';
 import { BookingService } from './booking.service';
 import { ReleaseExpiredBookingHoldsCron } from './cron/release-expired-booking-holds.cron';
+import { ExpirePromotionsCron } from './cron/expire-promotions.cron';
 import { NotificationModule } from '../notification/notification.module';
 import { CompanyModule } from '../company/company.module';
+import { PlatformSettingsModule } from '../platform-settings/platform-settings.module';
 
 @Module({
   imports: [
@@ -42,12 +46,20 @@ import { CompanyModule } from '../company/company.module';
       ItemPreorderConfig,
       OrderSlotBooking,
       Order,
+      OrderDispute,
+      ItemPromotion,
     ]),
     NotificationModule,
     CompanyModule,
+    PlatformSettingsModule,
   ],
-  controllers: [ItemController],
-  providers: [ItemService, BookingService, ReleaseExpiredBookingHoldsCron],
+  controllers: [PublicItemController, ItemController],
+  providers: [
+    ItemService,
+    BookingService,
+    ReleaseExpiredBookingHoldsCron,
+    ExpirePromotionsCron,
+  ],
   exports: [ItemService, BookingService],
 })
 export class ItemModule {}

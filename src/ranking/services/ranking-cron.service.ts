@@ -47,7 +47,7 @@ export class RankingCronService {
       'Iniciando cron diario de avisos de urgencia (20:00 VET)...',
     );
     const activeRankings = await this.storeRankingRepo.find({
-      relations: ['store', 'store.owner'],
+      relations: ['store', 'store.owner', 'store.company', 'store.company.owner'],
     });
 
     const now = new Date();
@@ -58,7 +58,8 @@ export class RankingCronService {
     const retConfig = settings.retention || DEFAULT_RANKING_SETTINGS.retention;
 
     for (const r of activeRankings) {
-      if (!r.store?.owner?.id) continue;
+      const storeOwnerId = r.store?.owner?.id || r.store?.company?.owner?.id;
+      if (!storeOwnerId) continue;
 
       // 1. Advertencia de Racha en Llamas
       if (r.consecutiveSalesDays >= (retConfig.streakL1Days ?? 3)) {
@@ -73,7 +74,7 @@ export class RankingCronService {
 
         if (!soldToday) {
           await this.notificationService.create({
-            userId: r.store.owner.id,
+            userId: storeOwnerId,
             storeId: r.storeId,
             type: NotificationType.STREAK_EXPIRING,
             title: '¡Tu Racha en Llamas está por apagarse! 🔥',
@@ -86,7 +87,7 @@ export class RankingCronService {
       // 2. Advertencia de Zona de Peligro
       if (r.inDangerZone && r.dangerZoneExpiresAt) {
         await this.notificationService.create({
-          userId: r.store.owner.id,
+          userId: storeOwnerId,
           storeId: r.storeId,
           type: NotificationType.DANGER_ZONE_ALERT,
           title: '¡Peligro de Descenso Inminente! 🚨',
@@ -104,7 +105,7 @@ export class RankingCronService {
       'Iniciando cron diario de medianoche para gamificación (00:05 VET)...',
     );
     const rankings = await this.storeRankingRepo.find({
-      relations: ['store', 'store.owner'],
+      relations: ['store', 'store.owner', 'store.company', 'store.company.owner'],
     });
 
     const now = new Date();
@@ -157,9 +158,11 @@ export class RankingCronService {
             r.dangerZoneExpiresAt = undefined;
             changed = true;
 
-            if (r.store?.owner?.id) {
+            const storeOwnerId =
+              r.store?.owner?.id || r.store?.company?.owner?.id;
+            if (storeOwnerId) {
               await this.notificationService.create({
-                userId: r.store.owner.id,
+                userId: storeOwnerId,
                 storeId: r.storeId,
                 type: NotificationType.DIVISION_DOWN,
                 title: 'Descenso de Rango Confirmado ⚠️',
@@ -287,11 +290,12 @@ export class RankingCronService {
 
     const activeStores = await this.storeRepo.find({
       where: { status: StoreStatus.ACTIVE },
-      relations: ['owner'],
+      relations: ['owner', 'company', 'company.owner'],
     });
 
     for (const store of activeStores) {
-      if (!store.owner?.id) continue;
+      const storeOwnerId = store.owner?.id || store.company?.owner?.id;
+      if (!storeOwnerId) continue;
 
       try {
         const events = await this.rankingEventRepo.find({
@@ -311,7 +315,7 @@ export class RankingCronService {
         const normDiv = normalizeDivision(ranking.division);
 
         await this.notificationService.create({
-          userId: store.owner.id,
+          userId: storeOwnerId,
           storeId: store.id,
           type: NotificationType.WEEKLY_RANKING_SUMMARY,
           title: 'Resumen Semanal de Rendimiento 📊',

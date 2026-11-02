@@ -15,10 +15,15 @@ import { StoreCategory } from 'src/store-category/entities/store-category.entity
 import { StoreCustomerBlock } from './entities/store-customer-block.entity';
 import { MediationRequest } from './entities/mediation-request.entity';
 import { StoreStrike } from './entities/store-strike.entity';
+import { FinancialOtp } from 'src/financial-auth/entities/financial-otp.entity';
+import { CompanyActivityLog } from 'src/company/entities/company-activity-log.entity';
+import { Installment } from 'src/order/entities/installment.entity';
+import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
 import { NotificationModule } from 'src/notification/notification.module';
 import { MailModule } from 'src/common/mail/mail.module';
 import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.module';
 import { RankingModule } from 'src/ranking/ranking.module';
+import { StoreAutoDeletionCron } from './cron/store-auto-deletion.cron';
 
 @Module({
   imports: [
@@ -39,10 +44,14 @@ import { RankingModule } from 'src/ranking/ranking.module';
       StoreCustomerBlock,
       MediationRequest,
       StoreStrike,
+      FinancialOtp,
+      CompanyActivityLog,
+      Installment,
+      OrderDispute,
     ]),
   ],
   controllers: [StoreController],
-  providers: [StoreService],
+  providers: [StoreService, StoreAutoDeletionCron],
   exports: [StoreService, TypeOrmModule],
 })
 export class StoreModule {}

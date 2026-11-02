@@ -63,7 +63,15 @@ export class OrderDisputeService {
   async create(dto: CreateDisputeDto, requestingUser: User) {
     const order = await this.orderRepository.findOne({
       where: { id: dto.orderId },
-      relations: ['user', 'store', 'store.owner', 'orderItems', 'payments'],
+      relations: [
+        'user',
+        'store',
+        'store.owner',
+        'store.company',
+        'store.company.owner',
+        'orderItems',
+        'payments',
+      ],
     });
 
     if (!order) {
@@ -92,7 +100,9 @@ export class OrderDisputeService {
 
     // Validar autorización: comprador, comercio o admin
     const isBuyer = order.user?.id === requestingUser.id;
-    const isStoreOwner = order.store?.owner?.id === requestingUser.id;
+    const isStoreOwner =
+      order.store?.owner?.id === requestingUser.id ||
+      order.store?.company?.owner?.id === requestingUser.id;
     const isAdmin = requestingUser.role === UserRole.ADMIN;
 
     if (!isBuyer && !isStoreOwner && !isAdmin) {
@@ -181,7 +191,8 @@ export class OrderDisputeService {
         order,
       );
     } else {
-      const storeOwnerId = order.store?.owner?.id;
+      const storeOwner = order.store?.owner || order.store?.company?.owner;
+      const storeOwnerId = storeOwner?.id;
       if (storeOwnerId) {
         try {
           const firstItem = order.orderItems?.[0]?.title;
@@ -193,6 +204,7 @@ export class OrderDisputeService {
             body: `Un cliente ha reportado un problema con el pedido${itemInfo}: "${finalDescription.substring(0, 80)}${finalDescription.length > 80 ? '...' : ''}".`,
             type: NotificationType.MEDIATION_REQUEST,
             targetId: order.id,
+            orderId: order.id,
           });
         } catch (err) {
           this.logger.error(
@@ -201,10 +213,10 @@ export class OrderDisputeService {
         }
 
         // Enviar correo transaccional de alerta al dueño del comercio
-        const storeOwnerEmail = order.store?.owner?.email;
+        const storeOwnerEmail = storeOwner?.email;
         if (storeOwnerEmail) {
-          const storeOwnerName = order.store?.owner?.firstName
-            ? `${order.store.owner.firstName} ${order.store.owner.lastName || ''}`.trim()
+          const storeOwnerName = storeOwner?.firstName
+            ? `${storeOwner.firstName} ${storeOwner.lastName || ''}`.trim()
             : order.store?.name || 'Comercio';
 
           this.mailService
@@ -231,7 +243,8 @@ export class OrderDisputeService {
     this.notificationService.notifyDisputeUpdated(savedDispute, {
       storeId: order.store?.id,
       userId: requestingUser.id,
-      storeOwnerId: order.store?.owner?.id,
+      storeOwnerId:
+        order.store?.owner?.id || order.store?.company?.owner?.id,
     });
 
     return savedDispute;
@@ -401,6 +414,8 @@ export class OrderDisputeService {
         'order',
         'order.store',
         'order.store.owner',
+        'order.store.company',
+        'order.store.company.owner',
         'order.user',
         'requestedBy',
       ],
@@ -410,7 +425,9 @@ export class OrderDisputeService {
       throw new NotFoundException(`Disputa #${id} no encontrada.`);
     }
 
-    const isStoreOwner = dispute.order?.store?.owner?.id === requestingUser.id;
+    const isStoreOwner =
+      dispute.order?.store?.owner?.id === requestingUser.id ||
+      dispute.order?.store?.company?.owner?.id === requestingUser.id;
     const isAdmin = requestingUser.role === UserRole.ADMIN;
 
     if (!isStoreOwner && !isAdmin) {
@@ -980,6 +997,7 @@ export class OrderDisputeService {
           body: `Orden #${shortOrderId}: ${dispute.adminNote.substring(0, 90)}...`,
           type: NotificationType.MEDIATION_RESPONSE,
           targetId: dispute.orderId,
+          orderId: dispute.orderId,
         })
         .catch(() => {});
 

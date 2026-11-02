@@ -195,12 +195,13 @@ export class AchievementService {
     try {
       const store = await this.storeRepo.findOne({
         where: { id: storeId },
-        relations: ['owner'],
+        relations: ['owner', 'company', 'company.owner'],
       });
 
-      if (store?.owner?.id) {
+      const storeOwnerId = store?.owner?.id || store?.company?.owner?.id;
+      if (store && storeOwnerId) {
         await this.notificationService.create({
-          userId: store.owner.id,
+          userId: storeOwnerId,
           storeId: store.id,
           type: NotificationType.ACHIEVEMENT_UNLOCKED,
           title: '¡Logro Desbloqueado! 🏆',

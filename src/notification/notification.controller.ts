@@ -41,13 +41,12 @@ export class NotificationController {
     return this.notificationService.registerDevice(req.user.id, dto);
   }
 
-  @Auth()
   @Post('unregister-device')
   unregisterDevice(
-    @Req() req: { user: { id: string } },
+    @Req() req: { user?: { id?: string } },
     @Body() dto: UnregisterDeviceDto,
   ) {
-    return this.notificationService.unregisterDevice(req.user.id, dto);
+    return this.notificationService.unregisterDevice(req.user?.id, dto);
   }
 
   @Auth()

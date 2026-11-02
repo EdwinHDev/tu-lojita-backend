@@ -1255,7 +1255,9 @@ export class OrderService {
 
       // Notificar al dueño de la tienda para que esté al tanto
       try {
-        if (order.store?.owner?.id) {
+        const storeOwnerId =
+          order.store?.owner?.id || order.store?.company?.owner?.id;
+        if (storeOwnerId) {
           const hasPendingPayments = order.payments?.some(
             (p) =>
               p.status === PaymentStatus.WAITING_VERIFICATION ||
@@ -1267,7 +1269,7 @@ export class OrderService {
             : `El cliente ha cancelado la orden #${order.id.split('-')[0].toUpperCase()}. No requiere reembolso. Motivo: ${order.rejectionReason}`;
 
           await this.notificationService.create({
-            userId: order.store.owner.id,
+            userId: storeOwnerId,
             storeId: order.store.id,
             title: 'Orden cancelada por el cliente',
             body: bodyMsg,
@@ -1297,6 +1299,8 @@ export class OrderService {
         'user',
         'store',
         'store.owner',
+        'store.company',
+        'store.company.owner',
         'orderItems',
         'orderItems.item',
         'payments',
@@ -1448,9 +1452,11 @@ export class OrderService {
 
       // Notificar a la tienda
       try {
-        if (order.store?.owner?.id) {
+        const storeOwnerId =
+          order.store?.owner?.id || order.store?.company?.owner?.id;
+        if (storeOwnerId) {
           await this.notificationService.create({
-            userId: order.store.owner.id,
+            userId: storeOwnerId,
             storeId: order.store.id,
             title: 'Orden cerrada de común acuerdo',
             body: `El cliente ha aceptado que el pago de la orden #${order.id.split('-')[0].toUpperCase()} no llegó. La orden ha sido cerrada sin reclamos.`,
@@ -1708,9 +1714,11 @@ export class OrderService {
                 targetId: order.id,
               });
             }
-            if (order.store?.owner?.id) {
+            const storeOwnerId =
+              order.store?.owner?.id || order.store?.company?.owner?.id;
+            if (storeOwnerId) {
               await this.notificationService.create({
-                userId: order.store.owner.id,
+                userId: storeOwnerId,
                 storeId: order.store.id,
                 title: '👤 Califica a tu comprador',
                 body: 'Una orden fue completada. Puedes calificar al cliente.',
@@ -1802,7 +1810,14 @@ export class OrderService {
     const installmentRepo = this.dataSource.getRepository(Installment);
     const installment = await installmentRepo.findOne({
       where: { id: installmentId },
-      relations: ['order', 'order.user', 'order.store', 'order.store.owner'],
+      relations: [
+        'order',
+        'order.user',
+        'order.store',
+        'order.store.owner',
+        'order.store.company',
+        'order.store.company.owner',
+      ],
     });
 
     if (!installment) {
@@ -1840,7 +1855,7 @@ export class OrderService {
 
     // Notificar al dueño de la tienda
     try {
-      const ownerId = store.owner?.id;
+      const ownerId = store.owner?.id || store.company?.owner?.id;
       if (ownerId) {
         const clientName =
           `${installment.order.user.firstName} ${installment.order.user.lastName}`.trim();
@@ -1870,7 +1885,14 @@ export class OrderService {
     const installmentRepo = this.dataSource.getRepository(Installment);
     const installment = await installmentRepo.findOne({
       where: { id: installmentId },
-      relations: ['order', 'order.user', 'order.store', 'order.store.owner'],
+      relations: [
+        'order',
+        'order.user',
+        'order.store',
+        'order.store.owner',
+        'order.store.company',
+        'order.store.company.owner',
+      ],
     });
 
     if (!installment) {
@@ -1878,7 +1900,8 @@ export class OrderService {
     }
 
     const store = installment.order.store;
-    if (!store.owner || store.owner.id !== storeOwnerId) {
+    const resolvedOwnerId = store.owner?.id || store.company?.owner?.id;
+    if (!resolvedOwnerId || resolvedOwnerId !== storeOwnerId) {
       throw new ForbiddenException(
         'No tienes permiso para resolver prórrogas de esta tienda',
       );
@@ -1999,11 +2022,11 @@ export class OrderService {
         ],
       });
 
-      if (!item) {
+      if (!item || item.isDeleted || !item.isActive) {
         errors.push({
           itemId: itemDto.itemId,
           code: 'ITEM_NOT_FOUND',
-          message: 'El artículo ya no existe en el catálogo.',
+          message: 'El artículo ya no existe o no está disponible en el catálogo.',
         });
         continue;
       }

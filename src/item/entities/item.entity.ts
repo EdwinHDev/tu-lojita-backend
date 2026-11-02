@@ -149,6 +149,12 @@ export class Item extends TimestampEntity {
   isActive: boolean;
 
   @Column('boolean', { default: false })
+  isDeleted: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  deletedAt?: Date | null;
+
+  @Column('boolean', { default: false })
   isAgeRestricted: boolean;
 
   @Column('numeric', {

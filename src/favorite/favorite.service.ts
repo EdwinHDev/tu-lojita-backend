@@ -100,6 +100,7 @@ export class FavoriteService {
       .leftJoinAndSelect('item.category', 'category')
       .leftJoinAndSelect('item.variants', 'variants')
       .where('fav.userId = :userId', { userId })
+      .andWhere('item.isActive = true AND item.isDeleted = false')
       .orderBy('fav.createdAt', 'DESC')
       .getMany();
 

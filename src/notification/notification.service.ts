@@ -717,7 +717,7 @@ export class NotificationService {
     }
 
     const messages = await this.chatMessageRepository.find({
-      where: { order: { id: orderId } },
+      where: { order: { id: orderId }, channelType: ChatChannelType.DIRECT },
       relations: ['sender'],
       order: { createdAt: 'ASC' },
     });
@@ -1008,13 +1008,14 @@ export class NotificationService {
     }
   }
 
-  async unregisterDevice(userId: string, dto: UnregisterDeviceDto) {
+  async unregisterDevice(userId: string | undefined, dto: UnregisterDeviceDto) {
     try {
-      await this.userDeviceRepository.delete({
-        userId,
-        deviceId: dto.deviceId,
-      });
-      this.logger.log(`Unregistered device ${dto.deviceId} for actor ${userId}`);
+      const deleteCriteria: any = { deviceId: dto.deviceId };
+      if (userId) {
+        deleteCriteria.userId = userId;
+      }
+      await this.userDeviceRepository.delete(deleteCriteria);
+      this.logger.log(`Unregistered device ${dto.deviceId}${userId ? ` for actor ${userId}` : ''}`);
       return { success: true };
     } catch (error) {
       this.logger.error(`Failed to unregister device: ${error.message}`);
@@ -1061,15 +1062,18 @@ export class NotificationService {
         },
         data: {
           notificationId: payload.notificationId,
+          title: payload.title || '',
+          body: payload.body || '',
           type: payload.type,
           channelType: payload.channelType || '',
           storeId: payload.storeId || '',
           orderId: payload.orderId || '',
           targetId: payload.targetId || payload.orderId || '',
           mediationId:
-            payload.type === NotificationType.MEDIATION_REQUEST &&
+            (payload.type === NotificationType.MEDIATION_REQUEST ||
+              payload.type === NotificationType.MEDIATION_RESPONSE) &&
             !payload.orderId
-              ? payload.targetId || ''
+              ? payload.targetId || payload.storeId || ''
               : '',
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
@@ -1136,6 +1140,7 @@ export class NotificationService {
       const targetId = data.targetId || data.orderId;
 
       // Resolver storeId y verificar si el destinatario (data.userId) es el comercio (dueño de tienda/empresa)
+      let resolvedUserId = data.userId;
       let candidateStoreId = data.storeId;
       let isMerchantStoreNotification = false;
 
@@ -1148,7 +1153,10 @@ export class NotificationService {
           .catch(() => null);
         if (store) {
           const ownerId = store.owner?.id || store.company?.owner?.id;
-          if (ownerId && ownerId === data.userId) {
+          if (!resolvedUserId && ownerId) {
+            resolvedUserId = ownerId;
+          }
+          if (ownerId && ownerId === resolvedUserId) {
             isMerchantStoreNotification = true;
           }
         }
@@ -1162,12 +1170,17 @@ export class NotificationService {
         if (order?.store?.id) {
           const ownerId =
             order.store.owner?.id || order.store.company?.owner?.id;
-          if (ownerId && ownerId === data.userId) {
+          if (!resolvedUserId && ownerId) {
+            resolvedUserId = ownerId;
+          }
+          if (ownerId && ownerId === resolvedUserId) {
             candidateStoreId = order.store.id;
             isMerchantStoreNotification = true;
           }
         }
       }
+
+      if (!resolvedUserId) return;
 
       const persistedStoreId = isMerchantStoreNotification
         ? candidateStoreId
@@ -1175,12 +1188,16 @@ export class NotificationService {
 
       // Si tiene targetId, intentamos buscar una existente para actualizarla (evitar duplicados de chat o pedidos)
       if (targetId) {
+        const existingWhere: any = {
+          userId: resolvedUserId,
+          type: data.type,
+          targetId,
+        };
+        if (data.channelType) {
+          existingWhere.channelType = data.channelType;
+        }
         const existing = await this.notificationRepository.findOne({
-          where: {
-            userId: data.userId,
-            type: data.type,
-            targetId,
-          },
+          where: existingWhere,
         });
 
         if (existing) {
@@ -1197,7 +1214,7 @@ export class NotificationService {
           }
         } else {
           notification = this.notificationRepository.create({
-            userId: data.userId,
+            userId: resolvedUserId,
             title: data.title,
             body: data.body,
             type: data.type,
@@ -1209,6 +1226,7 @@ export class NotificationService {
       } else {
         notification = this.notificationRepository.create({
           ...data,
+          userId: resolvedUserId,
           storeId: persistedStoreId,
           channelType: data.channelType,
         });
@@ -1233,7 +1251,7 @@ export class NotificationService {
 
       // 1. Emitir por WebSocket al destinatario principal y a cada colaborador autorizado
       this.notificationGateway.sendToUser(
-        data.userId,
+        resolvedUserId,
         'new_notification',
         savedNotification,
       );
@@ -1246,34 +1264,33 @@ export class NotificationService {
       }
 
       // 2. Enviar Push FCM tanto al destinatario principal como a los colaboradores autorizados
+      const hasExplicitOrder = Boolean(data.orderId);
       const isStoreMediation =
+        !hasExplicitOrder &&
         (data.type === NotificationType.MEDIATION_RESPONSE ||
-          data.type === NotificationType.MEDIATION_REQUEST) &&
-        (Boolean(persistedStoreId) ||
-          data.title?.toLowerCase().includes('mediaci') ||
-          data.body?.toLowerCase().includes('mediaci'));
+          data.type === NotificationType.MEDIATION_REQUEST);
 
       const isOrderRelated =
-        !isStoreMediation &&
-        (data.type === NotificationType.ORDER_CREATED ||
-          data.type === NotificationType.ORDER_APPROVED ||
-          data.type === NotificationType.ORDER_REJECTED ||
-          data.type === NotificationType.PAYMENT_REPORTED ||
-          data.type === NotificationType.PAYMENT_APPROVED ||
-          data.type === NotificationType.PAYMENT_REJECTED ||
-          data.type === NotificationType.REFUND_REPORTED ||
-          data.type === NotificationType.REFUND_CONFIRMED ||
-          data.type === NotificationType.CHAT_MESSAGE ||
-          data.type === NotificationType.MEDIATION_RESPONSE ||
-          data.type === NotificationType.ORDER_REVIEW_PROMPT ||
-          data.type === NotificationType.BUYER_REVIEW_PROMPT ||
-          data.type === NotificationType.ORDER_REVIEW_RECEIVED ||
-          data.type === NotificationType.ORDER_REVIEW_REPLIED ||
-          data.type === NotificationType.BUYER_REVIEW_RECEIVED ||
-          Boolean(data.orderId));
+        hasExplicitOrder ||
+        (!isStoreMediation &&
+          (data.type === NotificationType.ORDER_CREATED ||
+            data.type === NotificationType.ORDER_APPROVED ||
+            data.type === NotificationType.ORDER_REJECTED ||
+            data.type === NotificationType.PAYMENT_REPORTED ||
+            data.type === NotificationType.PAYMENT_APPROVED ||
+            data.type === NotificationType.PAYMENT_REJECTED ||
+            data.type === NotificationType.REFUND_REPORTED ||
+            data.type === NotificationType.REFUND_CONFIRMED ||
+            data.type === NotificationType.CHAT_MESSAGE ||
+            data.type === NotificationType.DISPUTE_ESCALATED ||
+            data.type === NotificationType.ORDER_REVIEW_PROMPT ||
+            data.type === NotificationType.BUYER_REVIEW_PROMPT ||
+            data.type === NotificationType.ORDER_REVIEW_RECEIVED ||
+            data.type === NotificationType.ORDER_REVIEW_REPLIED ||
+            data.type === NotificationType.BUYER_REVIEW_RECEIVED));
 
       await this.sendPushNotificationToUsers(
-        [data.userId, ...authorizedCollaboratorIds],
+        [resolvedUserId, ...authorizedCollaboratorIds],
         {
           notificationId: savedNotification.id,
           title: data.title,
@@ -1282,14 +1299,16 @@ export class NotificationService {
           channelType: data.channelType,
           orderId:
             data.orderId ||
-            (isOrderRelated && data.type !== NotificationType.MEDIATION_REQUEST
+            (isOrderRelated &&
+            data.type !== NotificationType.MEDIATION_REQUEST &&
+            data.type !== NotificationType.MEDIATION_RESPONSE
               ? targetId
               : ''),
           targetId: targetId || '',
           storeId:
             persistedStoreId ||
             data.storeId ||
-            (isStoreMediation ? targetId : ''),
+            (isStoreMediation && targetId ? targetId : ''),
         },
       );
 
@@ -1374,12 +1393,12 @@ export class NotificationService {
             type: NotificationType.DISPUTE_ESCALATED,
           },
         ],
-        select: ['targetId'],
+        select: ['targetId', 'storeId'],
       });
 
       const orderIds = new Set<string>();
       for (const n of notifications) {
-        if (n.targetId) {
+        if (n.targetId && (!n.storeId || n.targetId !== n.storeId)) {
           orderIds.add(n.targetId);
         }
       }
@@ -1408,12 +1427,12 @@ export class NotificationService {
           type: NotificationType.DISPUTE_ESCALATED,
         },
       ],
-      select: ['targetId'],
+      select: ['targetId', 'storeId'],
     });
 
     const orderIds = new Set<string>();
     for (const n of notifications) {
-      if (n.targetId) {
+      if (n.targetId && (!n.storeId || n.targetId !== n.storeId)) {
         orderIds.add(n.targetId);
       }
     }
@@ -1577,7 +1596,7 @@ export class NotificationService {
             ? content.substring(0, 97) + '...'
             : content;
 
-        await this.create({
+        const savedChatNotification = await this.create({
           userId: recipientId,
           storeId: isToBusiness ? order.store?.id : undefined,
           title,
@@ -1589,7 +1608,10 @@ export class NotificationService {
         });
 
         const chatNotifPayload = {
+          notificationId: savedChatNotification?.id || '',
           orderId,
+          storeId: isToBusiness ? order.store?.id : undefined,
+          channelType,
           senderName: isToBusiness ? senderName : order.store.name,
           content:
             content.substring(0, 50) + (content.length > 50 ? '...' : ''),
@@ -1672,7 +1694,7 @@ export class NotificationService {
             : order.store?.owner?.id || order.store?.company?.owner?.id;
 
         if (recipientId) {
-          await this.create({
+          const savedSupportNotification = await this.create({
             userId: recipientId,
             storeId: isToMerchantSupport ? order.store?.id : undefined,
             title: 'Soporte Tu Lojita',
@@ -1684,7 +1706,9 @@ export class NotificationService {
           });
 
           const supportChatPayload = {
+            notificationId: savedSupportNotification?.id || '',
             orderId,
+            storeId: isToMerchantSupport ? order.store?.id : undefined,
             channelType,
             senderName: 'Soporte Tu Lojita',
             content:

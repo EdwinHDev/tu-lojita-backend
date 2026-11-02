@@ -72,6 +72,8 @@ export class ReviewService {
         'user',
         'store',
         'store.owner',
+        'store.company',
+        'store.company.owner',
         'orderItems',
         'orderItems.item',
       ],
@@ -114,9 +116,11 @@ export class ReviewService {
     });
 
     // Notificar al vendedor
-    if (order.store?.owner?.id) {
+    const storeOwnerId =
+      order.store?.owner?.id || order.store?.company?.owner?.id;
+    if (storeOwnerId) {
       await this.notificationService.create({
-        userId: order.store.owner.id,
+        userId: storeOwnerId,
         storeId: order.store.id,
         title: '⭐ Nueva reseña recibida',
         body: `Un cliente calificó su orden con ${dto.rating} estrellas.`,

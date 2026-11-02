@@ -23,6 +23,8 @@ import { RequestForgotPasswordOtpDto } from './dto/request-forgot-password-otp.d
 import { VerifyForgotPasswordOtpDto } from './dto/verify-forgot-password-otp.dto';
 import { ResendForgotPasswordOtpDto } from './dto/resend-forgot-password-otp.dto';
 import { ResetForgotPasswordDto } from './dto/reset-forgot-password.dto';
+import { RequestAccountDeletionDto } from './dto/request-account-deletion.dto';
+import { ConfirmAccountDeletionDto } from './dto/confirm-account-deletion.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
@@ -84,9 +86,9 @@ export class AuthController {
   @UseGuards(AuthGuard('jwt-refresh')) // <-- Usa la estrategia de refresh
   @Get('refresh')
   renewTokens(@Req() req: Request) {
-    // Gracias al AuthGuard, NestJS ya validó el token y nos dejó el usuario en req.user
-    const user = req.user as User;
-    return this.authService.renewTokens(user.id);
+    // Gracias al AuthGuard, NestJS ya validó el token y nos dejó el actor en req.user
+    const actor = req.user as any;
+    return this.authService.renewTokens(actor);
   }
 
   @Post('register/request-otp')
@@ -146,5 +148,26 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(userId, dto);
+  }
+
+  @Auth()
+  @Post('request-account-deletion')
+  requestAccountDeletion(
+    @GetUser() user: User,
+    @Body() dto: RequestAccountDeletionDto,
+  ) {
+    return this.authService.requestAccountDeletion(user, dto);
+  }
+
+  @Auth()
+  @Post('confirm-account-deletion')
+  confirmAccountDeletion(
+    @GetUser() user: User,
+    @Body() dto: ConfirmAccountDeletionDto,
+    @Req() req: Request,
+  ) {
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string);
+    const userAgent = req.headers['user-agent'] as string;
+    return this.authService.confirmAccountDeletion(user, dto, ip, userAgent);
   }
 }

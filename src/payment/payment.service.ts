@@ -1836,7 +1836,15 @@ export class PaymentService {
   async confirmRefund(paymentId: string, user: User) {
     const payment = await this.paymentRepository.findOne({
       where: { id: paymentId },
-      relations: ['order', 'order.payments', 'store', 'store.owner', 'user'],
+      relations: [
+        'order',
+        'order.payments',
+        'store',
+        'store.owner',
+        'store.company',
+        'store.company.owner',
+        'user',
+      ],
     });
 
     if (!payment) {
@@ -1863,10 +1871,12 @@ export class PaymentService {
     const saved = await this.paymentRepository.save(payment);
 
     // Notificar al comercio
-    if (payment.store?.owner) {
+    const storeOwnerId =
+      payment.store?.owner?.id || payment.store?.company?.owner?.id;
+    if (storeOwnerId) {
       try {
         await this.notificationService.create({
-          userId: payment.store.owner.id,
+          userId: storeOwnerId,
           storeId: payment.store.id,
           title: 'Reembolso confirmado',
           body: `El cliente confirmó la recepción del reembolso por $${payment.amount} para la orden #${payment.order.id.split('-')[0].toUpperCase()}.`,

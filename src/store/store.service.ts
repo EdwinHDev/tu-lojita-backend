@@ -9,7 +9,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, In, MoreThan } from 'typeorm';
+import * as bcrypt from 'bcrypt';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { Store } from './entities/store.entity';
@@ -26,6 +27,15 @@ import { Item } from 'src/item/entities/item.entity';
 import { StoreCategory } from 'src/store-category/entities/store-category.entity';
 import { OrderStatus } from 'src/order/types';
 import { StoreDashboardDto } from './dto/store-dashboard.dto';
+import { FinancialOtp } from 'src/financial-auth/entities/financial-otp.entity';
+import {
+  CompanyActivityLog,
+  ActivityLogModule,
+} from 'src/company/entities/company-activity-log.entity';
+import { Installment } from 'src/order/entities/installment.entity';
+import { InstallmentStatus } from 'src/order/types';
+import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
+import { DisputeStatus } from 'src/order-dispute/types/dispute.enum';
 import {
   getStartOfTodayInTimezone,
   formatTimeInTimezone,
@@ -72,6 +82,14 @@ export class StoreService {
     private readonly storeCustomerBlockRepository: Repository<StoreCustomerBlock>,
     @InjectRepository(MediationRequest)
     private readonly mediationRequestRepository: Repository<MediationRequest>,
+    @InjectRepository(FinancialOtp)
+    private readonly otpRepository: Repository<FinancialOtp>,
+    @InjectRepository(CompanyActivityLog)
+    private readonly activityLogRepository: Repository<CompanyActivityLog>,
+    @InjectRepository(Installment)
+    private readonly installmentRepository: Repository<Installment>,
+    @InjectRepository(OrderDispute)
+    private readonly disputeRepository: Repository<OrderDispute>,
     private readonly notificationService: NotificationService,
     private readonly mailService: MailService,
     private readonly dataSource: DataSource,
@@ -350,7 +368,7 @@ export class StoreService {
       ],
     });
 
-    if (!store) {
+    if (!store || store.isDeleted) {
       throw new NotFoundException(`Tienda con ID ${id} no encontrada`);
     }
 
@@ -601,9 +619,433 @@ export class StoreService {
   }
 
   async remove(id: string) {
-    const store = await this.findOne(id);
-    await this.storeRepository.remove(store);
-    return { deleted: true };
+    return this.executeSoftDeleteStore(id);
+  }
+
+  /**
+   * Valida que el usuario sea el Propietario de la Empresa o un Colaborador con rol administrativo / permiso de sucursales.
+   */
+  async assertBranchAdminAccess(storeId: string, user: User): Promise<Store> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      relations: ['company', 'company.owner', 'owner'],
+    });
+
+    if (!store) {
+      throw new NotFoundException(`Sucursal no encontrada`);
+    }
+
+    if (store.isDeleted) {
+      throw new BadRequestException('Esta sucursal ha sido eliminada previamente');
+    }
+
+    // 1. Super Administradores de la plataforma
+    if (user.role === UserRole.ADMIN) {
+      return store;
+    }
+
+    // 2. Propietario directo de la tienda o propietario de la empresa
+    const isStoreOwner = store.owner?.id === user.id;
+    const isCompanyOwner = store.company?.owner?.id === user.id;
+
+    // 3. Colaborador con rol administrativo o permiso de gestión de sucursales
+    const actor = user as any;
+    const isCollaboratorAdmin =
+      actor.isCollaborator &&
+      (actor.collaboratorRole?.toLowerCase() === 'administrador' ||
+        (actor.permissions || []).includes('branches:manage'));
+
+    if (isStoreOwner || isCompanyOwner || isCollaboratorAdmin) {
+      return store;
+    }
+
+    throw new ForbiddenException(
+      'Solo el propietario de la empresa o un colaborador con rol administrativo puede gestionar el ciclo de vida de esta sucursal.',
+    );
+  }
+
+  /**
+   * Realiza validaciones pre-vuelo (candados): órdenes en curso, disputas abiertas, cuotas pendientes.
+   */
+  async validateLifecyclePreflight(storeId: string, user: User) {
+    const store = await this.assertBranchAdminAccess(storeId, user);
+    const blockers: string[] = [];
+
+    // 1. Órdenes activas (PENDING, PARTIALLY_PAID)
+    const activeOrdersCount = await this.orderRepository.count({
+      where: {
+        store: { id: storeId },
+        status: In([OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID]),
+      },
+    });
+
+    if (activeOrdersCount > 0) {
+      blockers.push(
+        `Tiene ${activeOrdersCount} orden(es) activa(s) en proceso o pendientes de pago/entrega. Debe completarlas o cancelarlas primero.`,
+      );
+    }
+
+    // 2. Reclamos o disputas abiertas
+    const openDisputesCount = await this.disputeRepository
+      .createQueryBuilder('dispute')
+      .innerJoin('dispute.order', 'order')
+      .where('order.storeId = :storeId', { storeId })
+      .andWhere('dispute.status IN (:...statuses)', {
+        statuses: [
+          DisputeStatus.OPEN,
+          DisputeStatus.ADMIN_REVIEW,
+          DisputeStatus.MERCHANT_RESPONDED,
+        ],
+      })
+      .getCount();
+
+    if (openDisputesCount > 0) {
+      blockers.push(
+        `Tiene ${openDisputesCount} reclamo(s) o mediación(es) abierta(s). Debe resolverlos antes de continuar.`,
+      );
+    }
+
+    // 3. Cuotas activas pendientes de pago
+    const pendingInstallmentsCount = await this.installmentRepository
+      .createQueryBuilder('installment')
+      .innerJoin('installment.order', 'order')
+      .where('order.storeId = :storeId', { storeId })
+      .andWhere('installment.status IN (:...statuses)', {
+        statuses: [InstallmentStatus.PENDING, InstallmentStatus.OVERDUE],
+      })
+      .getCount();
+
+    if (pendingInstallmentsCount > 0) {
+      blockers.push(
+        `Tiene ${pendingInstallmentsCount} cuota(s) pendiente(s) por cobrar asociadas a clientes en esta sede.`,
+      );
+    }
+
+    // 4. Conteo de sucursales activas en la empresa
+    let totalCompanyBranches = 1;
+    let isLastBranch = false;
+    if (store.company?.id) {
+      totalCompanyBranches = await this.storeRepository.count({
+        where: {
+          company: { id: store.company.id },
+          isDeleted: false,
+          status: StoreStatus.ACTIVE,
+        },
+      });
+      if (totalCompanyBranches <= 1 && store.status === StoreStatus.ACTIVE) {
+        isLastBranch = true;
+      }
+    }
+
+    return {
+      canProceed: blockers.length === 0,
+      blockers,
+      details: {
+        activeOrdersCount,
+        openDisputesCount,
+        pendingInstallmentsCount,
+        isLastBranch,
+        totalCompanyBranches,
+        currentStatus: store.status,
+        deletionScheduledAt: store.deletionScheduledAt,
+      },
+    };
+  }
+
+  /**
+   * Genera y envía código OTP para pausar o programar la eliminación de la sucursal.
+   */
+  async requestLifecycleOtp(
+    storeId: string,
+    actionType: 'DEACTIVATE' | 'SCHEDULE_DELETION',
+    user: User,
+  ) {
+    const preflight = await this.validateLifecyclePreflight(storeId, user);
+    if (!preflight.canProceed) {
+      throw new ConflictException({
+        message: 'No es posible proceder debido a dependencias activas.',
+        blockers: preflight.blockers,
+      });
+    }
+
+    const store = await this.assertBranchAdminAccess(storeId, user);
+
+    const targetEmail =
+      store.company?.owner?.email || store.owner?.email || user.email;
+    const adminName =
+      `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+      'Administrador';
+
+    // Invalidar OTPs previos
+    await this.otpRepository.update(
+      { email: targetEmail, isUsed: false },
+      { isUsed: true },
+    );
+
+    // Generar OTP de 6 dígitos
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeHash = bcrypt.hashSync(code, 10);
+
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+
+    const otpRecord = this.otpRepository.create({
+      email: targetEmail,
+      codeHash,
+      expiresAt,
+      isUsed: false,
+    });
+    await this.otpRepository.save(otpRecord);
+
+    await this.mailService.sendBranchLifecycleOtpEmail(
+      targetEmail,
+      adminName,
+      store.branchName || store.name,
+      actionType,
+      code,
+    );
+
+    return {
+      success: true,
+      message: `Código de verificación enviado al correo ${targetEmail}`,
+      email: targetEmail,
+      expiresAt,
+    };
+  }
+
+  /**
+   * Valida el código OTP recibido.
+   */
+  private async validateOtpCode(
+    email: string,
+    otpCode: string,
+  ): Promise<FinancialOtp> {
+    if (!otpCode || otpCode.trim().length !== 6) {
+      throw new BadRequestException(
+        'Se requiere un código de verificación de 6 dígitos',
+      );
+    }
+
+    const activeOtp = await this.otpRepository.findOne({
+      where: {
+        email,
+        isUsed: false,
+        expiresAt: MoreThan(new Date()),
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!activeOtp) {
+      throw new BadRequestException('El código OTP ha expirado o no es válido');
+    }
+
+    const isValid = bcrypt.compareSync(otpCode.trim(), activeOtp.codeHash);
+    if (!isValid) {
+      throw new BadRequestException('Código OTP incorrecto');
+    }
+
+    activeOtp.isUsed = true;
+    await this.otpRepository.save(activeOtp);
+    return activeOtp;
+  }
+
+  /**
+   * Desactiva temporalmente la sucursal previa confirmación de OTP.
+   */
+  async executeDeactivateBranch(storeId: string, otpCode: string, user: User) {
+    const preflight = await this.validateLifecyclePreflight(storeId, user);
+    if (!preflight.canProceed) {
+      throw new ConflictException({
+        message: 'No es posible desactivar la sucursal.',
+        blockers: preflight.blockers,
+      });
+    }
+
+    const store = await this.assertBranchAdminAccess(storeId, user);
+    const targetEmail =
+      store.company?.owner?.email || store.owner?.email || user.email;
+
+    await this.validateOtpCode(targetEmail, otpCode);
+
+    store.status = StoreStatus.INACTIVE;
+    const updated = await this.storeRepository.save(store);
+
+    await this.logStoreActivity(
+      store,
+      user,
+      'BRANCH_DEACTIVATED',
+      `Se desactivó la sucursal "${store.name} - ${store.branchName || 'Principal'}"`,
+      { storeId: store.id, previousStatus: 'ACTIVE' },
+    );
+
+    return updated;
+  }
+
+  /**
+   * Reactiva una sucursal inactiva o con eliminación cancelada.
+   */
+  async executeReactivateBranch(storeId: string, user: User) {
+    const store = await this.assertBranchAdminAccess(storeId, user);
+
+    store.status = StoreStatus.ACTIVE;
+    store.deletionScheduledAt = null;
+    const updated = await this.storeRepository.save(store);
+
+    await this.logStoreActivity(
+      store,
+      user,
+      'BRANCH_REACTIVATED',
+      `Se reactivó la sucursal "${store.name} - ${store.branchName || 'Principal'}"`,
+      { storeId: store.id },
+    );
+
+    return updated;
+  }
+
+  /**
+   * Inicia el período de gracia de 7 días para la eliminación programada.
+   */
+  async executeScheduleBranchDeletion(
+    storeId: string,
+    otpCode: string,
+    user: User,
+  ) {
+    const preflight = await this.validateLifecyclePreflight(storeId, user);
+    if (!preflight.canProceed) {
+      throw new ConflictException({
+        message: 'No es posible programar la eliminación de la sucursal.',
+        blockers: preflight.blockers,
+      });
+    }
+
+    const store = await this.assertBranchAdminAccess(storeId, user);
+    const targetEmail =
+      store.company?.owner?.email || store.owner?.email || user.email;
+
+    await this.validateOtpCode(targetEmail, otpCode);
+
+    const scheduledDate = new Date();
+    scheduledDate.setDate(scheduledDate.getDate() + 7);
+
+    store.status = StoreStatus.INACTIVE;
+    store.deletionScheduledAt = scheduledDate;
+    const updated = await this.storeRepository.save(store);
+
+    await this.logStoreActivity(
+      store,
+      user,
+      'BRANCH_DELETION_SCHEDULED',
+      `Se programó la eliminación de la sucursal "${store.name} - ${store.branchName || 'Principal'}" para el ${scheduledDate.toLocaleDateString()}`,
+      {
+        storeId: store.id,
+        scheduledDate: scheduledDate.toISOString(),
+      },
+    );
+
+    return updated;
+  }
+
+  /**
+   * Cancela la eliminación programada dentro del período de gracia de 7 días.
+   */
+  async executeCancelScheduledDeletion(storeId: string, user: User) {
+    const store = await this.assertBranchAdminAccess(storeId, user);
+
+    if (!store.deletionScheduledAt) {
+      throw new BadRequestException(
+        'Esta sucursal no tiene una eliminación programada',
+      );
+    }
+
+    store.deletionScheduledAt = null;
+    store.status = StoreStatus.ACTIVE;
+    const updated = await this.storeRepository.save(store);
+
+    await this.logStoreActivity(
+      store,
+      user,
+      'BRANCH_DELETION_CANCELLED',
+      `Se canceló la eliminación programada de la sucursal "${store.name} - ${store.branchName || 'Principal'}". Sucursal reactivada.`,
+      { storeId: store.id },
+    );
+
+    return updated;
+  }
+
+  /**
+   * Ejecuta la baja lógica (soft delete) definitiva. Invocada por el cron a los 7 días.
+   */
+  async executeSoftDeleteStore(storeId: string): Promise<Store> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      relations: ['company'],
+    });
+
+    if (!store) {
+      throw new NotFoundException(`Sucursal ${storeId} no encontrada`);
+    }
+
+    store.isDeleted = true;
+    store.deletedAt = new Date();
+    store.status = StoreStatus.CLOSED;
+    store.slug = `${store.slug}-deleted-${Date.now()}`;
+    const updated = await this.storeRepository.save(store);
+
+    await this.logStoreActivity(
+      store,
+      null,
+      'BRANCH_DELETED_PERMANENTLY',
+      `Baja lógica definitiva ejecutada tras vencer los 7 días de gracia para la sucursal "${store.name} - ${store.branchName || 'Principal'}"`,
+      {
+        storeId: store.id,
+        deletedAt: store.deletedAt.toISOString(),
+      },
+    );
+
+    return updated;
+  }
+
+  /**
+   * Helper para emitir logs en CompanyActivityLog.
+   */
+  private async logStoreActivity(
+    store: Store,
+    user: User | null,
+    action: string,
+    description: string,
+    metadata?: Record<string, any>,
+  ) {
+    if (!store.company?.id) return;
+
+    try {
+      const actor = user as any;
+      const isCollaborator = !!actor?.isCollaborator;
+      const actorName = user
+        ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Usuario'
+        : 'Sistema Automático';
+      const actorRoleName = isCollaborator
+        ? actor.collaboratorRole || 'Colaborador'
+        : user
+          ? 'Propietario'
+          : 'Cron';
+
+      await this.activityLogRepository.save(
+        this.activityLogRepository.create({
+          companyId: store.company.id,
+          storeId: store.id,
+          actorType: isCollaborator ? 'COLLABORATOR' : 'OWNER',
+          actorId: user?.id || store.company.id,
+          actorName,
+          actorRoleName,
+          module: ActivityLogModule.STORE,
+          action,
+          description,
+          metadata,
+        }),
+      );
+    } catch (logErr) {
+      // Ignorar fallas secundarias de logging para no bloquear la operación
+    }
   }
 
   async getStoreDashboardData(storeId: string): Promise<StoreDashboardDto> {
@@ -891,6 +1333,7 @@ export class StoreService {
     try {
       await this.notificationService.create({
         userId: customerId,
+        storeId,
         title: 'Acceso a compras restringido',
         body: `La tienda "${store.name}" ha restringido las compras para tu cuenta. Motivo: ${dto.reason}`,
         type: NotificationType.CUSTOMER_BLOCKED,
@@ -952,6 +1395,7 @@ export class StoreService {
     try {
       await this.notificationService.create({
         userId: customerId,
+        storeId,
         title: 'Acceso a compras restablecido',
         body: `La tienda "${store.name}" ha restablecido tu acceso para realizar compras.`,
         type: NotificationType.CUSTOMER_UNBLOCKED,
