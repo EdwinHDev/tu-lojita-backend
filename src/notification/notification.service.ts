@@ -1080,14 +1080,21 @@ export class NotificationService {
         android: {
           priority: 'high',
           notification: {
+            title: payload.title,
+            body: payload.body,
             channelId: 'high_importance_channel',
             sound: 'default',
             priority: 'high',
+            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
           },
         },
         apns: {
           payload: {
             aps: {
+              alert: {
+                title: payload.title,
+                body: payload.body,
+              },
               sound: 'default',
               badge: 1,
             },
