@@ -11,7 +11,7 @@ import { Repository } from 'typeorm';
 import { StoreRanking } from '../entities/store-ranking.entity';
 import { RankingEvent } from '../entities/ranking-event.entity';
 import { Store } from 'src/store/entities/store.entity';
-import { User } from 'src/user/entities/user.entity';
+import { User, isUserAdult } from 'src/user/entities/user.entity';
 import { RankingSettingsService } from './ranking-settings.service';
 import { AchievementService } from './achievement.service';
 import { NotificationService } from 'src/notification/notification.service';
@@ -761,6 +761,7 @@ export class RankingService {
     limit = 50,
     subcategoryId?: string,
     categoryId?: string,
+    user?: User | null,
   ) {
     const query = this.storeRankingRepo
       .createQueryBuilder('sr')
@@ -768,6 +769,18 @@ export class RankingService {
       .leftJoinAndSelect('store.subcategory', 'subcategory')
       .leftJoinAndSelect('subcategory.category', 'category')
       .where('store.status = :status', { status: 'ACTIVE' });
+
+    // Protección estricta a menores y usuarios anónimos (Opción B):
+    // Excluir tiendas y rubros +18 del leaderboard
+    if (!isUserAdult(user)) {
+      query.andWhere('store.isAgeRestricted = false');
+      query.andWhere(
+        '(subcategory.isAgeRestricted = false OR subcategory.id IS NULL)',
+      );
+      query.andWhere(
+        '(category.isAgeRestricted = false OR category.id IS NULL)',
+      );
+    }
 
     const filterId = categoryId || subcategoryId;
     if (filterId) {

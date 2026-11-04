@@ -20,6 +20,11 @@ export const PLATFORM_KEYS = {
   FEATURED_MAX_ITEMS: 'featured_max_items',
   FEATURED_FILL_BESTSELLERS: 'featured_fill_bestsellers',
   FEATURED_PRICE_PER_DAY: 'featured_price_per_day',
+  BCV_RATE_ENABLED: 'bcv_rate_enabled',
+  BCV_RATE_MODE: 'bcv_rate_mode',
+  BCV_RATE_MANUAL_VALUE: 'bcv_rate_manual_value',
+  BCV_RATE_CACHED_VALUE: 'bcv_rate_cached_value',
+  BCV_RATE_LAST_SYNC: 'bcv_rate_last_sync',
 } as const;
 
 @Injectable()
@@ -48,6 +53,11 @@ export class PlatformSettingsService {
       [PLATFORM_KEYS.FEATURED_MAX_ITEMS]: '10',
       [PLATFORM_KEYS.FEATURED_FILL_BESTSELLERS]: 'true',
       [PLATFORM_KEYS.FEATURED_PRICE_PER_DAY]: '2.00',
+      [PLATFORM_KEYS.BCV_RATE_ENABLED]: 'true',
+      [PLATFORM_KEYS.BCV_RATE_MODE]: 'AUTO',
+      [PLATFORM_KEYS.BCV_RATE_MANUAL_VALUE]: '50.00',
+      [PLATFORM_KEYS.BCV_RATE_CACHED_VALUE]: '50.00',
+      [PLATFORM_KEYS.BCV_RATE_LAST_SYNC]: new Date().toISOString(),
     };
 
     for (const [key, value] of Object.entries(defaults)) {
@@ -150,6 +160,40 @@ export class PlatformSettingsService {
     };
   }
 
+  async getExchangeRateConfig(): Promise<{
+    enabled: boolean;
+    rate: number;
+    currency: string;
+    symbol: string;
+    source: string;
+    mode: 'AUTO' | 'MANUAL';
+    updatedAt: string;
+  }> {
+    const [enabledStr, mode, manualStr, cachedStr, lastSync] = await Promise.all([
+      this.get(PLATFORM_KEYS.BCV_RATE_ENABLED),
+      this.get(PLATFORM_KEYS.BCV_RATE_MODE),
+      this.get(PLATFORM_KEYS.BCV_RATE_MANUAL_VALUE),
+      this.get(PLATFORM_KEYS.BCV_RATE_CACHED_VALUE),
+      this.get(PLATFORM_KEYS.BCV_RATE_LAST_SYNC),
+    ]);
+
+    const isEnabled = enabledStr !== 'false';
+    const activeMode = mode === 'MANUAL' ? 'MANUAL' : 'AUTO';
+    const manualRate = manualStr ? parseFloat(manualStr) : 50.0;
+    const cachedRate = cachedStr ? parseFloat(cachedStr) : 50.0;
+    const activeRate = activeMode === 'MANUAL' ? manualRate : (cachedRate || manualRate);
+
+    return {
+      enabled: isEnabled,
+      rate: activeRate > 0 ? activeRate : 50.0,
+      currency: 'VES',
+      symbol: 'Bs.',
+      source: activeMode === 'MANUAL' ? 'MANUAL' : 'BCV',
+      mode: activeMode,
+      updatedAt: lastSync || new Date().toISOString(),
+    };
+  }
+
   async getPublicSettings(): Promise<{
     officialSupportWhatsapp: string;
     whatsappSupportEnabled: boolean;
@@ -161,16 +205,27 @@ export class PlatformSettingsService {
       fillWithBestSellers: boolean;
       pricePerDay: number;
     };
+    exchangeRate: {
+      enabled: boolean;
+      rate: number;
+      currency: string;
+      symbol: string;
+      source: string;
+      mode: 'AUTO' | 'MANUAL';
+      updatedAt: string;
+    };
   }> {
-    const [whatsapp, enabled, featuredShowcase] = await Promise.all([
+    const [whatsapp, enabled, featuredShowcase, exchangeRate] = await Promise.all([
       this.getOfficialSupportWhatsapp(),
       this.isWhatsappSupportEnabled(),
       this.getFeaturedShowcaseConfig(),
+      this.getExchangeRateConfig(),
     ]);
     return {
       officialSupportWhatsapp: whatsapp,
       whatsappSupportEnabled: enabled,
       featuredShowcase,
+      exchangeRate,
     };
   }
 

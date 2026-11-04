@@ -24,6 +24,38 @@ export class ItemVariant {
         value !== null && value !== undefined ? parseFloat(value) : null,
     },
   })
+  basePrice?: number;
+
+  @Column('decimal', {
+    precision: 5,
+    scale: 2,
+    default: 0,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => (value !== null && value !== undefined ? parseFloat(value) : 0),
+    },
+  })
+  commissionRate: number;
+
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => (value !== null && value !== undefined ? parseFloat(value) : 0),
+    },
+  })
+  commissionAmount: number;
+
+  @Column('numeric', {
+    nullable: true,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) =>
+        value !== null && value !== undefined ? parseFloat(value) : null,
+    },
+  })
   price?: number;
 
   @Column('numeric', {

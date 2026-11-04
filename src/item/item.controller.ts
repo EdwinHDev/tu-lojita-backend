@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ItemService } from './item.service';
 import { CreateItemDto } from './dto/create-item.dto';
@@ -14,6 +15,8 @@ import { UpdateItemDto } from './dto/update-item.dto';
 import { ItemPaginationDto } from './dto/item-pagination.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
+import { GetOptionalUser } from 'src/auth/decorators/get-optional-user.decorator';
+import { OptionalJwtAuthGuard } from 'src/auth/guards/optional-jwt-auth.guard';
 import { User } from 'src/user/entities/user.entity';
 import { BookingService } from './booking.service';
 import {
@@ -34,7 +37,6 @@ export class PublicItemController {
   }
 }
 
-@Auth()
 @Controller('items')
 export class ItemController {
   constructor(
@@ -42,21 +44,27 @@ export class ItemController {
     private readonly bookingService: BookingService,
   ) {}
 
+  @Auth()
   @Post()
   create(@Body() createItemDto: CreateItemDto, @GetUser() user: User) {
     return this.itemService.create(createItemDto, user);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
-  findAll(@Query() paginationDto: ItemPaginationDto, @GetUser() user: User) {
+  findAll(
+    @Query() paginationDto: ItemPaginationDto,
+    @GetOptionalUser() user: User | null,
+  ) {
     return this.itemService.findAll(paginationDto, user);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('store/:storeId')
   findByStore(
     @Param('storeId') storeId: string,
     @Query() paginationDto: ItemPaginationDto,
-    @GetUser() user: User,
+    @GetOptionalUser() user: User | null,
   ) {
     return this.itemService.findByStore(storeId, paginationDto, user);
   }
@@ -66,6 +74,7 @@ export class ItemController {
     return this.bookingService.getAvailableSlots(id, date);
   }
 
+  @Auth()
   @Post(':id/slots/hold')
   acquireSlotHold(
     @Param('id') id: string,
@@ -80,6 +89,7 @@ export class ItemController {
     );
   }
 
+  @Auth()
   @Post(':id/slot-config')
   configureSlotConfig(
     @Param('id') id: string,
@@ -89,6 +99,7 @@ export class ItemController {
     return this.bookingService.configureSlotBooking(id, dto, user);
   }
 
+  @Auth()
   @Post(':id/preorder-config')
   configurePreorderConfig(
     @Param('id') id: string,
@@ -132,6 +143,7 @@ export class ItemController {
     return this.itemService.rejectPromotion(id, reason, user);
   }
 
+  @Auth()
   @Post(':id/promote')
   requestPromotion(
     @Param('id') id: string,
@@ -141,16 +153,19 @@ export class ItemController {
     return this.itemService.requestPromotion(id, user, dto);
   }
 
+  @Auth()
   @Get(':id/promotion-status')
   getItemPromotionStatus(@Param('id') id: string, @GetUser() user: User) {
     return this.itemService.getItemPromotionStatus(id, user);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
-  findOne(@Param('id') id: string, @GetUser() user: User) {
+  findOne(@Param('id') id: string, @GetOptionalUser() user: User | null) {
     return this.itemService.findOne(id, user);
   }
 
+  @Auth()
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -160,6 +175,7 @@ export class ItemController {
     return this.itemService.update(id, updateItemDto, user);
   }
 
+  @Auth()
   @Delete(':id')
   remove(@Param('id') id: string, @GetUser() user: User) {
     return this.itemService.remove(id, user);

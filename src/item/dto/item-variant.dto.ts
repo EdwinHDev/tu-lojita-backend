@@ -16,6 +16,11 @@ export class ItemVariantDto {
   @IsOptional()
   sku?: string;
 
+  @IsNumber({}, { message: 'El precio base debe ser un número válido' })
+  @Min(0, { message: 'El precio base no puede ser negativo' })
+  @IsOptional()
+  basePrice?: number;
+
   @IsNumber({}, { message: 'El precio debe ser un número válido' })
   @Min(0, { message: 'El precio no puede ser negativo' })
   @IsOptional()

@@ -64,6 +64,7 @@ import { ItemPromotion } from './entities/item-promotion.entity';
 import { ItemPromotionStatus } from './types/item-promotion-status.enum';
 import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
 import { RequestPromotionDto } from './dto/request-promotion.dto';
+import { CommissionService } from 'src/commission/commission.service';
 
 @Injectable()
 export class ItemService {
@@ -97,6 +98,7 @@ export class ItemService {
     private readonly platformSettingsService: PlatformSettingsService,
     private readonly bookingService: BookingService,
     private readonly activityLogService: CompanyActivityLogService,
+    private readonly commissionService: CommissionService,
   ) {}
 
   private async enrichStoresWithBranchStatus(
@@ -212,21 +214,49 @@ export class ItemService {
           where: { item: { id: item.id } },
         });
       }
-      variantsJson = (variants || []).map((v) => ({
-        id: v.id,
-        sku: v.sku,
-        price:
-          v.price !== null && v.price !== undefined
-            ? parseFloat(v.price.toString())
-            : null,
-        discountPrice:
-          v.discountPrice !== null && v.discountPrice !== undefined
-            ? parseFloat(v.discountPrice.toString())
-            : null,
-        stockQuantity: parseFloat(v.stockQuantity?.toString() || '0'),
-        isActive: v.isActive,
-        axisValues: v.axisValues,
-        imageUrl: v.imageUrl || null,
+
+      let storeForMap: Store | null | undefined = item.store;
+      if (!storeForMap) {
+        if ((item as any).storeId) {
+          storeForMap = await this.storeRepository.findOne({ where: { id: (item as any).storeId } });
+        } else if (item.id) {
+          const itemWithStore = await this.itemRepository.findOne({
+            where: { id: item.id },
+            relations: ['store'],
+          });
+          storeForMap = itemWithStore?.store;
+        }
+      }
+
+      variantsJson = await Promise.all((variants || []).map(async (v) => {
+        let vPrice = v.price !== null && v.price !== undefined ? parseFloat(v.price.toString()) : null;
+        let vBase = v.basePrice !== null && v.basePrice !== undefined ? parseFloat(v.basePrice.toString()) : null;
+        let vRate = v.commissionRate !== null && v.commissionRate !== undefined ? parseFloat(v.commissionRate.toString()) : 0;
+        let vAmount = v.commissionAmount !== null && v.commissionAmount !== undefined ? parseFloat(v.commissionAmount.toString()) : 0;
+
+        if (vBase !== null && vBase > 0 && (vAmount === 0 || vPrice === vBase) && storeForMap) {
+          const comm = await this.commissionService.calculateCommission(vBase, false, storeForMap);
+          vRate = comm.rate;
+          vAmount = comm.commissionAmount;
+          vPrice = Math.round((vBase + vAmount) * 100) / 100;
+        }
+
+        return {
+          id: v.id,
+          sku: v.sku,
+          basePrice: vBase,
+          commissionRate: vRate,
+          commissionAmount: vAmount,
+          price: vPrice,
+          discountPrice:
+            v.discountPrice !== null && v.discountPrice !== undefined
+              ? parseFloat(v.discountPrice.toString())
+              : null,
+          stockQuantity: parseFloat(v.stockQuantity?.toString() || '0'),
+          isActive: v.isActive,
+          axisValues: v.axisValues,
+          imageUrl: v.imageUrl || null,
+        };
       }));
     }
 
@@ -388,19 +418,17 @@ export class ItemService {
     const keysA = Object.keys(a || {});
     const keysB = Object.keys(b || {});
     if (keysA.length !== keysB.length) return false;
-    return keysA.every((k) => {
-      const valA = a[k];
-      const valB = b[k];
+    return keysA.every((kA) => {
+      const normKeyA = kA.trim().toLowerCase();
+      const kB = keysB.find((k) => k.trim().toLowerCase() === normKeyA);
+      if (!kB) return false;
+      const valA = a[kA];
+      const valB = b[kB];
       if (valA === valB) return true;
-      if (valA && valB && (valA.includes('|') || valB.includes('|'))) {
-        const partsA = valA.split('|');
-        const partsB = valB.split('|');
-        return (
-          partsA[0]?.trim() === partsB[0]?.trim() &&
-          partsA[1]?.trim() === partsB[1]?.trim()
-        );
-      }
-      return false;
+      if (typeof valA !== 'string' || typeof valB !== 'string') return false;
+      const baseA = valA.split('|')[0]?.trim().toLowerCase() ?? '';
+      const baseB = valB.split('|')[0]?.trim().toLowerCase() ?? '';
+      return baseA.length > 0 && baseA === baseB;
     });
   }
 
@@ -411,40 +439,61 @@ export class ItemService {
     variantAxesDto?: VariantAxisDto[],
     variantsDto?: ItemVariantDto[],
   ) {
+    // Evitar que TypeORM cascade-inserte copias duplicadas al guardar `item`
+    delete (item as any).variantAxes;
+    delete (item as any).variants;
+
     if (hasVariants === false) {
-      if (item.hasVariants) {
-        // Validar órdenes pendientes con variantes
-        const pendingVariantOrdersCount = await this.orderItemRepository
-          .createQueryBuilder('oi')
-          .innerJoin('oi.order', 'o')
-          .where('oi.item.id = :itemId', { itemId: item.id })
-          .andWhere('oi.variantId IS NOT NULL')
-          .andWhere('o.status IN (:...statuses)', {
-            statuses: [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID],
-          })
-          .getCount();
+      // Validar órdenes pendientes con variantes
+      const pendingVariantOrdersCount = await this.orderItemRepository
+        .createQueryBuilder('oi')
+        .innerJoin('oi.order', 'o')
+        .where('oi.item.id = :itemId', { itemId: item.id })
+        .andWhere('oi.variantId IS NOT NULL')
+        .andWhere('o.status IN (:...statuses)', {
+          statuses: [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID],
+        })
+        .getCount();
 
-        if (pendingVariantOrdersCount > 0) {
-          throw new BadRequestException(
-            'No puedes desactivar las variantes mientras existan órdenes pendientes con variantes de este artículo.',
-          );
-        }
+      if (pendingVariantOrdersCount > 0) {
+        throw new BadRequestException(
+          'No puedes desactivar las variantes mientras existan órdenes pendientes con variantes de este artículo.',
+        );
+      }
 
-        // Sumar stock de variantes activas al stock global
-        const activeVariants = await this.itemVariantRepository.find({
-          where: { item: { id: item.id }, isActive: true },
-        });
+      const existingVariants = await this.itemVariantRepository.find({
+        where: { item: { id: item.id } },
+      });
+      const activeVariants = existingVariants.filter((v) => v.isActive);
+
+      if (item.hasVariants && activeVariants.length > 0) {
         const totalStock = activeVariants.reduce(
           (sum, v) => sum + parseFloat(v.stockQuantity?.toString() || '0'),
           0,
         );
-        item.stockQuantity = totalStock;
-        item.hasVariants = false;
-        await this.itemRepository.save(item);
+        if (!item.stockQuantity || Number(item.stockQuantity) <= 0) {
+          item.stockQuantity = totalStock;
+        }
+      }
 
-        for (const v of activeVariants) {
-          v.isActive = false;
-          await this.itemVariantRepository.save(v);
+      item.hasVariants = false;
+      await this.itemRepository.save(item);
+
+      // Eliminar todos los ejes del artículo
+      await this.variantAxisRepository.delete({ item: { id: item.id } });
+
+      // Eliminar variantes sin historial de órdenes; desactivar las que tengan órdenes históricas
+      for (const v of existingVariants) {
+        const hasOrders = await this.orderItemRepository.count({
+          where: { variant: { id: v.id } },
+        });
+        if (hasOrders > 0) {
+          if (v.isActive) {
+            v.isActive = false;
+            await this.itemVariantRepository.save(v);
+          }
+        } else {
+          await this.itemVariantRepository.remove(v);
         }
       }
       return;
@@ -514,6 +563,22 @@ export class ItemService {
         where: { item: { id: item.id } },
       });
 
+      let storeForVariant: Store | null | undefined = item.store;
+      if (!storeForVariant) {
+        if (item.id) {
+          const itemWithStore = await this.itemRepository.findOne({
+            where: { id: item.id },
+            relations: ['store'],
+          });
+          storeForVariant = itemWithStore?.store;
+        }
+        if (!storeForVariant && (item as any).storeId) {
+          storeForVariant = await this.storeRepository.findOne({
+            where: { id: (item as any).storeId },
+          });
+        }
+      }
+
       const matchedVariantIds = new Set<string>();
 
       for (const combo of combinations) {
@@ -528,18 +593,55 @@ export class ItemService {
           dto?.sku ||
           existing?.sku ||
           this.generateSku(storeName, item.title, combo);
-        const price =
-          dto?.price !== undefined
-            ? dto.price
-            : existing?.price !== undefined
-              ? existing.price
-              : null;
-        const discountPrice =
+
+        let vBase: number | null = null;
+        if (dto?.basePrice !== undefined && dto.basePrice !== null) {
+          vBase = parseFloat(dto.basePrice.toString());
+        } else if (dto?.price !== undefined && dto.price !== null) {
+          vBase = parseFloat(dto.price.toString());
+        } else if (existing?.basePrice !== undefined && existing.basePrice !== null) {
+          vBase = parseFloat(existing.basePrice.toString());
+        } else if (existing?.price !== undefined && existing.price !== null) {
+          vBase = parseFloat(existing.price.toString());
+        } else if (item.basePrice !== undefined && item.basePrice !== null) {
+          vBase = parseFloat(item.basePrice.toString());
+        } else if (item.price !== undefined && item.price !== null) {
+          vBase = parseFloat(item.price.toString());
+        }
+
+        let vRate = 0;
+        let vAmount = 0;
+        let vPrice: number | null = null;
+
+        if (vBase !== null && vBase > 0) {
+          if (storeForVariant) {
+            const comm = await this.commissionService.calculateCommission(vBase, false, storeForVariant);
+            vRate = comm.rate;
+            vAmount = comm.commissionAmount;
+            vPrice = Math.round((vBase + vAmount) * 100) / 100;
+          } else {
+            vPrice = vBase;
+          }
+        } else if (vBase !== null) {
+          vPrice = 0;
+        }
+
+        let vDiscount =
           dto?.discountPrice !== undefined
             ? dto.discountPrice
             : existing?.discountPrice !== undefined
               ? existing.discountPrice
               : null;
+
+        if (dto?.discountPrice !== undefined && dto.discountPrice !== null && dto.discountPrice > 0) {
+          const discBase = parseFloat(dto.discountPrice.toString());
+          const storeForVariant = item.store || (await this.storeRepository.findOne({ where: { items: { id: item.id } } }));
+          if (storeForVariant) {
+            const discComm = await this.commissionService.calculateCommission(discBase, false, storeForVariant);
+            vDiscount = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
+          }
+        }
+
         const stockQuantity =
           dto?.stockQuantity !== undefined
             ? dto.stockQuantity
@@ -570,9 +672,12 @@ export class ItemService {
         if (existing) {
           matchedVariantIds.add(existing.id);
           existing.sku = sku;
-          existing.price = price !== null ? price : undefined;
+          existing.basePrice = vBase !== null ? vBase : undefined;
+          existing.commissionRate = vRate;
+          existing.commissionAmount = vAmount;
+          existing.price = vPrice !== null ? vPrice : undefined;
           existing.discountPrice =
-            discountPrice !== null ? discountPrice : undefined;
+            vDiscount !== null ? vDiscount : undefined;
           existing.stockQuantity = stockQuantity;
           existing.isActive = isActive;
           existing.axisValues = combo;
@@ -582,8 +687,11 @@ export class ItemService {
           const newVariant = this.itemVariantRepository.create({
             item,
             sku,
-            price: price !== null ? price : undefined,
-            discountPrice: discountPrice !== null ? discountPrice : undefined,
+            basePrice: vBase !== null ? vBase : undefined,
+            commissionRate: vRate,
+            commissionAmount: vAmount,
+            price: vPrice !== null ? vPrice : undefined,
+            discountPrice: vDiscount !== null ? vDiscount : undefined,
             stockQuantity,
             isActive,
             axisValues: combo,
@@ -630,10 +738,20 @@ export class ItemService {
           : effPrice;
       });
 
+      const basePrices = currentActiveVariants.map((v) => {
+        return v.basePrice !== null && v.basePrice !== undefined
+          ? parseFloat(v.basePrice.toString())
+          : parseFloat((item.basePrice ?? item.price ?? 0).toString());
+      });
+
       const minPrice = Math.min(...prices);
       const maxPrice = Math.max(...prices);
+      const minBasePrice = Math.min(...basePrices);
 
       item.price = minPrice;
+      if (minBasePrice > 0) {
+        item.basePrice = minBasePrice;
+      }
       item.priceType =
         minPrice < maxPrice ? PriceType.STARTING_AT : PriceType.FIXED;
       await this.itemRepository.save(item);
@@ -794,10 +912,45 @@ export class ItemService {
     } = itemData;
     let { price, discountPrice } = itemData;
 
+    // Determinar precio base (ganancia neta de la tienda)
+    let basePrice = 0;
+    if (itemData.basePrice !== undefined && itemData.basePrice !== null) {
+      basePrice = parseFloat(itemData.basePrice.toString());
+    } else if (price !== undefined && price !== null) {
+      basePrice = parseFloat(price.toString());
+    }
+
+    let commissionRate = 0;
+    let commissionAmount = 0;
+
     // Lógica profesional para tipos de precio especiales
     if (priceType === PriceType.FREE || priceType === PriceType.ON_DEMAND) {
+      basePrice = 0;
+      commissionRate = 0;
+      commissionAmount = 0;
       price = 0;
       discountPrice = undefined; // Usamos undefined para que TypeORM no lo guarde o lo limpie según la entidad
+    } else if (basePrice > 0) {
+      const commCalc = await this.commissionService.calculateCommission(
+        basePrice,
+        false,
+        store,
+      );
+      commissionRate = commCalc.rate;
+      commissionAmount = commCalc.commissionAmount;
+      price = Math.round((basePrice + commissionAmount) * 100) / 100;
+    } else {
+      price = 0;
+    }
+
+    if (discountPrice !== undefined && discountPrice !== null && discountPrice > 0) {
+      const discBase = parseFloat(discountPrice.toString());
+      const discComm = await this.commissionService.calculateCommission(
+        discBase,
+        false,
+        store,
+      );
+      discountPrice = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
     }
 
     // Validar que si trackInventory es true, el stock inicial sea > 0 (si no tiene variantes ni es preorder ni servicio)
@@ -823,8 +976,17 @@ export class ItemService {
       }
     }
 
+    const {
+      variantAxes: _createVariantAxes,
+      variants: _createVariants,
+      ...scalarItemData
+    } = itemData;
+
     const item = this.itemRepository.create({
-      ...itemData,
+      ...scalarItemData,
+      basePrice,
+      commissionRate,
+      commissionAmount,
       price,
       discountPrice,
       store,
@@ -886,7 +1048,7 @@ export class ItemService {
     return await this.findOne(savedItem.id);
   }
 
-  async findAll(paginationDto: ItemPaginationDto, user?: User) {
+  async findAll(paginationDto: ItemPaginationDto, user?: User | null) {
     const {
       limit = 10,
       offset = 0,
@@ -904,6 +1066,7 @@ export class ItemService {
       hasDiscount,
       onlyInStock,
       priceType,
+      itemType,
     } = paginationDto;
 
     const queryBuilder = this.itemRepository
@@ -959,6 +1122,11 @@ export class ItemService {
           onDemand: PriceType.ON_DEMAND,
         });
       }
+    }
+
+    // Filtro por Tipo de Artículo (PRODUCT / SERVICE)
+    if (itemType) {
+      queryBuilder.andWhere('item.itemType = :itemType', { itemType });
     }
 
     // Filtros de Relación
@@ -1151,7 +1319,7 @@ export class ItemService {
   async findByStore(
     storeId: string,
     paginationDto: ItemPaginationDto,
-    user?: User,
+    user?: User | null,
   ) {
     let includeInactive = false;
 
@@ -1193,7 +1361,7 @@ export class ItemService {
     );
   }
 
-  async findOne(id: string, user?: User) {
+  async findOne(id: string, user?: User | null) {
     const item = await this.itemRepository.findOne({
       where: { id },
       relations: [
@@ -1387,7 +1555,56 @@ export class ItemService {
       }
     }
 
-    this.itemRepository.merge(item, updateItemDto);
+    const effectiveBase =
+      updateItemDto.basePrice !== undefined
+        ? parseFloat(updateItemDto.basePrice.toString())
+        : updateItemDto.price !== undefined
+          ? parseFloat(updateItemDto.price.toString())
+          : item.basePrice;
+
+    if (
+      updateItemDto.priceType === PriceType.FREE ||
+      updateItemDto.priceType === PriceType.ON_DEMAND
+    ) {
+      updateItemDto.basePrice = 0;
+      updateItemDto.price = 0;
+      updateItemDto.discountPrice = undefined;
+      item.commissionRate = 0;
+      item.commissionAmount = 0;
+    } else if (effectiveBase !== undefined && effectiveBase !== null && effectiveBase > 0) {
+      const commCalc = await this.commissionService.calculateCommission(
+        effectiveBase,
+        false,
+        item.store,
+      );
+      updateItemDto.basePrice = effectiveBase;
+      item.commissionRate = commCalc.rate;
+      item.commissionAmount = commCalc.commissionAmount;
+      updateItemDto.price = Math.round((effectiveBase + commCalc.commissionAmount) * 100) / 100;
+    }
+
+    if (updateItemDto.discountPrice !== undefined) {
+      if (updateItemDto.discountPrice !== null && updateItemDto.discountPrice > 0) {
+        const discBase = parseFloat(updateItemDto.discountPrice.toString());
+        const discComm = await this.commissionService.calculateCommission(
+          discBase,
+          false,
+          item.store,
+        );
+        updateItemDto.discountPrice = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
+      } else {
+        updateItemDto.discountPrice = undefined;
+      }
+    }
+
+    const {
+      variantAxes: _updateVariantAxes,
+      variants: _updateVariants,
+      ...scalarUpdateDto
+    } = updateItemDto;
+    delete (item as any).variantAxes;
+    delete (item as any).variants;
+    this.itemRepository.merge(item, scalarUpdateDto);
     const savedItem = await this.itemRepository.save(item);
 
     await this.saveCustomizationAndAttributes(

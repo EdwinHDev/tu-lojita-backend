@@ -26,6 +26,7 @@ import { ExpirePromotionsCron } from './cron/expire-promotions.cron';
 import { NotificationModule } from '../notification/notification.module';
 import { CompanyModule } from '../company/company.module';
 import { PlatformSettingsModule } from '../platform-settings/platform-settings.module';
+import { CommissionModule } from '../commission/commission.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { PlatformSettingsModule } from '../platform-settings/platform-settings.m
     NotificationModule,
     CompanyModule,
     PlatformSettingsModule,
+    CommissionModule,
   ],
   controllers: [PublicItemController, ItemController],
   providers: [

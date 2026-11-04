@@ -174,6 +174,7 @@ export class OrderService {
       }
 
       let subtotal = 0;
+      let totalOrderCommission = 0;
       let hasPreOrderItem = false;
       let hasProductItem = false;
       let hasServiceItem = false;
@@ -393,41 +394,68 @@ export class OrderService {
           }
         }
 
-        // Determinar precio base (prioridad a variant si tiene variantes, sustitutivo NO aditivo - Task 3.8)
-        let basePrice: number;
+        // Determinar precio base (ganancia neta de la tienda para este artículo)
+        let merchantBasePrice: number;
         if (item.hasVariants && variant) {
+          const vBase =
+            variant.basePrice !== null && variant.basePrice !== undefined
+              ? parseFloat(variant.basePrice.toString())
+              : (variant.price !== null && variant.price !== undefined
+                  ? parseFloat(variant.price.toString())
+                  : parseFloat(item.basePrice?.toString() || item.price.toString()));
           const vDiscount =
             variant.discountPrice !== null &&
             variant.discountPrice !== undefined
               ? parseFloat(variant.discountPrice.toString())
               : null;
-          const vPrice =
-            variant.price !== null && variant.price !== undefined
-              ? parseFloat(variant.price.toString())
-              : parseFloat(item.price.toString());
-          basePrice =
-            vDiscount !== null && vDiscount < vPrice ? vDiscount : vPrice;
+          merchantBasePrice =
+            vDiscount !== null && vDiscount < vBase ? vDiscount : vBase;
         } else {
-          basePrice = item.discountPrice
-            ? parseFloat(item.discountPrice.toString())
-            : parseFloat(item.price.toString());
+          const itemBase =
+            item.basePrice !== null && item.basePrice !== undefined && parseFloat(item.basePrice.toString()) > 0
+              ? parseFloat(item.basePrice.toString())
+              : parseFloat(item.price.toString());
+          const itemDiscount =
+            item.discountPrice !== null && item.discountPrice !== undefined
+              ? parseFloat(item.discountPrice.toString())
+              : null;
+          merchantBasePrice =
+            itemDiscount !== null && itemDiscount < itemBase ? itemDiscount : itemBase;
         }
 
+        // 4.1 Cálculo de comisión por artículo según el modo de pago (Contado vs Cuotas)
+        const { rate: itemCommRate, commissionAmount: itemCommAmount } =
+          await this.commissionService.calculateCommission(
+            merchantBasePrice,
+            isPartialPayment,
+            store,
+          );
+
+        // El precio público unitario con la comisión correspondiente incorporada
+        const unitPublicPrice =
+          Math.round((merchantBasePrice + itemCommAmount) * 100) / 100;
         const totalLinePrice =
-          basePrice * itemDto.quantity + customizationExtra;
+          unitPublicPrice * itemDto.quantity + customizationExtra;
         const priceAtOrder =
           itemDto.quantity > 0
-            ? totalLinePrice / itemDto.quantity
+            ? Math.round((totalLinePrice / itemDto.quantity) * 100) / 100
             : totalLinePrice;
 
-        // Usar redondeo a 2 decimales para evitar errores de coma flotante en el subtotal
+        // Subtotal y acumulación de comisión de plataforma de la orden
         subtotal = Math.round((subtotal + totalLinePrice) * 100) / 100;
+        totalOrderCommission =
+          Math.round(
+            (totalOrderCommission + itemCommAmount * itemDto.quantity) * 100,
+          ) / 100;
 
-        // Preparar OrderItem (Snapshot con variantId y variantLabel - Task 3.5)
+        // Preparar OrderItem (Snapshot inmutable: basePrice, commissionRate, commissionAmount, price)
         const orderItem = queryRunner.manager.create(OrderItem, {
           item,
-          title: item.title, // Snapshot del nombre
+          title: item.title,
           quantity: itemDto.quantity,
+          basePrice: merchantBasePrice,
+          commissionRate: itemCommRate,
+          commissionAmount: itemCommAmount,
           price: priceAtOrder,
           selectedOptions: itemDto.selectedOptions,
           variantId: item.hasVariants ? variant?.id : undefined,
@@ -507,17 +535,15 @@ export class OrderService {
         feeAmount = Math.round(((subtotal * feePercent) / 100) * 100) / 100;
       }
 
-      const storeTotal = Math.round((subtotal + feeAmount) * 100) / 100;
-
-      // 5.1 Cálculo de Comisión de la Plataforma
-      const { rate: commRate, commissionAmount: commAmount } =
-        await this.commissionService.calculateCommission(
-          storeTotal,
-          isPartialPayment,
-          store,
-        );
-
-      const finalAmount = Math.round((storeTotal + commAmount) * 100) / 100;
+      // 5.1 En el nuevo modelo, la comisión de la plataforma ya está incorporada
+      // en el precio de cada artículo. Por lo tanto, el cliente sólo paga:
+      // subtotal (precios públicos) + feeAmount (recargo por financiamiento en cuotas de la tienda)
+      const commAmount = totalOrderCommission;
+      const commRate =
+        subtotal > 0
+          ? Math.round(((totalOrderCommission / subtotal) * 100) * 100) / 100
+          : 0;
+      const finalAmount = Math.round((subtotal + feeAmount) * 100) / 100;
 
       // Validar Límite de Crédito si el comercio lo tiene configurado
       if (
@@ -2260,16 +2286,9 @@ export class OrderService {
         Math.round(((calculatedSubtotal * feePercent) / 100) * 100) / 100;
     }
 
-    const storeTotal = Math.round((calculatedSubtotal + feeAmount) * 100) / 100;
-
-    const { rate: commRate, commissionAmount: commAmount } =
-      await this.commissionService.calculateCommission(
-        storeTotal,
-        isPartialPayment,
-        store,
-      );
-
-    const finalAmount = Math.round((storeTotal + commAmount) * 100) / 100;
+    // En el nuevo modelo, los precios públicos ya tienen la comisión incorporada.
+    // El cliente no paga comisión como recargo en el checkout; sólo paga subtotal + feeAmount de financiamiento.
+    const finalAmount = Math.round((calculatedSubtotal + feeAmount) * 100) / 100;
 
     return {
       isValid: errors.length === 0,
@@ -2277,8 +2296,8 @@ export class OrderService {
       pricingSummary: {
         subtotal: calculatedSubtotal,
         feeAmount,
-        platformCommissionRate: commRate,
-        platformCommissionAmount: commAmount,
+        platformCommissionRate: 0,
+        platformCommissionAmount: 0,
         finalAmount,
       },
     };

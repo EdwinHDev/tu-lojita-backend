@@ -13,11 +13,11 @@ import { CreateStoreCategoryDto } from './dto/create-store-category.dto';
 import { UpdateStoreCategoryDto } from './dto/update-store-category.dto';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 
-@Auth()
 @Controller('store-categories')
 export class StoreCategoryController {
   constructor(private readonly storeCategoryService: StoreCategoryService) {}
 
+  @Auth()
   @Post()
   create(@Body() createStoreCategoryDto: CreateStoreCategoryDto) {
     return this.storeCategoryService.create(createStoreCategoryDto);
@@ -55,6 +55,7 @@ export class StoreCategoryController {
     return this.storeCategoryService.findOne(id);
   }
 
+  @Auth()
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -63,6 +64,7 @@ export class StoreCategoryController {
     return this.storeCategoryService.update(id, updateStoreCategoryDto);
   }
 
+  @Auth()
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.storeCategoryService.remove(id);
@@ -73,11 +75,13 @@ export class StoreCategoryController {
     return this.storeCategoryService.findTemplates(id);
   }
 
+  @Auth()
   @Post(':id/templates')
   addTemplate(@Param('id') id: string, @Body() templateData: any) {
     return this.storeCategoryService.addTemplate(id, templateData);
   }
 
+  @Auth()
   @Delete('templates/:templateId')
   removeTemplate(@Param('templateId') templateId: string) {
     return this.storeCategoryService.removeTemplate(templateId);

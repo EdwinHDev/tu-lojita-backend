@@ -38,7 +38,47 @@ export class Item extends TimestampEntity {
   description: string;
 
   /**
-   * Precio base de venta.
+   * Precio base deseado por la tienda (ganancia neta del comerciante).
+   */
+  @Column('numeric', {
+    default: 0,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => (value !== null && value !== undefined ? parseFloat(value) : 0),
+    },
+  })
+  basePrice: number;
+
+  /**
+   * Porcentaje de comisión de plataforma aplicado al precio base.
+   */
+  @Column('decimal', {
+    precision: 5,
+    scale: 2,
+    default: 0,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => (value !== null && value !== undefined ? parseFloat(value) : 0),
+    },
+  })
+  commissionRate: number;
+
+  /**
+   * Monto en dólares de la comisión de plataforma por unidad.
+   */
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string) => (value !== null && value !== undefined ? parseFloat(value) : 0),
+    },
+  })
+  commissionAmount: number;
+
+  /**
+   * Precio público final de venta (basePrice + commissionAmount).
    * Nota: Se usa 'numeric' para evitar problemas de precisión con decimales
    * (muy común si se usara 'float' para dinero).
    */

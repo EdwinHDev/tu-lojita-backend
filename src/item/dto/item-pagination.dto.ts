@@ -9,6 +9,7 @@ import {
   IsEnum,
 } from 'class-validator';
 import { PriceType } from '../types/price-type.enum';
+import { ItemType } from '../types/item-type.enum';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 export class ItemPaginationDto extends PaginationDto {
@@ -27,6 +28,13 @@ export class ItemPaginationDto extends PaginationDto {
   @IsOptional()
   @IsEnum(PriceType, { message: 'El tipo de precio no es válido' })
   priceType?: PriceType;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toUpperCase() : value,
+  )
+  @IsEnum(ItemType, { message: 'El tipo de artículo debe ser PRODUCT o SERVICE' })
+  itemType?: ItemType;
 
   @IsOptional()
   @IsUUID('4', { message: 'El ID de la tienda debe ser un UUID válido' })

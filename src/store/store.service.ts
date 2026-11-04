@@ -214,7 +214,7 @@ export class StoreService {
     }
   }
 
-  async findAll(paginationDto: StorePaginationDto, user?: User) {
+  async findAll(paginationDto: StorePaginationDto, user?: User | null) {
     const {
       limit = 10,
       offset = 0,
@@ -261,6 +261,12 @@ export class StoreService {
     // Control de edad: ocultar tiendas +18 para menores
     if (!isUserAdult(user)) {
       queryBuilder.andWhere('store.isAgeRestricted = false');
+      queryBuilder.andWhere(
+        '(subCategory.isAgeRestricted = false OR subCategory.id IS NULL)',
+      );
+      queryBuilder.andWhere(
+        '(category.isAgeRestricted = false OR category.id IS NULL)',
+      );
     }
 
     // Filtros
@@ -315,6 +321,12 @@ export class StoreService {
 
       if (!isUserAdult(user)) {
         countQueryBuilder.andWhere('store.isAgeRestricted = false');
+        countQueryBuilder.andWhere(
+          '(subCategory.isAgeRestricted = false OR subCategory.id IS NULL)',
+        );
+        countQueryBuilder.andWhere(
+          '(category.isAgeRestricted = false OR category.id IS NULL)',
+        );
       }
 
       // Aplicamos los mismos filtros
@@ -355,7 +367,7 @@ export class StoreService {
     };
   }
 
-  async findOne(id: string, user?: User) {
+  async findOne(id: string, user?: User | null) {
     const store = await this.storeRepository.findOne({
       where: { id },
       relations: [
@@ -403,7 +415,7 @@ export class StoreService {
     return store;
   }
 
-  async findLatestWithItems(limit: number = 10, user?: User) {
+  async findLatestWithItems(limit: number = 10, user?: User | null) {
     const queryBuilder = this.storeRepository
       .createQueryBuilder('store')
       .leftJoinAndSelect('store.subcategory', 'subcategory')

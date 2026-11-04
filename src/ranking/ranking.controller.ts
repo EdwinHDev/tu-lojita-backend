@@ -8,9 +8,12 @@ import {
   Body,
   ParseUUIDPipe,
   NotFoundException,
+  UseGuards,
 } from '@nestjs/common';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
+import { GetOptionalUser } from 'src/auth/decorators/get-optional-user.decorator';
+import { OptionalJwtAuthGuard } from 'src/auth/guards/optional-jwt-auth.guard';
 import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
 import { RankingService } from './services/ranking.service';
@@ -24,18 +27,21 @@ export class RankingController {
   ) {}
 
   // 6.1 Leaderboard público paginado con filtro opcional por categoría o subcategoría
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('leaderboard')
   getLeaderboard(
     @Query('page') page = '1',
     @Query('limit') limit = '50',
     @Query('subcategoryId') subcategoryId?: string,
     @Query('categoryId') categoryId?: string,
+    @GetOptionalUser() user?: User | null,
   ) {
     return this.rankingService.getLeaderboard(
       parseInt(page, 10) || 1,
       parseInt(limit, 10) || 50,
       subcategoryId,
       categoryId,
+      user,
     );
   }
 
