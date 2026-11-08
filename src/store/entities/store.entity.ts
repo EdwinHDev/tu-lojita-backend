@@ -21,6 +21,7 @@ import { Payment } from 'src/payment/entities/payment.entity';
 import { Order } from 'src/order/entities/order.entity';
 import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
 import { StoreRanking } from 'src/ranking/entities/store-ranking.entity';
+import { StoreAiSettings } from 'src/store-ai/entities/store-ai-settings.entity';
 import slugify from 'slugify';
 import { StoreStatus } from '../types/status.enum';
 import { InstallmentPeriod } from '../types/installment-period.enum';
@@ -38,6 +39,7 @@ export class Store extends TimestampEntity {
 
   hasMultipleBranches?: boolean;
   productsCount?: number;
+  aiEnabled?: boolean;
 
   @Column('text')
   description: string;
@@ -104,6 +106,11 @@ export class Store extends TimestampEntity {
 
   @OneToOne(() => StoreRanking, (ranking) => ranking.store, { nullable: true })
   ranking?: StoreRanking;
+
+  @OneToOne(() => StoreAiSettings, (aiSettings) => aiSettings.store, {
+    nullable: true,
+  })
+  aiSettings?: StoreAiSettings;
 
   @ManyToMany(() => CompanyCollaborator, (collaborator) => collaborator.stores)
   collaborators: CompanyCollaborator[];

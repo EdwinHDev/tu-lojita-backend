@@ -174,6 +174,7 @@ export class OrderService {
       }
 
       let subtotal = 0;
+      let totalOrderBasePrice = 0;
       let totalOrderCommission = 0;
       let hasPreOrderItem = false;
       let hasProductItem = false;
@@ -394,46 +395,116 @@ export class OrderService {
           }
         }
 
-        // Determinar precio base (ganancia neta de la tienda para este artículo)
+        // Determinar precio público fijo del catálogo y snapshots de comisión del artículo
+        let rawPrice = parseFloat(item.price.toString());
+        let rawBase =
+          item.basePrice !== null && item.basePrice !== undefined
+            ? parseFloat(item.basePrice.toString())
+            : 0;
+        let rawRate =
+          item.commissionRate !== null && item.commissionRate !== undefined
+            ? parseFloat(item.commissionRate.toString())
+            : 0;
+        let rawAmount =
+          item.commissionAmount !== null && item.commissionAmount !== undefined
+            ? parseFloat(item.commissionAmount.toString())
+            : 0;
+
+        if (rawBase > 0 && (rawAmount === 0 || rawPrice === rawBase) && store) {
+          const comm = await this.commissionService.calculateCommission(
+            rawBase,
+            false,
+            store,
+          );
+          rawRate = comm.rate;
+          rawAmount = comm.commissionAmount;
+          rawPrice = Math.round((rawBase + rawAmount) * 100) / 100;
+        }
+
+        let unitPublicPrice: number;
         let merchantBasePrice: number;
+        let itemCommRate: number;
+        let itemCommAmount: number;
+
         if (item.hasVariants && variant) {
+          let vPrice =
+            variant.price !== null && variant.price !== undefined
+              ? parseFloat(variant.price.toString())
+              : rawPrice;
           const vBase =
             variant.basePrice !== null && variant.basePrice !== undefined
               ? parseFloat(variant.basePrice.toString())
-              : (variant.price !== null && variant.price !== undefined
-                  ? parseFloat(variant.price.toString())
-                  : parseFloat(item.basePrice?.toString() || item.price.toString()));
+              : rawBase;
+          let vRate =
+            variant.commissionRate !== null &&
+            variant.commissionRate !== undefined
+              ? parseFloat(variant.commissionRate.toString())
+              : rawRate;
+          let vAmount =
+            variant.commissionAmount !== null &&
+            variant.commissionAmount !== undefined
+              ? parseFloat(variant.commissionAmount.toString())
+              : rawAmount;
+
+          if (vBase > 0 && (vAmount === 0 || vPrice === vBase) && store) {
+            const comm = await this.commissionService.calculateCommission(
+              vBase,
+              false,
+              store,
+            );
+            vRate = comm.rate;
+            vAmount = comm.commissionAmount;
+            vPrice = Math.round((vBase + vAmount) * 100) / 100;
+          }
+
           const vDiscount =
             variant.discountPrice !== null &&
             variant.discountPrice !== undefined
               ? parseFloat(variant.discountPrice.toString())
               : null;
-          merchantBasePrice =
-            vDiscount !== null && vDiscount < vBase ? vDiscount : vBase;
+
+          if (vDiscount !== null && vDiscount > 0 && vDiscount < vPrice) {
+            unitPublicPrice = vDiscount;
+            itemCommRate = vRate;
+            merchantBasePrice =
+              vRate > 0
+                ? Math.round((vDiscount / (1 + vRate / 100)) * 100) / 100
+                : vDiscount;
+            itemCommAmount =
+              Math.round((vDiscount - merchantBasePrice) * 100) / 100;
+          } else {
+            unitPublicPrice = vPrice;
+            merchantBasePrice = vBase > 0 ? vBase : vPrice;
+            itemCommRate = vRate;
+            itemCommAmount = vAmount;
+          }
         } else {
-          const itemBase =
-            item.basePrice !== null && item.basePrice !== undefined && parseFloat(item.basePrice.toString()) > 0
-              ? parseFloat(item.basePrice.toString())
-              : parseFloat(item.price.toString());
           const itemDiscount =
             item.discountPrice !== null && item.discountPrice !== undefined
               ? parseFloat(item.discountPrice.toString())
               : null;
-          merchantBasePrice =
-            itemDiscount !== null && itemDiscount < itemBase ? itemDiscount : itemBase;
+
+          if (
+            itemDiscount !== null &&
+            itemDiscount > 0 &&
+            itemDiscount < rawPrice
+          ) {
+            unitPublicPrice = itemDiscount;
+            itemCommRate = rawRate;
+            merchantBasePrice =
+              rawRate > 0
+                ? Math.round((itemDiscount / (1 + rawRate / 100)) * 100) / 100
+                : itemDiscount;
+            itemCommAmount =
+              Math.round((itemDiscount - merchantBasePrice) * 100) / 100;
+          } else {
+            unitPublicPrice = rawPrice;
+            merchantBasePrice = rawBase > 0 ? rawBase : rawPrice;
+            itemCommRate = rawRate;
+            itemCommAmount = rawAmount;
+          }
         }
 
-        // 4.1 Cálculo de comisión por artículo según el modo de pago (Contado vs Cuotas)
-        const { rate: itemCommRate, commissionAmount: itemCommAmount } =
-          await this.commissionService.calculateCommission(
-            merchantBasePrice,
-            isPartialPayment,
-            store,
-          );
-
-        // El precio público unitario con la comisión correspondiente incorporada
-        const unitPublicPrice =
-          Math.round((merchantBasePrice + itemCommAmount) * 100) / 100;
         const totalLinePrice =
           unitPublicPrice * itemDto.quantity + customizationExtra;
         const priceAtOrder =
@@ -441,8 +512,12 @@ export class OrderService {
             ? Math.round((totalLinePrice / itemDto.quantity) * 100) / 100
             : totalLinePrice;
 
-        // Subtotal y acumulación de comisión de plataforma de la orden
+        // Subtotal, base del comercio y acumulación de comisión de plataforma de la orden
         subtotal = Math.round((subtotal + totalLinePrice) * 100) / 100;
+        totalOrderBasePrice =
+          Math.round(
+            (totalOrderBasePrice + merchantBasePrice * itemDto.quantity) * 100,
+          ) / 100;
         totalOrderCommission =
           Math.round(
             (totalOrderCommission + itemCommAmount * itemDto.quantity) * 100,
@@ -471,9 +546,15 @@ export class OrderService {
         );
       }
 
-      if (bookedServicesCount > 1) {
+      if (hasPreOrderItem && (hasProductItem || hasServiceItem)) {
         throw new BadRequestException(
-          'Cada servicio con reserva de turno debe tramitarse en un pedido individual.',
+          'Los artículos en preventa deben tramitarse en un pedido exclusivo debido a sus tiempos estimados de entrega.',
+        );
+      }
+
+      if (bookedServicesCount > 1 || (hasServiceItem && orderItemsToSave.length > 1)) {
+        throw new BadRequestException(
+          'Cada servicio debe tramitarse en un pedido individual por razones de agenda y prestación.',
         );
       }
 
@@ -540,8 +621,10 @@ export class OrderService {
       // subtotal (precios públicos) + feeAmount (recargo por financiamiento en cuotas de la tienda)
       const commAmount = totalOrderCommission;
       const commRate =
-        subtotal > 0
-          ? Math.round(((totalOrderCommission / subtotal) * 100) * 100) / 100
+        totalOrderBasePrice > 0
+          ? Math.round(
+              ((totalOrderCommission / totalOrderBasePrice) * 100) * 100,
+            ) / 100
           : 0;
       const finalAmount = Math.round((subtotal + feeAmount) * 100) / 100;
 
@@ -1563,9 +1646,11 @@ export class OrderService {
     }
 
     const oldStatus = order.status;
+    const previouslyAccruedCommission =
+      this.commissionService.calculateAccruedOrderCommission(order);
     this.orderRepository.merge(order, updateOrderDto);
 
-    // Si la orden pasa a FULLY_PAID, regularizar balances y cuotas
+    // Si la orden pasa a FULLY_PAID, regularizar balances, cuotas y devengar comisión pendiente
     if (
       updateOrderDto.status === OrderStatus.FULLY_PAID &&
       oldStatus !== OrderStatus.FULLY_PAID
@@ -1588,6 +1673,32 @@ export class OrderService {
           inst.status = InstallmentStatus.PAID;
           inst.paidAmount = inst.amount;
           await this.dataSource.getRepository(Installment).save(inst);
+        }
+      }
+
+      const commAmount = parseFloat(
+        order.platformCommissionAmount?.toString() || '0',
+      );
+      if (commAmount > 0 && !order.isCommissionVoided && order.store?.id) {
+        const commToAdd = Math.max(
+          0,
+          Math.round((commAmount - previouslyAccruedCommission) * 100) / 100,
+        );
+        if (commToAdd > 0) {
+          const storeRepo = this.dataSource.getRepository(Store);
+          const freshStore = await storeRepo.findOne({
+            where: { id: order.store.id },
+          });
+          if (freshStore) {
+            const currentDebt = parseFloat(
+              freshStore.accumulatedCommissionDebt?.toString() || '0',
+            );
+            const newDebt = Math.round((currentDebt + commToAdd) * 100) / 100;
+            await storeRepo.update(freshStore.id, {
+              accumulatedCommissionDebt: newDebt,
+            });
+            order.store.accumulatedCommissionDebt = newDebt;
+          }
         }
       }
     }
@@ -1643,8 +1754,12 @@ export class OrderService {
             }
           }
         }
-        // Guardar la orden con el nuevo estado dentro de la misma transacción
+        // Guardar la orden con el nuevo estado y anular su comisión dentro de la misma transacción
         await cancelQueryRunner.manager.save(order);
+        await this.commissionService.voidOrderCommission(
+          order,
+          cancelQueryRunner.manager,
+        );
         await cancelQueryRunner.commitTransaction();
       } catch (error) {
         await cancelQueryRunner.rollbackTransaction();
@@ -2007,6 +2122,7 @@ export class OrderService {
     const { storeId, items: itemsDto, isPartialPayment = false } = dto;
     const errors: {
       itemId?: string;
+      variantId?: string;
       storeId?: string;
       code: string;
       message: string;
@@ -2036,6 +2152,7 @@ export class OrderService {
     let calculatedSubtotal = 0;
     let hasProductItem = false;
     let hasServiceItem = false;
+    let hasPreOrderItem = false;
     let bookedServicesCount = 0;
 
     for (const itemDto of itemsDto) {
@@ -2066,7 +2183,11 @@ export class OrderService {
       }
 
       if (item.itemType === ItemType.PRODUCT) {
-        hasProductItem = true;
+        if (item.bookingType === BookingType.PRE_ORDER) {
+          hasPreOrderItem = true;
+        } else {
+          hasProductItem = true;
+        }
       } else if (item.itemType === ItemType.SERVICE) {
         hasServiceItem = true;
       }
@@ -2128,20 +2249,69 @@ export class OrderService {
         }
       }
 
-      // Determinar precio efectivo
-      let effectivePrice = item.discountPrice
-        ? parseFloat(item.discountPrice.toString())
-        : parseFloat(item.price.toString());
+      // Determinar precio efectivo (con salvaguarda de comisión idéntica al catálogo)
+      let rawPrice = parseFloat(item.price.toString());
+      let rawBase =
+        item.basePrice !== null && item.basePrice !== undefined
+          ? parseFloat(item.basePrice.toString())
+          : 0;
+      let rawAmount =
+        item.commissionAmount !== null && item.commissionAmount !== undefined
+          ? parseFloat(item.commissionAmount.toString())
+          : 0;
+
+      if (rawBase > 0 && (rawAmount === 0 || rawPrice === rawBase) && store) {
+        const comm = await this.commissionService.calculateCommission(
+          rawBase,
+          false,
+          store,
+        );
+        rawAmount = comm.commissionAmount;
+        rawPrice = Math.round((rawBase + rawAmount) * 100) / 100;
+      }
+
+      const itemDiscount =
+        item.discountPrice !== null && item.discountPrice !== undefined
+          ? parseFloat(item.discountPrice.toString())
+          : null;
+      let effectivePrice =
+        itemDiscount !== null && itemDiscount > 0 && itemDiscount < rawPrice
+          ? itemDiscount
+          : rawPrice;
 
       if (item.hasVariants && variant) {
-        if (
-          variant.discountPrice !== null &&
-          variant.discountPrice !== undefined
-        ) {
-          effectivePrice = parseFloat(variant.discountPrice.toString());
-        } else if (variant.price !== null && variant.price !== undefined) {
-          effectivePrice = parseFloat(variant.price.toString());
+        let vPrice =
+          variant.price !== null && variant.price !== undefined
+            ? parseFloat(variant.price.toString())
+            : rawPrice;
+        const vBase =
+          variant.basePrice !== null && variant.basePrice !== undefined
+            ? parseFloat(variant.basePrice.toString())
+            : 0;
+        let vAmount =
+          variant.commissionAmount !== null &&
+          variant.commissionAmount !== undefined
+            ? parseFloat(variant.commissionAmount.toString())
+            : 0;
+
+        if (vBase > 0 && (vAmount === 0 || vPrice === vBase) && store) {
+          const comm = await this.commissionService.calculateCommission(
+            vBase,
+            false,
+            store,
+          );
+          vAmount = comm.commissionAmount;
+          vPrice = Math.round((vBase + vAmount) * 100) / 100;
         }
+
+        const vDiscount =
+          variant.discountPrice !== null && variant.discountPrice !== undefined
+            ? parseFloat(variant.discountPrice.toString())
+            : null;
+        effectivePrice =
+          vDiscount !== null && vDiscount > 0 && vDiscount < vPrice
+            ? vDiscount
+            : vPrice;
       }
 
       // Validar cambio de precio
@@ -2150,6 +2320,7 @@ export class OrderService {
         if (Math.abs(effectivePrice - cartPrice) > 0.001) {
           errors.push({
             itemId: itemDto.itemId,
+            variantId: itemDto.variantId,
             code: 'PRICE_CHANGED',
             message: `El precio de "${item.title}" cambió de $${cartPrice.toFixed(2)} a $${effectivePrice.toFixed(2)}.`,
             currentPrice: effectivePrice,
@@ -2227,11 +2398,19 @@ export class OrderService {
       });
     }
 
-    if (bookedServicesCount > 1) {
+    if (hasPreOrderItem && (hasProductItem || hasServiceItem)) {
+      errors.push({
+        code: 'INCOMPATIBLE_PREORDER_ITEMS',
+        message:
+          'Los artículos en preventa deben tramitarse en un pedido exclusivo debido a sus tiempos estimados de entrega.',
+      });
+    }
+
+    if (bookedServicesCount > 1 || (hasServiceItem && itemsDto.length > 1)) {
       errors.push({
         code: 'MULTIPLE_BOOKINGS_NOT_ALLOWED',
         message:
-          'Cada servicio con reserva de turno debe tramitarse en un pedido individual.',
+          'Cada servicio debe tramitarse en un pedido individual por razones de agenda y prestación.',
       });
     }
 

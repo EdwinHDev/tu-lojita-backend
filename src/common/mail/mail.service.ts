@@ -1,7 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 import { Order } from 'src/order/entities/order.entity';
 import { Payment } from 'src/payment/entities/payment.entity';
+import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
+import {
+  ExchangeRateEmailContext,
+  formatDualPrice,
+  renderIssuanceDateNotice,
+  renderExchangeRateFooterNote,
+} from 'src/common/utils/currency-format.utils';
 import {
   getInstallmentPlanTemplate,
   getPaymentReminderTemplate,
@@ -25,7 +32,25 @@ import { formatDateInTimezone } from 'src/common/utils/timezone.utils';
 export class MailService {
   private readonly logger = new Logger(MailService.name);
 
-  constructor(private readonly mailerService: MailerService) {}
+  constructor(
+    private readonly mailerService: MailerService,
+    @Optional()
+    private readonly platformSettingsService?: PlatformSettingsService,
+  ) {}
+
+  private async getExchangeRateContext(): Promise<ExchangeRateEmailContext | null> {
+    if (!this.platformSettingsService) {
+      return null;
+    }
+    try {
+      const config = await this.platformSettingsService.getExchangeRateConfig();
+      return config;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Could not retrieve exchange rate for email: ${msg}`);
+      return null;
+    }
+  }
 
   async sendOrderConfirmation(order: Order) {
     try {
@@ -53,6 +78,9 @@ export class MailService {
         ? formatDateInTimezone(new Date(order.nextDueDate))
         : undefined;
 
+      const rateContext = await this.getExchangeRateContext();
+      const emissionDate = formatDateInTimezone(new Date());
+
       await this.mailerService.sendMail({
         to: order.user.email,
         subject: title,
@@ -66,6 +94,8 @@ export class MailService {
               paidAmount,
               remainingBalance,
               nextDate,
+              rateContext,
+              emissionDate,
             )
           : `<h2>Hola ${customerName}, tu orden #${orderId} en ${order.store.name} ha sido confirmada.</h2>`,
       });
@@ -88,6 +118,9 @@ export class MailService {
   ) {
     try {
       const formattedOrderId = orderId.split('-')[0].toUpperCase();
+      const rateContext = await this.getExchangeRateContext();
+      const emissionDate = formatDateInTimezone(new Date());
+
       await this.mailerService.sendMail({
         to: email,
         subject: 'Recordatorio de Pago Próximo - Tu Lojita',
@@ -96,6 +129,8 @@ export class MailService {
           amount,
           formatDateInTimezone(new Date(dueDate)),
           formattedOrderId,
+          rateContext,
+          emissionDate,
         ),
       });
     } catch (error) {
@@ -115,6 +150,9 @@ export class MailService {
         price: parseFloat(oi.price.toString()),
       }));
 
+      const rateContext = await this.getExchangeRateContext();
+      const emissionDate = formatDateInTimezone(new Date());
+
       await this.mailerService.sendMail({
         to: order.user.email,
         subject: `Pago Bajo Revisión - Orden #${orderId}`,
@@ -124,6 +162,8 @@ export class MailService {
           order.store.name,
           items,
           amount,
+          rateContext,
+          emissionDate,
         ),
       });
       this.logger.log(
@@ -157,6 +197,9 @@ export class MailService {
           }
         : undefined;
 
+      const rateContext = await this.getExchangeRateContext();
+      const emissionDate = formatDateInTimezone(new Date());
+
       await this.mailerService.sendMail({
         to: payment.user.email,
         subject: `¡Pago Aprobado! 🎉 - Orden #${orderId}`,
@@ -167,6 +210,8 @@ export class MailService {
           parseFloat(payment.amount.toString()),
           nextInstallmentInfo,
           remainingBalance,
+          rateContext,
+          emissionDate,
         ),
       });
       this.logger.log(
@@ -183,6 +228,8 @@ export class MailService {
     try {
       const orderId = payment.order.id.split('-')[0].toUpperCase();
       const customerName = `${payment.user.firstName}${payment.user.lastName ? ' ' + payment.user.lastName : ''}`;
+      const rateContext = await this.getExchangeRateContext();
+      const emissionDate = formatDateInTimezone(new Date());
 
       await this.mailerService.sendMail({
         to: payment.user.email,
@@ -193,6 +240,8 @@ export class MailService {
           payment.store.name,
           parseFloat(payment.amount.toString()),
           payment.rejectionReason || undefined,
+          rateContext,
+          emissionDate,
         ),
       });
       this.logger.log(
@@ -243,10 +292,35 @@ export class MailService {
   ) {
     try {
       const shortOrderId = orderId.split('-')[0].toUpperCase();
+      const rateContext = await this.getExchangeRateContext();
+      const emissionDate = formatDateInTimezone(new Date());
+      const amountDual = formatDualPrice(amount, rateContext);
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        emissionDate,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        emissionDate,
+        rateContext,
+      );
+
       await this.mailerService.sendMail({
         to: email,
         subject: `Próxima Cuota Programada - Orden #${shortOrderId}`,
-        html: `<h2>Hola ${customerName},</h2><p>Se ha confirmado tu pago en <strong>${storeName}</strong>.</p><p>Tu <strong>Cuota #${installmentNumber}</strong> por un monto de <strong>$${amount.toFixed(2)}</strong> ha sido programada con fecha de vencimiento: <strong>${formatDateInTimezone(dueDate)}</strong>.</p>`,
+        html: `
+          <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF;">
+            ${issuanceNoticeHtml}
+            <div style="text-align: center; margin-bottom: 24px;">
+              <span style="background-color: #EFF6FF; color: #1D4ED8; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600;">PRÓXIMA CUOTA PROGRAMADA</span>
+            </div>
+            <h2 style="color: #1E293B; font-size: 20px; font-weight: 700; text-align: center;">Hola, ${customerName}</h2>
+            <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center;">Se ha confirmado tu pago en <strong>${storeName}</strong>.</p>
+            <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center;">Tu <strong>Cuota #${installmentNumber}</strong> por un monto de <strong>${amountDual.combined}</strong> ha sido programada con fecha de vencimiento: <strong>${formatDateInTimezone(dueDate)}</strong>.</p>
+            <hr style="border: 0; border-top: 1px solid #E2E8F0; margin: 24px 0 20px 0;">
+            <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+            ${footerNoteHtml}
+          </div>
+        `,
       });
     } catch (error) {
       this.logger.error(
@@ -523,26 +597,40 @@ export class MailService {
     dueDate: Date,
   ) {
     try {
-      const subject = `Liquidación Semanal de Comisiones ($${amount.toFixed(2)}) - ${storeName}`;
-      const text = `Estimado equipo de ${storeName},\n\nSe ha emitido el corte de comisiones por un monto de $${amount.toFixed(2)} USD.\nFecha límite de pago: ${formatDateInTimezone(dueDate)}.\n\nPor favor ingresa a Tu Lojita Empresa para reportar tu comprobante.\n\nTu Lojita Finanzas`;
+      const rateContext = await this.getExchangeRateContext();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const amountDual = formatDualPrice(amount, rateContext);
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        dateFormatted,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        dateFormatted,
+        rateContext,
+      );
+
+      const subject = `Liquidación Semanal de Comisiones (${amountDual.combined}) - ${storeName}`;
+      const text = `Estimado equipo de ${storeName},\n\nSe ha emitido el corte de comisiones por un monto de ${amountDual.combined}.\nFecha límite de pago: ${formatDateInTimezone(dueDate)}.\n\nPor favor ingresa a Tu Lojita Empresa para reportar tu comprobante.\n\nTu Lojita Finanzas`;
       await this.mailerService.sendMail({
         to: email,
         subject,
         text,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+            ${issuanceNoticeHtml}
             <h2 style="color: #1e293b; margin-bottom: 8px;">Corte Semanal de Comisiones por Ventas</h2>
             <p style="color: #64748b; font-size: 15px;">Estimado equipo de <strong>${storeName}</strong>,</p>
             <p style="color: #334155; font-size: 15px; line-height: 1.5;">Se ha emitido el corte de comisiones correspondiente a las ventas procesadas en tu tienda. El total liquidado es:</p>
             <div style="margin: 24px 0; text-align: center;">
-              <span style="display: inline-block; font-size: 32px; font-weight: 800; color: #0284c7; background-color: #f0f9ff; padding: 12px 24px; border-radius: 8px; border: 1px dashed #38bdf8;">
-                $${amount.toFixed(2)} USD
+              <span style="display: inline-block; font-size: 26px; font-weight: 800; color: #0284c7; background-color: #f0f9ff; padding: 12px 24px; border-radius: 8px; border: 1px dashed #38bdf8;">
+                ${amountDual.combined}
               </span>
             </div>
             <p style="color: #334155; font-size: 14px;">Fecha límite de pago (con 3 días de gracia): <strong>${formatDateInTimezone(dueDate)}</strong>.</p>
             <p style="color: #64748b; font-size: 13px;">Por favor ingresa a la aplicación <strong>Tu Lojita Empresa</strong> en la sección de Deudas con la Plataforma para reportar tu comprobante antes del vencimiento del período de gracia.</p>
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
             <p style="color: #94a3b8; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Finanzas & Plataforma</p>
+            ${footerNoteHtml}
           </div>
         `,
       });
@@ -560,20 +648,34 @@ export class MailService {
     amount: number,
   ) {
     try {
+      const rateContext = await this.getExchangeRateContext();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const amountDual = formatDualPrice(amount, rateContext);
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        dateFormatted,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        dateFormatted,
+        rateContext,
+      );
+
       const subject = `Recordatorio: Hoy vence el plazo de pago de comisiones - ${storeName}`;
-      const text = `Hola, equipo de ${storeName},\n\nTe recordamos que hoy finaliza el período de gracia para liquidar las comisiones pendientes por $${amount.toFixed(2)} USD.\nReporta tu pago a tiempo desde Tu Lojita Empresa.\n\nTu Lojita © 2026`;
+      const text = `Hola, equipo de ${storeName},\n\nTe recordamos que hoy finaliza el período de gracia para liquidar las comisiones pendientes por ${amountDual.combined}.\nReporta tu pago a tiempo desde Tu Lojita Empresa.\n\nTu Lojita © 2026`;
       await this.mailerService.sendMail({
         to: email,
         subject,
         text,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fed7aa; border-radius: 12px; background-color: #fffbeb;">
+            ${issuanceNoticeHtml}
             <h2 style="color: #c2410c; margin-bottom: 8px;">Período de Gracia por Vencer Hoy</h2>
             <p style="color: #78350f; font-size: 15px;">Hola, equipo de <strong>${storeName}</strong>,</p>
-            <p style="color: #92400e; font-size: 15px; line-height: 1.5;">Te recordamos que hoy miércoles a las <strong>11:59 PM</strong> finaliza el período de gracia para liquidar las comisiones pendientes por un monto de <strong>$${amount.toFixed(2)} USD</strong>.</p>
+            <p style="color: #92400e; font-size: 15px; line-height: 1.5;">Te recordamos que hoy miércoles a las <strong>11:59 PM</strong> finaliza el período de gracia para liquidar las comisiones pendientes por un monto de <strong>${amountDual.combined}</strong>.</p>
             <p style="color: #92400e; font-size: 14px; line-height: 1.5;">Evita la suspensión automática de tu tienda y la aplicación de multas reportando tu pago a tiempo desde Tu Lojita Empresa.</p>
             <hr style="border: none; border-top: 1px solid #fed7aa; margin: 24px 0;" />
             <p style="color: #b45309; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Cobranzas</p>
+            ${footerNoteHtml}
           </div>
         `,
       });
@@ -592,22 +694,37 @@ export class MailService {
     fineAmount: number,
   ) {
     try {
+      const rateContext = await this.getExchangeRateContext();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const fineDual = formatDualPrice(fineAmount, rateContext);
+      const totalDual = formatDualPrice(totalDue, rateContext);
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        dateFormatted,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        dateFormatted,
+        rateContext,
+      );
+
       const subject = `Aviso Importante: Estado de tu tienda - ${storeName}`;
-      const text = `Estimado equipo de ${storeName},\n\nEl período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido suspendida temporalmente.\nRecargo de mora: $${fineAmount.toFixed(2)} USD.\nDeuda total a regularizar: $${totalDue.toFixed(2)} USD.\n\nUna vez verificado el pago total, tu tienda será reactivada automáticamente.\n\nTu Lojita © 2026`;
+      const text = `Estimado equipo de ${storeName},\n\nEl período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido suspendida temporalmente.\nRecargo de mora: ${fineDual.combined}.\nDeuda total a regularizar: ${totalDual.combined}.\n\nUna vez verificado el pago total, tu tienda será reactivada automáticamente.\n\nTu Lojita © 2026`;
       await this.mailerService.sendMail({
         to: email,
         subject,
         text,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fecaca; border-radius: 12px; background-color: #fef2f2;">
+            ${issuanceNoticeHtml}
             <h2 style="color: #dc2626; margin-bottom: 8px;">Suspensión de Operaciones por Mora</h2>
             <p style="color: #991b1b; font-size: 15px;">Estimado equipo de <strong>${storeName}</strong>,</p>
             <p style="color: #991b1b; font-size: 15px; line-height: 1.5;">El período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido <strong>suspendida temporalmente</strong> y tus productos ya no serán visibles para los clientes.</p>
-            <p style="color: #7f1d1d; font-size: 14px;">Se ha aplicado un recargo por mora/multa de: <strong>$${fineAmount.toFixed(2)} USD</strong>.</p>
-            <p style="color: #7f1d1d; font-size: 16px; font-weight: 700;">Deuda total a regularizar: $${totalDue.toFixed(2)} USD.</p>
+            <p style="color: #7f1d1d; font-size: 14px;">Se ha aplicado un recargo por mora/multa de: <strong>${fineDual.combined}</strong>.</p>
+            <p style="color: #7f1d1d; font-size: 16px; font-weight: 700;">Deuda total a regularizar: ${totalDual.combined}.</p>
             <p style="color: #991b1b; font-size: 13px;">Una vez verificado el pago total, tu tienda será reactivada automáticamente.</p>
             <hr style="border: none; border-top: 1px solid #fecaca; margin: 24px 0;" />
             <p style="color: #b91c1c; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Departamento de Riesgo y Cobranzas</p>
+            ${footerNoteHtml}
           </div>
         `,
       });
@@ -656,20 +773,34 @@ export class MailService {
     lateFee: number,
   ) {
     try {
+      const rateContext = await this.getExchangeRateContext();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const lateFeeDual = formatDualPrice(lateFee, rateContext);
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        dateFormatted,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        dateFormatted,
+        rateContext,
+      );
+
       const subject = `Aviso sobre el estado de tu suscripción - Tu Lojita Empresa`;
-      const text = `Hola ${userName},\n\nEl período de gracia de tu suscripción ha expirado. Tus tiendas han sido suspendidas del catálogo público y se ha aplicado un recargo de mora de $${lateFee.toFixed(2)} USD.\nIngresa a Tu Lojita Empresa para regularizar tu pago.\n\nTu Lojita © 2026`;
+      const text = `Hola ${userName},\n\nEl período de gracia de tu suscripción ha expirado. Tus tiendas han sido suspendidas del catálogo público y se ha aplicado un recargo de mora de ${lateFeeDual.combined}.\nIngresa a Tu Lojita Empresa para regularizar tu pago.\n\nTu Lojita © 2026`;
       await this.mailerService.sendMail({
         to: email,
         subject,
         text,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fecaca; border-radius: 12px; background-color: #fef2f2;">
+            ${issuanceNoticeHtml}
             <h2 style="color: #dc2626; margin-bottom: 8px;">Acceso Suspendido</h2>
             <p style="color: #991b1b; font-size: 15px;">Hola <strong>${userName}</strong>,</p>
-            <p style="color: #991b1b; font-size: 15px; line-height: 1.5;">El período de gracia de tu suscripción ha expirado. Tus tiendas han sido suspendidas del catálogo público y se ha aplicado un recargo de mora de <strong>$${lateFee.toFixed(2)} USD</strong>.</p>
+            <p style="color: #991b1b; font-size: 15px; line-height: 1.5;">El período de gracia de tu suscripción ha expirado. Tus tiendas han sido suspendidas del catálogo público y se ha aplicado un recargo de mora de <strong>${lateFeeDual.combined}</strong>.</p>
             <p style="color: #991b1b; font-size: 14px;">Ingresa a Tu Lojita Empresa para regularizar tu pago y restablecer tu operación.</p>
             <hr style="border: none; border-top: 1px solid #fecaca; margin: 24px 0;" />
             <p style="color: #b91c1c; font-size: 12px; text-align: center;">Tu Lojita © 2026</p>
+            ${footerNoteHtml}
           </div>
         `,
       });
@@ -696,9 +827,11 @@ export class MailService {
         params.orderId.length > 8
           ? params.orderId.substring(0, 8).toUpperCase()
           : params.orderId.toUpperCase();
+      const rateContext = await this.getExchangeRateContext();
       const dateFormatted = formatDateInTimezone(new Date());
+      const totalDual = formatDualPrice(params.totalAmount, rateContext);
       const subject = `Nuevo Reclamo en Pedido #${orderShort} - Tu Lojita`;
-      const text = `Hola ${params.storeOwnerName},\n\nSe ha registrado un nuevo reclamo para el pedido #${orderShort} en tu tienda ${params.storeName}.\nCliente: ${params.customerName}\nTipo: ${params.disputeType}\nDescripción: ${params.description}\nMonto: $${params.totalAmount}\n\nIngresa a Tu Lojita Empresa para responder.\n\nTu Lojita © 2026`;
+      const text = `Hola ${params.storeOwnerName},\n\nSe ha registrado un nuevo reclamo para el pedido #${orderShort} en tu tienda ${params.storeName}.\nCliente: ${params.customerName}\nTipo: ${params.disputeType}\nDescripción: ${params.description}\nMonto: ${totalDual.combined}\n\nIngresa a Tu Lojita Empresa para responder.\n\nTu Lojita © 2026`;
       await this.mailerService.sendMail({
         to: params.toEmail,
         subject,
@@ -711,6 +844,8 @@ export class MailService {
           params.disputeType,
           params.description,
           params.totalAmount,
+          dateFormatted,
+          rateContext,
           dateFormatted,
         ),
       });

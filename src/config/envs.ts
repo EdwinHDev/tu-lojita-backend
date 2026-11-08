@@ -27,6 +27,25 @@ interface EnvVars {
   FRONTEND_ADMIN_URL_PROD: string;
   FRONTEND_CUSTOMER_URL_DEV: string;
   FRONTEND_CUSTOMER_URL_PROD: string;
+
+  // AI Vault Encryption
+  AI_ENCRYPTION_MASTER_KEY: string;
+}
+
+export function decodeAiMasterKey(raw: string): Buffer | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return Buffer.from(trimmed, 'hex');
+  }
+  if (/^[A-Za-z0-9+/]{43}=?$|^[A-Za-z0-9+/_-]{43,44}={0,2}$/.test(trimmed)) {
+    const normalized = trimmed.replace(/-/g, '+').replace(/_/g, '/');
+    const buf = Buffer.from(normalized, 'base64');
+    if (buf.length === 32) {
+      return buf;
+    }
+  }
+  return null;
 }
 
 const envsSchema = joi
@@ -56,6 +75,21 @@ const envsSchema = joi
     FRONTEND_ADMIN_URL_PROD: joi.string().required(),
     FRONTEND_CUSTOMER_URL_DEV: joi.string().required(),
     FRONTEND_CUSTOMER_URL_PROD: joi.string().required(),
+
+    // AI Vault Encryption (must decode to 32 bytes: 64 hex chars or 32-byte base64)
+    AI_ENCRYPTION_MASTER_KEY: joi
+      .string()
+      .required()
+      .custom((val: string, helpers) => {
+        if (!decodeAiMasterKey(val)) {
+          return helpers.error('any.invalid');
+        }
+        return val.trim();
+      }, '32-byte encryption key validation')
+      .messages({
+        'any.invalid':
+          'AI_ENCRYPTION_MASTER_KEY must be a 32-byte key (64 hex characters or 44-char base64)',
+      }),
   })
   .unknown(true);
 
@@ -95,4 +129,7 @@ export const envs = {
   frontendAdminUrlProd: envVars.FRONTEND_ADMIN_URL_PROD,
   frontendCustomerUrlDev: envVars.FRONTEND_CUSTOMER_URL_DEV,
   frontendCustomerUrlProd: envVars.FRONTEND_CUSTOMER_URL_PROD,
+
+  // AI Vault Encryption
+  aiEncryptionMasterKey: envVars.AI_ENCRYPTION_MASTER_KEY,
 };

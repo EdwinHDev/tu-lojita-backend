@@ -12,6 +12,8 @@ import { CommissionSettings } from './entities/commission-settings.entity';
 import { StoreCommissionBilling } from './entities/store-commission-billing.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Order } from 'src/order/entities/order.entity';
+import { OrderStatus, InstallmentStatus } from 'src/order/types';
+import { PaymentStatus } from 'src/payment/types/payment-status.enum';
 import { BillingStatus } from './types';
 
 @Injectable()
@@ -91,6 +93,73 @@ export class CommissionService {
     return { rate, commissionAmount };
   }
 
+  calculateAccruedOrderCommission(order: Order): number {
+    const commAmount = parseFloat(
+      order.platformCommissionAmount?.toString() || '0',
+    );
+    if (commAmount <= 0) {
+      return 0;
+    }
+
+    const approvedPayments = (order.payments || []).filter(
+      (p) => p.status === PaymentStatus.APPROVED,
+    );
+    const installments = order.installments || [];
+    const paidInstallmentsCount = installments.filter(
+      (inst) => inst.status === InstallmentStatus.PAID,
+    ).length;
+
+    if (!order.isPartialPayment) {
+      const totalPaid = parseFloat(order.totalPaidAmount?.toString() || '0');
+      if (
+        approvedPayments.length > 0 ||
+        order.isFullyPaid ||
+        order.status === OrderStatus.FULLY_PAID ||
+        totalPaid > 0
+      ) {
+        return commAmount;
+      }
+      return 0;
+    }
+
+    // Orden en cuotas (isPartialPayment === true)
+    if (
+      order.isFullyPaid ||
+      order.status === OrderStatus.FULLY_PAID ||
+      (installments.length > 0 && paidInstallmentsCount >= installments.length)
+    ) {
+      return commAmount;
+    }
+
+    if (installments.length > 0) {
+      if (paidInstallmentsCount <= 0) {
+        return 0;
+      }
+      const perInstComm =
+        Math.round((commAmount / installments.length) * 100) / 100;
+      return Math.min(
+        commAmount,
+        Math.round(perInstComm * paidInstallmentsCount * 100) / 100,
+      );
+    }
+
+    if (approvedPayments.length <= 0) {
+      return 0;
+    }
+    const maxInst = parseInt(
+      order.store?.maxInstallments?.toString() || '1',
+      10,
+    );
+    if (maxInst <= 1 || approvedPayments.length >= maxInst) {
+      return commAmount;
+    }
+    const perInstComm = Math.round((commAmount / maxInst) * 100) / 100;
+    return Math.min(
+      commAmount,
+      Math.round(perInstComm * approvedPayments.length * 100) / 100,
+    );
+  }
+
   async voidOrderCommission(
     order: Order,
     manager?: EntityManager,
@@ -102,14 +171,36 @@ export class CommissionService {
       return;
     }
 
-    const repo = manager ? manager.getRepository(Order) : null;
-    if (repo) {
-      await repo.update(order.id, { isCommissionVoided: true });
-    } else {
-      order.isCommissionVoided = true;
+    const orderRepo = manager
+      ? manager.getRepository(Order)
+      : this.storeRepository.manager.getRepository(Order);
+
+    const fullOrder =
+      order.payments && order.installments
+        ? order
+        : await orderRepo.findOne({
+            where: { id: order.id },
+            relations: ['payments', 'installments', 'store'],
+          });
+
+    const accruedCommission = this.calculateAccruedOrderCommission(
+      fullOrder || order,
+    );
+
+    await orderRepo.update(order.id, { isCommissionVoided: true });
+    order.isCommissionVoided = true;
+
+    if (accruedCommission <= 0) {
+      this.logger.log(
+        `Marked commission voided for unpaid order ${order.id} ($0.00 accrued to reverse)`,
+      );
+      return;
     }
 
-    const storeId = order.store?.id || (order as any).storeId;
+    const storeId =
+      order.store?.id ||
+      fullOrder?.store?.id ||
+      (order as any).storeId;
     if (!storeId) {
       this.logger.warn(
         `Cannot void commission for order ${order.id}: missing store relationship`,
@@ -125,11 +216,12 @@ export class CommissionService {
       const currentDebt = parseFloat(
         store.accumulatedCommissionDebt?.toString() || '0',
       );
-      const newDebt = Math.max(0, currentDebt - commission);
+      const newDebt =
+        Math.round(Math.max(0, currentDebt - accruedCommission) * 100) / 100;
       await storeRepo.update(store.id, { accumulatedCommissionDebt: newDebt });
     }
 
-    // Si existe una factura de corte pendiente para esa tienda, descontarlo
+    // Si existe una factura de corte pendiente para esa tienda, descontar lo efectivamente devengado
     const billingRepo = manager
       ? manager.getRepository(StoreCommissionBilling)
       : this.billingRepository;
@@ -145,8 +237,10 @@ export class CommissionService {
         pendingBilling.commissionAmount.toString(),
       );
       const bDue = parseFloat(pendingBilling.totalDue.toString());
-      const updatedComm = Math.max(0, bCommission - commission);
-      const updatedDue = Math.max(0, bDue - commission);
+      const updatedComm =
+        Math.round(Math.max(0, bCommission - accruedCommission) * 100) / 100;
+      const updatedDue =
+        Math.round(Math.max(0, bDue - accruedCommission) * 100) / 100;
       await billingRepo.update(pendingBilling.id, {
         commissionAmount: updatedComm,
         totalDue: updatedDue,
@@ -154,7 +248,7 @@ export class CommissionService {
     }
 
     this.logger.log(
-      `Voided commission of $${commission} for cancelled order ${order.id}`,
+      `Voided accrued commission of $${accruedCommission} (of $${commission} total) for order ${order.id}`,
     );
   }
 }

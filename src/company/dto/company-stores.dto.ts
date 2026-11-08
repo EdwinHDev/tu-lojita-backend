@@ -16,6 +16,7 @@ export class CompanyStoreDto {
   phone?: string;
   deletionScheduledAt?: Date | null;
   isDeleted?: boolean;
+  aiEnabled?: boolean;
 }
 
 export class CompanyStoresResponseDto {

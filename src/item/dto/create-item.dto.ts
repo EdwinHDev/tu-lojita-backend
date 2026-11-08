@@ -13,7 +13,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ItemType } from '../types/item-type.enum';
 import { BookingType } from '../types/booking-type.enum';
 import { PriceType } from '../types/price-type.enum';
@@ -26,10 +26,11 @@ import { VariantAxisDto } from './variant-axis.dto';
 import { ItemVariantDto } from './item-variant.dto';
 
 export class CreateItemDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString({ message: 'El título debe ser una cadena de texto' })
   @IsNotEmpty({ message: 'El título no puede estar vacío' })
   @MinLength(3, { message: 'El título debe tener al menos 3 caracteres' })
-  @MaxLength(100, { message: 'El título debe tener menos de 100 caracteres' })
+  @MaxLength(60, { message: 'El título no puede exceder los 60 caracteres' })
   title: string;
 
   @IsString({ message: 'El ID de la tienda debe ser una cadena de texto' })

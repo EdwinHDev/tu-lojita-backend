@@ -67,6 +67,16 @@ export class CompanyCollaborator extends TimestampEntity {
   })
   stores: Store[];
 
+  @ManyToMany(() => Store, { eager: true, cascade: true })
+  @JoinTable({
+    name: 'collaborator_ai_branches',
+    joinColumn: { name: 'collaboratorId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'storeId', referencedColumnName: 'id' },
+  })
+  aiEnabledStores: Store[];
+
+  aiAllowedStoreIds?: string[];
+
   @BeforeInsert()
   @BeforeUpdate()
   hashPassword() {

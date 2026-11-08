@@ -10,6 +10,9 @@ import { CompanyCollaborator } from '../entities/company-collaborator.entity';
 import { Company } from '../entities/company.entity';
 import { CompanyRole } from '../entities/company-role.entity';
 import { Store } from 'src/store/entities/store.entity';
+import { StoreAiSettings } from 'src/store-ai/entities/store-ai-settings.entity';
+import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
+import { CompanyPermission } from '../types/company-permission.enum';
 import { CollaboratorCredentialService } from './collaborator-credential.service';
 import { CreateCompanyCollaboratorDto } from '../dto/create-company-collaborator.dto';
 import { UpdateCompanyCollaboratorDto } from '../dto/update-company-collaborator.dto';
@@ -27,9 +30,92 @@ export class CompanyCollaboratorService {
     private readonly roleRepository: Repository<CompanyRole>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
+    @InjectRepository(StoreAiSettings)
+    private readonly storeAiSettingsRepository: Repository<StoreAiSettings>,
     private readonly credentialService: CollaboratorCredentialService,
     private readonly activityLogService: CompanyActivityLogService,
+    private readonly platformSettingsService: PlatformSettingsService,
   ) {}
+
+  private roleHasInventoryEdit(role?: CompanyRole | null): boolean {
+    return Boolean(
+      role?.permissions?.some(
+        (p) => p.permission === CompanyPermission.INVENTORY_EDIT,
+      ),
+    );
+  }
+
+  private attachAiAllowedStoreIds(
+    collaborator: CompanyCollaborator,
+  ): CompanyCollaborator {
+    const canEditInventory = this.roleHasInventoryEdit(collaborator.role);
+    const assignedIds = new Set((collaborator.stores || []).map((s) => s.id));
+    collaborator.aiAllowedStoreIds = canEditInventory
+      ? (collaborator.aiEnabledStores || [])
+          .filter(
+            (s) => collaborator.hasFullBranchAccess || assignedIds.has(s.id),
+          )
+          .map((s) => s.id)
+      : [];
+    return collaborator;
+  }
+
+  private async resolveAiEnabledStores(
+    companyId: string,
+    role: CompanyRole | undefined,
+    hasFullBranchAccess: boolean,
+    assignedStores: Store[],
+    requestedStoreIds?: string[],
+  ): Promise<Store[]> {
+    if (!this.roleHasInventoryEdit(role)) {
+      return [];
+    }
+    if (!requestedStoreIds || requestedStoreIds.length === 0) {
+      return [];
+    }
+
+    const globalEnabled =
+      await this.platformSettingsService.isAiImageEnhancementEnabled();
+    if (!globalEnabled) {
+      return [];
+    }
+
+    const uniqueIds = Array.from(new Set(requestedStoreIds));
+    let candidateStores: Store[] = [];
+
+    if (hasFullBranchAccess) {
+      candidateStores = await this.storeRepository.find({
+        where: {
+          id: In(uniqueIds),
+          company: { id: companyId },
+          isDeleted: false,
+        },
+      });
+    } else {
+      candidateStores = (assignedStores || []).filter((s) =>
+        uniqueIds.includes(s.id),
+      );
+    }
+
+    if (candidateStores.length === 0) {
+      return [];
+    }
+
+    const activeSettings = await this.storeAiSettingsRepository.find({
+      where: {
+        storeId: In(candidateStores.map((s) => s.id)),
+        isEnabled: true,
+      },
+    });
+
+    const activeStoreIds = new Set(
+      activeSettings
+        .filter((s) => Boolean(s.apiKeyHint))
+        .map((s) => s.storeId),
+    );
+
+    return candidateStores.filter((s) => activeStoreIds.has(s.id));
+  }
 
   /**
    * Crear un nuevo colaborador con credenciales autogeneradas
@@ -53,15 +139,18 @@ export class CompanyCollaboratorService {
 
     const role = await this.roleRepository.findOne({
       where: { id: createDto.roleId, company: { id: companyId } },
+      relations: ['permissions'],
     });
 
     if (!role) {
       throw new NotFoundException('El rol asignado no existe en esta empresa');
     }
 
+    const hasFullBranchAccess = createDto.hasFullBranchAccess || false;
+
     // Resolver sucursales
     let stores: Store[] = [];
-    if (!createDto.hasFullBranchAccess && createDto.storeIds && createDto.storeIds.length > 0) {
+    if (!hasFullBranchAccess && createDto.storeIds && createDto.storeIds.length > 0) {
       stores = await this.storeRepository.find({
         where: {
           id: In(createDto.storeIds),
@@ -76,6 +165,14 @@ export class CompanyCollaboratorService {
       }
     }
 
+    const aiEnabledStores = await this.resolveAiEnabledStores(
+      companyId,
+      role,
+      hasFullBranchAccess,
+      stores,
+      createDto.aiAllowedStoreIds,
+    );
+
     // Generar credenciales de 8 dígitos
     const accessId = await this.credentialService.generateAccessId();
     const initialPassword = this.credentialService.generateInitialPassword();
@@ -89,12 +186,15 @@ export class CompanyCollaboratorService {
       lastName: createDto.lastName.trim(),
       identification: createDto.identification?.trim(),
       phone: createDto.phone?.trim(),
-      hasFullBranchAccess: createDto.hasFullBranchAccess || false,
+      hasFullBranchAccess,
       stores,
+      aiEnabledStores,
       isActive: true,
     });
 
-    const saved = await this.collaboratorRepository.save(collaborator);
+    const saved = this.attachAiAllowedStoreIds(
+      await this.collaboratorRepository.save(collaborator),
+    );
 
     this.activityLogService.log({
       companyId,
@@ -110,6 +210,7 @@ export class CompanyCollaboratorService {
         roleName: role.name,
         hasFullBranchAccess: saved.hasFullBranchAccess,
         storesCount: saved.stores?.length || 0,
+        aiStoresCount: saved.aiAllowedStoreIds?.length || 0,
       },
     });
 
@@ -137,14 +238,14 @@ export class CompanyCollaboratorService {
   }> {
     const [items, total] = await this.collaboratorRepository.findAndCount({
       where: { company: { id: companyId } },
-      relations: ['role', 'stores'],
+      relations: ['role', 'role.permissions', 'stores', 'aiEnabledStores'],
       order: { createdAt: 'DESC' },
       take: limit,
       skip: offset,
     });
 
     return {
-      items,
+      items: items.map((item) => this.attachAiAllowedStoreIds(item)),
       total,
       hasMore: offset + items.length < total,
       limit,
@@ -161,14 +262,14 @@ export class CompanyCollaboratorService {
   ): Promise<CompanyCollaborator> {
     const collaborator = await this.collaboratorRepository.findOne({
       where: { id: collaboratorId, company: { id: companyId } },
-      relations: ['role', 'role.permissions', 'stores'],
+      relations: ['role', 'role.permissions', 'stores', 'aiEnabledStores'],
     });
 
     if (!collaborator) {
       throw new NotFoundException('Colaborador no encontrado');
     }
 
-    return collaborator;
+    return this.attachAiAllowedStoreIds(collaborator);
   }
 
   /**
@@ -209,6 +310,7 @@ export class CompanyCollaboratorService {
     if (updateDto.roleId) {
       const role = await this.roleRepository.findOne({
         where: { id: updateDto.roleId, company: { id: companyId } },
+        relations: ['permissions'],
       });
       if (!role) {
         throw new NotFoundException('El nuevo rol no existe en la empresa');
@@ -231,7 +333,36 @@ export class CompanyCollaboratorService {
       collaborator.stores = stores;
     }
 
-    const saved = await this.collaboratorRepository.save(collaborator);
+    if (!this.roleHasInventoryEdit(collaborator.role)) {
+      collaborator.aiEnabledStores = [];
+    } else if (updateDto.aiAllowedStoreIds !== undefined) {
+      collaborator.aiEnabledStores = await this.resolveAiEnabledStores(
+        companyId,
+        collaborator.role,
+        collaborator.hasFullBranchAccess,
+        collaborator.stores || [],
+        updateDto.aiAllowedStoreIds,
+      );
+    } else if (
+      updateDto.storeIds !== undefined ||
+      updateDto.hasFullBranchAccess !== undefined ||
+      updateDto.roleId !== undefined
+    ) {
+      const existingAiIds = (collaborator.aiEnabledStores || []).map(
+        (s) => s.id,
+      );
+      collaborator.aiEnabledStores = await this.resolveAiEnabledStores(
+        companyId,
+        collaborator.role,
+        collaborator.hasFullBranchAccess,
+        collaborator.stores || [],
+        existingAiIds,
+      );
+    }
+
+    const saved = this.attachAiAllowedStoreIds(
+      await this.collaboratorRepository.save(collaborator),
+    );
 
     let action = 'COLLABORATOR_UPDATED';
     let description = `Colaborador ${saved.firstName} ${saved.lastName} actualizado`;

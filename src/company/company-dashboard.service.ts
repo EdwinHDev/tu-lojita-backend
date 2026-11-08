@@ -40,6 +40,7 @@ import {
 import { Payment } from 'src/payment/entities/payment.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { PaymentStatus } from 'src/payment/types/payment-status.enum';
+import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
 
 @Injectable()
 export class CompanyDashboardService {
@@ -58,6 +59,7 @@ export class CompanyDashboardService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    private readonly platformSettingsService: PlatformSettingsService,
   ) {}
 
   /**
@@ -465,7 +467,7 @@ export class CompanyDashboardService {
 
     let stores = await this.storeRepository.find({
       where: { company: { id: companyId }, isDeleted: false },
-      relations: ['items', 'addresses'],
+      relations: ['items', 'addresses', 'aiSettings'],
       order: { createdAt: 'DESC' },
     });
 
@@ -473,6 +475,8 @@ export class CompanyDashboardService {
       stores = stores.filter((s) => allowedStoreIds.includes(s.id));
     }
 
+    const globalAiEnabled =
+      await this.platformSettingsService.isAiImageEnhancementEnabled();
     const totalCompanyStores = stores.length;
     const companyStores: CompanyStoreDto[] = await Promise.all(
       stores.map(async (store) => {
@@ -511,6 +515,11 @@ export class CompanyDashboardService {
           phone: store.phone,
           deletionScheduledAt: store.deletionScheduledAt,
           isDeleted: store.isDeleted,
+          aiEnabled: Boolean(
+            globalAiEnabled &&
+              store.aiSettings?.isEnabled &&
+              store.aiSettings?.apiKeyHint,
+          ),
         };
       }),
     );

@@ -1169,6 +1169,7 @@ export class AuthService {
       .leftJoinAndSelect('collab.role', 'role')
       .leftJoinAndSelect('role.permissions', 'permissions')
       .leftJoinAndSelect('collab.stores', 'stores')
+      .leftJoinAndSelect('collab.aiEnabledStores', 'aiEnabledStores')
       .where('collab.accessId = :accessId', { accessId })
       .getOne();
 
@@ -1212,6 +1213,16 @@ export class AuthService {
     const allowedBranchIds = collaborator.hasFullBranchAccess
       ? []
       : (collaborator.stores || []).map((s) => s.id);
+    const canEditInventory = permissions.includes('inventory:edit');
+    const aiAllowedStoreIds = canEditInventory
+      ? (collaborator.aiEnabledStores || [])
+          .filter(
+            (s) =>
+              collaborator.hasFullBranchAccess ||
+              allowedBranchIds.includes(s.id),
+          )
+          .map((s) => s.id)
+      : [];
 
     return {
       collaborator: {
@@ -1235,6 +1246,7 @@ export class AuthService {
         permissions,
         hasFullBranchAccess: collaborator.hasFullBranchAccess,
         allowedBranchIds,
+        aiAllowedStoreIds,
         stores: (collaborator.stores || []).map((s) => ({
           id: s.id,
           name: s.name,

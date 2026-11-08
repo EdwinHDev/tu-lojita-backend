@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, LessThanOrEqual } from 'typeorm';
+import { Repository, In, LessThanOrEqual, MoreThan } from 'typeorm';
 import { StoreCommissionBilling } from '../entities/store-commission-billing.entity';
 import { CommissionSettings } from '../entities/commission-settings.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { StoreStatus } from 'src/store/types/status.enum';
 import { Order } from 'src/order/entities/order.entity';
+import { OrderStatus } from 'src/order/types';
 import { BillingStatus, FineType } from '../types';
 import { MailService } from 'src/common/mail/mail.service';
 
@@ -62,11 +63,13 @@ export class CommissionBillingCron {
       );
       if (debt <= 0) continue;
 
-      // Buscar órdenes del período
+      // Buscar órdenes efectivamente pagadas/abonadas con comisión activa
       const orders = await this.orderRepository.find({
         where: {
           store: { id: store.id },
+          status: In([OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]),
           isCommissionVoided: false,
+          platformCommissionAmount: MoreThan(0),
         },
       });
 

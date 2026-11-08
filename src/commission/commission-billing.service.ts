@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan, In } from 'typeorm';
+import { Repository, Between, LessThan, MoreThan, In } from 'typeorm';
 import { StoreCommissionBilling } from './entities/store-commission-billing.entity';
 import { CommissionPaymentReport } from './entities/commission-payment-report.entity';
 import { CommissionConfigRange } from './entities/commission-config-range.entity';
@@ -176,14 +176,17 @@ export class StoreCommissionBillingService {
       order: { createdAt: 'DESC' },
     });
 
-    // Buscar órdenes recientes que generaron comisión
+    // Buscar órdenes recientes efectivamente pagadas/abonadas que generaron comisión
     const recentOrders = await this.orderRepository.find({
       where: {
         store: { id: storeId },
+        status: In([OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]),
         isCommissionVoided: false,
+        platformCommissionAmount: MoreThan(0),
       },
       select: [
         'id',
+        'totalAmount',
         'finalAmount',
         'platformCommissionRate',
         'platformCommissionAmount',

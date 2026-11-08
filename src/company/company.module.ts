@@ -23,8 +23,10 @@ import { Item } from 'src/item/entities/item.entity';
 import { Payment } from 'src/payment/entities/payment.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
+import { StoreAiSettings } from 'src/store-ai/entities/store-ai-settings.entity';
 import { FinancialAuthModule } from 'src/financial-auth/financial-auth.module';
 import { NotificationModule } from 'src/notification/notification.module';
+import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.module';
 
 @Module({
   imports: [
@@ -36,6 +38,7 @@ import { NotificationModule } from 'src/notification/notification.module';
       CompanyActivityLog,
       User,
       Store,
+      StoreAiSettings,
       Order,
       Item,
       Payment,
@@ -44,6 +47,7 @@ import { NotificationModule } from 'src/notification/notification.module';
     ]),
     FinancialAuthModule,
     NotificationModule,
+    PlatformSettingsModule,
   ],
   controllers: [
     CompanyController,

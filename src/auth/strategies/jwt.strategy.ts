@@ -48,6 +48,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
           'role',
           'role.permissions',
           'stores',
+          'aiEnabledStores',
         ],
       });
 
@@ -77,6 +78,16 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       const allowedBranchIds = collaborator.hasFullBranchAccess
         ? []
         : (collaborator.stores || []).map((s) => s.id);
+      const canEditInventory = permissions.includes('inventory:edit');
+      const aiAllowedStoreIds = canEditInventory
+        ? (collaborator.aiEnabledStores || [])
+            .filter(
+              (s) =>
+                collaborator.hasFullBranchAccess ||
+                allowedBranchIds.includes(s.id),
+            )
+            .map((s) => s.id)
+        : [];
 
       return {
         id: collaborator.id,
@@ -93,6 +104,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         collaboratorRole: collaborator.role?.name,
         permissions,
         allowedBranchIds,
+        aiAllowedStoreIds,
         hasFullBranchAccess: collaborator.hasFullBranchAccess,
         stores: collaborator.stores || [],
       };

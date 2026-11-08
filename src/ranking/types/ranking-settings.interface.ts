@@ -97,27 +97,6 @@ export interface DivisionEmblemsConfig {
   [key: string]: string | undefined;
 }
 
-export interface DivisionFramesConfig {
-  PUESTO_AMBULANTE?: string;
-  CARRITO_VENTAS?: string;
-  TIENDITA_BARRIO?: string;
-  LOCAL_ESTABLECIDO?: string;
-  TIENDA_MARCA?: string;
-  GRAN_DISTRIBUIDOR?: string;
-  IMPERIO_COMERCIAL?: string;
-  MAGNATE_MERCADO?: string;
-  // Legacy aliases
-  HIERRO?: string;
-  BRONCE?: string;
-  PLATA?: string;
-  ORO?: string;
-  PLATINO?: string;
-  ESMERALDA?: string;
-  DIAMANTE?: string;
-  MAESTRO?: string;
-  [key: string]: string | undefined;
-}
-
 export interface RankingSettingsData {
   lpValues: LpValuesConfig;
   divisionThresholds: DivisionThresholdsConfig;
@@ -126,7 +105,6 @@ export interface RankingSettingsData {
   inactivity: InactivityConfig;
   maestro: MaestroConfig;
   divisionEmblems: DivisionEmblemsConfig;
-  divisionFrames?: DivisionFramesConfig;
   retention: RetentionConfig;
   missions: MissionsConfig;
 }
@@ -220,24 +198,5 @@ export const DEFAULT_RANKING_SETTINGS: RankingSettingsData = {
     ESMERALDA: '/assets/ranking/emblems/gran_distribuidor.png',
     DIAMANTE: '/assets/ranking/emblems/imperio_comercial.png',
     MAESTRO: '/assets/ranking/emblems/magnate_mercado.png',
-  },
-  divisionFrames: {
-    PUESTO_AMBULANTE: '/assets/ranking/frames/puesto_ambulante.png',
-    CARRITO_VENTAS: '/assets/ranking/frames/carrito_ventas.png',
-    TIENDITA_BARRIO: '/assets/ranking/frames/tiendita_barrio.png',
-    LOCAL_ESTABLECIDO: '/assets/ranking/frames/local_establecido.png',
-    TIENDA_MARCA: '/assets/ranking/frames/tienda_marca.png',
-    GRAN_DISTRIBUIDOR: '/assets/ranking/frames/gran_distribuidor.png',
-    IMPERIO_COMERCIAL: '/assets/ranking/frames/imperio_comercial.png',
-    MAGNATE_MERCADO: '/assets/ranking/frames/magnate_mercado.png',
-    // Legacy aliases
-    HIERRO: '/assets/ranking/frames/puesto_ambulante.png',
-    BRONCE: '/assets/ranking/frames/carrito_ventas.png',
-    PLATA: '/assets/ranking/frames/tiendita_barrio.png',
-    ORO: '/assets/ranking/frames/local_establecido.png',
-    PLATINO: '/assets/ranking/frames/tienda_marca.png',
-    ESMERALDA: '/assets/ranking/frames/gran_distribuidor.png',
-    DIAMANTE: '/assets/ranking/frames/imperio_comercial.png',
-    MAESTRO: '/assets/ranking/frames/magnate_mercado.png',
   },
 };

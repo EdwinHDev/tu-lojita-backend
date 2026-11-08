@@ -193,6 +193,31 @@ export class ItemService {
     let variantAxesJson: any[] = [];
     let variantsJson: any[] = [];
 
+    let storeForMap: Store | null | undefined = item.store;
+    if (!storeForMap) {
+      if ((item as any).storeId) {
+        storeForMap = await this.storeRepository.findOne({ where: { id: (item as any).storeId } });
+      } else if (item.id) {
+        const itemWithStore = await this.itemRepository.findOne({
+          where: { id: item.id },
+          relations: ['store'],
+        });
+        storeForMap = itemWithStore?.store;
+      }
+    }
+
+    let rootPrice = item.price !== null && item.price !== undefined ? parseFloat(item.price.toString()) : 0;
+    let rootBase = item.basePrice !== null && item.basePrice !== undefined ? parseFloat(item.basePrice.toString()) : 0;
+    let rootRate = item.commissionRate !== null && item.commissionRate !== undefined ? parseFloat(item.commissionRate.toString()) : 0;
+    let rootAmount = item.commissionAmount !== null && item.commissionAmount !== undefined ? parseFloat(item.commissionAmount.toString()) : 0;
+
+    if (rootBase > 0 && (rootAmount === 0 || rootPrice === rootBase) && storeForMap) {
+      const comm = await this.commissionService.calculateCommission(rootBase, false, storeForMap);
+      rootRate = comm.rate;
+      rootAmount = comm.commissionAmount;
+      rootPrice = Math.round((rootBase + rootAmount) * 100) / 100;
+    }
+
     if (item.hasVariants) {
       let axes = item.variantAxes;
       if (!axes) {
@@ -213,19 +238,6 @@ export class ItemService {
         variants = await this.itemVariantRepository.find({
           where: { item: { id: item.id } },
         });
-      }
-
-      let storeForMap: Store | null | undefined = item.store;
-      if (!storeForMap) {
-        if ((item as any).storeId) {
-          storeForMap = await this.storeRepository.findOne({ where: { id: (item as any).storeId } });
-        } else if (item.id) {
-          const itemWithStore = await this.itemRepository.findOne({
-            where: { id: item.id },
-            relations: ['store'],
-          });
-          storeForMap = itemWithStore?.store;
-        }
       }
 
       variantsJson = await Promise.all((variants || []).map(async (v) => {
@@ -270,6 +282,10 @@ export class ItemService {
 
     return {
       ...item,
+      basePrice: rootBase,
+      commissionRate: rootRate,
+      commissionAmount: rootAmount,
+      price: rootPrice,
       store: item.store
         ? {
             ...item.store,
@@ -595,10 +611,26 @@ export class ItemService {
           this.generateSku(storeName, item.title, combo);
 
         let vBase: number | null = null;
-        if (dto?.basePrice !== undefined && dto.basePrice !== null) {
-          vBase = parseFloat(dto.basePrice.toString());
-        } else if (dto?.price !== undefined && dto.price !== null) {
-          vBase = parseFloat(dto.price.toString());
+        const dtoPrice =
+          dto?.price !== undefined && dto.price !== null
+            ? parseFloat(dto.price.toString())
+            : null;
+        const dtoBasePrice =
+          dto?.basePrice !== undefined && dto.basePrice !== null
+            ? parseFloat(dto.basePrice.toString())
+            : null;
+
+        if (dtoPrice !== null && dtoBasePrice !== null) {
+          if (dtoPrice !== dtoBasePrice) {
+            // Client provided differing values (e.g. updated price while basePrice was stale from original entity)
+            vBase = dtoPrice;
+          } else {
+            vBase = dtoBasePrice;
+          }
+        } else if (dtoPrice !== null) {
+          vBase = dtoPrice;
+        } else if (dtoBasePrice !== null) {
+          vBase = dtoBasePrice;
         } else if (existing?.basePrice !== undefined && existing.basePrice !== null) {
           vBase = parseFloat(existing.basePrice.toString());
         } else if (existing?.price !== undefined && existing.price !== null) {
@@ -635,7 +667,6 @@ export class ItemService {
 
         if (dto?.discountPrice !== undefined && dto.discountPrice !== null && dto.discountPrice > 0) {
           const discBase = parseFloat(dto.discountPrice.toString());
-          const storeForVariant = item.store || (await this.storeRepository.findOne({ where: { items: { id: item.id } } }));
           if (storeForVariant) {
             const discComm = await this.commissionService.calculateCommission(discBase, false, storeForVariant);
             vDiscount = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
@@ -1490,44 +1521,7 @@ export class ItemService {
       await this.validateAttributes(item.category.id, updateItemDto.attributes);
     }
 
-    if (updateItemDto.isActive === false && item.isActive === true) {
-      // 1. Verificación operativa: Órdenes en curso
-      const activeOrdersCount = await this.orderItemRepository
-        .createQueryBuilder('oi')
-        .innerJoin('oi.order', 'o')
-        .where('oi.itemId = :itemId', { itemId: id })
-        .andWhere('o.status IN (:...statuses)', {
-          statuses: [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID],
-        })
-        .getCount();
 
-      if (activeOrdersCount > 0) {
-        throw new BadRequestException(
-          'No se puede despublicar el artículo porque tiene compras o pedidos en curso.',
-        );
-      }
-
-      // 2. Verificación operativa: Disputas abiertas
-      const activeDisputesCount = await this.orderDisputeRepository
-        .createQueryBuilder('d')
-        .innerJoin('d.order', 'o')
-        .innerJoin('o.orderItems', 'oi')
-        .where('oi.itemId = :itemId', { itemId: id })
-        .andWhere('d.status IN (:...disputeStatuses)', {
-          disputeStatuses: [
-            DisputeStatus.OPEN,
-            DisputeStatus.MERCHANT_RESPONDED,
-            DisputeStatus.ADMIN_REVIEW,
-          ],
-        })
-        .getCount();
-
-      if (activeDisputesCount > 0) {
-        throw new BadRequestException(
-          'No se puede despublicar el artículo porque tiene una disputa o mediación abierta en revisión.',
-        );
-      }
-    }
 
     const hasVariantsActive =
       updateItemDto.hasVariants !== undefined

@@ -29,6 +29,7 @@ import { ReviewModule } from './review/review.module';
 import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { RankingModule } from './ranking/ranking.module';
 import { FavoriteModule } from './favorite/favorite.module';
+import { StoreAiModule } from './store-ai/store-ai.module';
 
 @Module({
   imports: [
@@ -84,6 +85,7 @@ import { FavoriteModule } from './favorite/favorite.module';
     PlatformSettingsModule,
     RankingModule,
     FavoriteModule,
+    StoreAiModule,
   ],
   controllers: [],
   providers: [],

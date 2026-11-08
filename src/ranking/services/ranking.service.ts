@@ -672,14 +672,6 @@ export class RankingService {
       settings.divisionEmblems[emblemKey] ||
       `/uploads/emblems/${normDiv.toLowerCase()}.png`;
 
-    const frameKey =
-      settings.divisionFrames && normDiv in settings.divisionFrames
-        ? normDiv
-        : ranking.division;
-    const frameUrl =
-      (settings.divisionFrames && settings.divisionFrames[frameKey]) ||
-      `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
-
     // Calculate position in leaderboard
     const betterStoresCount = await this.storeRankingRepo
       .createQueryBuilder('sr')
@@ -725,7 +717,6 @@ export class RankingService {
       division: normDiv,
       divisionTitle: DIVISION_TITLES[normDiv] || normDiv,
       divisionEmblemUrl: emblemUrl,
-      divisionFrameUrl: frameUrl,
       position,
       isCalibrating: ranking.isCalibrating,
       calibrationOrdersCompleted: ranking.calibrationOrdersCompleted,
@@ -803,13 +794,6 @@ export class RankingService {
       const normDiv = normalizeDivision(r.division);
       const emblemKey =
         normDiv in settings.divisionEmblems ? normDiv : r.division;
-      const frameKey =
-        settings.divisionFrames && normDiv in settings.divisionFrames
-          ? normDiv
-          : r.division;
-      const frameUrl =
-        (settings.divisionFrames && settings.divisionFrames[frameKey]) ||
-        `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
       return {
         position: (page - 1) * limit + idx + 1,
         storeId: r.storeId,
@@ -820,7 +804,6 @@ export class RankingService {
         divisionEmblemUrl:
           settings.divisionEmblems[emblemKey] ||
           `/uploads/emblems/${normDiv.toLowerCase()}.png`,
-        divisionFrameUrl: frameUrl,
         currentPR: r.currentPR,
         currentLP: r.currentPR,
         consecutiveSalesDays: r.consecutiveSalesDays || 0,
@@ -846,16 +829,12 @@ export class RankingService {
       const emblemUrl =
         settings.divisionEmblems[normDiv] ||
         `/uploads/emblems/${normDiv.toLowerCase()}.png`;
-      const frameUrl =
-        (settings.divisionFrames && settings.divisionFrames[normDiv]) ||
-        `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
 
       return {
         division: normDiv,
         title: DIVISION_TITLES[normDiv] || normDiv,
         threshold,
         emblemUrl,
-        frameUrl,
       };
     });
   }

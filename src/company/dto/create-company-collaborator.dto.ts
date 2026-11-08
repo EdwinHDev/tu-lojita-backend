@@ -44,4 +44,12 @@ export class CreateCompanyCollaboratorDto {
   @IsBoolean({ message: 'hasFullBranchAccess debe ser un booleano' })
   @IsOptional()
   hasFullBranchAccess?: boolean;
+
+  @IsArray({ message: 'aiAllowedStoreIds debe enviarse como una lista' })
+  @IsUUID('4', {
+    each: true,
+    message: 'Cada sucursal con IA debe ser un UUID válido',
+  })
+  @IsOptional()
+  aiAllowedStoreIds?: string[];
 }

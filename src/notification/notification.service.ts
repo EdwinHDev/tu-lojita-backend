@@ -1075,7 +1075,6 @@ export class NotificationService {
             !payload.orderId
               ? payload.targetId || payload.storeId || ''
               : '',
-          click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         android: {
           priority: 'high',
@@ -1085,7 +1084,6 @@ export class NotificationService {
             channelId: 'high_importance_channel',
             sound: 'default',
             priority: 'high',
-            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
           },
         },
         apns: {
@@ -1150,6 +1148,7 @@ export class NotificationService {
       let resolvedUserId = data.userId;
       let candidateStoreId = data.storeId;
       let isMerchantStoreNotification = false;
+      let verifiedOrderId: string | undefined = data.orderId;
 
       if (candidateStoreId) {
         const store = await this.storeRepository
@@ -1174,6 +1173,9 @@ export class NotificationService {
             relations: ['store', 'store.owner', 'store.company', 'store.company.owner'],
           })
           .catch(() => null);
+        if (order?.id) {
+          verifiedOrderId = verifiedOrderId || order.id;
+        }
         if (order?.store?.id) {
           const ownerId =
             order.store.owner?.id || order.store.company?.owner?.id;
@@ -1271,7 +1273,16 @@ export class NotificationService {
       }
 
       // 2. Enviar Push FCM tanto al destinatario principal como a los colaboradores autorizados
-      const hasExplicitOrder = Boolean(data.orderId);
+      if (!verifiedOrderId && targetId && data.type === NotificationType.GENERAL) {
+        const matchedOrder = await this.orderRepository
+          .findOne({ where: { id: targetId }, select: ['id'] })
+          .catch(() => null);
+        if (matchedOrder?.id) {
+          verifiedOrderId = matchedOrder.id;
+        }
+      }
+
+      const hasExplicitOrder = Boolean(verifiedOrderId);
       const isStoreMediation =
         !hasExplicitOrder &&
         (data.type === NotificationType.MEDIATION_RESPONSE ||
@@ -1305,7 +1316,7 @@ export class NotificationService {
           type: data.type,
           channelType: data.channelType,
           orderId:
-            data.orderId ||
+            verifiedOrderId ||
             (isOrderRelated &&
             data.type !== NotificationType.MEDIATION_REQUEST &&
             data.type !== NotificationType.MEDIATION_RESPONSE

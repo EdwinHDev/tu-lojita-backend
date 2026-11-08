@@ -377,6 +377,7 @@ export class StoreService {
         'owner',
         'addresses',
         'ranking',
+        'aiSettings',
       ],
     });
 
@@ -402,9 +403,19 @@ export class StoreService {
         where: { company: { id: store.company.id } },
       });
       store.hasMultipleBranches = count > 1;
+      const globalAiEnabled =
+        await this.platformSettings.isAiImageEnhancementEnabled();
+      store.aiEnabled = Boolean(
+        globalAiEnabled &&
+          store.aiSettings?.isEnabled &&
+          store.aiSettings?.apiKeyHint,
+      );
     } else {
       store.hasMultipleBranches = false;
+      store.aiEnabled = false;
     }
+
+    delete store.aiSettings;
 
     store.productsCount = await this.itemRepository.count({
       where: { store: { id: store.id } },
@@ -497,13 +508,6 @@ export class StoreService {
       for (const store of stores) {
         if (store.ranking) {
           const normDiv = normalizeDivision(store.ranking.division);
-          const frameKey =
-            settings.divisionFrames && normDiv in settings.divisionFrames
-              ? normDiv
-              : store.ranking.division;
-          const frameUrl =
-            (settings.divisionFrames && settings.divisionFrames[frameKey]) ||
-            `/assets/ranking/frames/${normDiv.toLowerCase()}.png`;
 
           const emblemKey =
             normDiv in settings.divisionEmblems
@@ -513,7 +517,6 @@ export class StoreService {
             settings.divisionEmblems[emblemKey] ||
             `/assets/ranking/emblems/${normDiv.toLowerCase()}.png`;
 
-          (store.ranking as any).divisionFrameUrl = frameUrl;
           (store.ranking as any).divisionEmblemUrl = emblemUrl;
         }
       }

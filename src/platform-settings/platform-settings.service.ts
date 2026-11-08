@@ -25,7 +25,11 @@ export const PLATFORM_KEYS = {
   BCV_RATE_MANUAL_VALUE: 'bcv_rate_manual_value',
   BCV_RATE_CACHED_VALUE: 'bcv_rate_cached_value',
   BCV_RATE_LAST_SYNC: 'bcv_rate_last_sync',
+  AI_IMAGE_ENHANCEMENT_ENABLED: 'ai_image_enhancement_enabled',
+  AI_GEMINI_MODEL: 'ai_gemini_model',
 } as const;
+
+export const DEFAULT_AI_GEMINI_MODEL = 'gemini-2.5-flash-image';
 
 @Injectable()
 export class PlatformSettingsService {
@@ -58,6 +62,8 @@ export class PlatformSettingsService {
       [PLATFORM_KEYS.BCV_RATE_MANUAL_VALUE]: '50.00',
       [PLATFORM_KEYS.BCV_RATE_CACHED_VALUE]: '50.00',
       [PLATFORM_KEYS.BCV_RATE_LAST_SYNC]: new Date().toISOString(),
+      [PLATFORM_KEYS.AI_IMAGE_ENHANCEMENT_ENABLED]: 'true',
+      [PLATFORM_KEYS.AI_GEMINI_MODEL]: DEFAULT_AI_GEMINI_MODEL,
     };
 
     for (const [key, value] of Object.entries(defaults)) {
@@ -194,6 +200,28 @@ export class PlatformSettingsService {
     };
   }
 
+  async isAiImageEnhancementEnabled(): Promise<boolean> {
+    const val = await this.get(PLATFORM_KEYS.AI_IMAGE_ENHANCEMENT_ENABLED);
+    return val === null ? true : val === 'true';
+  }
+
+  async getAiGeminiModel(): Promise<string> {
+    const val = await this.get(PLATFORM_KEYS.AI_GEMINI_MODEL);
+    const trimmed = val?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : DEFAULT_AI_GEMINI_MODEL;
+  }
+
+  async getAiImageGovernanceConfig(): Promise<{
+    enabled: boolean;
+    model: string;
+  }> {
+    const [enabled, model] = await Promise.all([
+      this.isAiImageEnhancementEnabled(),
+      this.getAiGeminiModel(),
+    ]);
+    return { enabled, model };
+  }
+
   async getPublicSettings(): Promise<{
     officialSupportWhatsapp: string;
     whatsappSupportEnabled: boolean;
@@ -214,18 +242,26 @@ export class PlatformSettingsService {
       mode: 'AUTO' | 'MANUAL';
       updatedAt: string;
     };
+    aiImageEnhancement: {
+      enabled: boolean;
+    };
   }> {
-    const [whatsapp, enabled, featuredShowcase, exchangeRate] = await Promise.all([
-      this.getOfficialSupportWhatsapp(),
-      this.isWhatsappSupportEnabled(),
-      this.getFeaturedShowcaseConfig(),
-      this.getExchangeRateConfig(),
-    ]);
+    const [whatsapp, enabled, featuredShowcase, exchangeRate, aiEnabled] =
+      await Promise.all([
+        this.getOfficialSupportWhatsapp(),
+        this.isWhatsappSupportEnabled(),
+        this.getFeaturedShowcaseConfig(),
+        this.getExchangeRateConfig(),
+        this.isAiImageEnhancementEnabled(),
+      ]);
     return {
       officialSupportWhatsapp: whatsapp,
       whatsappSupportEnabled: enabled,
       featuredShowcase,
       exchangeRate,
+      aiImageEnhancement: {
+        enabled: aiEnabled,
+      },
     };
   }
 

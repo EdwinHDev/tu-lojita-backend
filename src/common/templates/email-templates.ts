@@ -1,3 +1,12 @@
+import {
+  ExchangeRateEmailContext,
+  formatDualPrice,
+  renderDualPriceCellHtml,
+  renderIssuanceDateNotice,
+  renderExchangeRateFooterNote,
+} from '../utils/currency-format.utils';
+import { formatDateInTimezone } from '../utils/timezone.utils';
+
 export function getLoginAlertTemplate(
   firstName: string,
   blockUrl: string,
@@ -45,13 +54,31 @@ export function getInstallmentPlanTemplate(
   paidAmount: number,
   remainingBalance: number,
   nextPaymentDate?: string,
+  rateContext?: ExchangeRateEmailContext | null,
+  emissionDate?: string,
 ): string {
+  const emissionFormatted =
+    emissionDate || formatDateInTimezone(new Date());
+  const issuanceNoticeHtml = renderIssuanceDateNotice(
+    emissionFormatted,
+    rateContext,
+  );
+  const footerNoteHtml = renderExchangeRateFooterNote(
+    emissionFormatted,
+    rateContext,
+  );
+
+  const paidDual = formatDualPrice(paidAmount, rateContext);
+  const remainingDual = formatDualPrice(remainingBalance, rateContext);
+
   const installmentsHtml = installments
     .map(
       (i, index) => `
     <tr>
       <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #475569;">Cuota ${index + 1}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #1E293B; font-weight: 600;">$${i.amount}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #1E293B;">
+        ${renderDualPriceCellHtml(i.amount, rateContext, { align: 'left' })}
+      </td>
       <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #475569;">${i.dueDate}</td>
     </tr>
   `,
@@ -60,6 +87,7 @@ export function getInstallmentPlanTemplate(
 
   return `
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 600px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF;">
+      ${issuanceNoticeHtml}
       <div style="text-align: center; margin-bottom: 24px;">
         <span style="background-color: #F0FDF4; color: #16A34A; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600;">PLAN DE PAGOS APROBADO</span>
       </div>
@@ -71,11 +99,13 @@ export function getInstallmentPlanTemplate(
       <div style="display: flex; gap: 12px; margin-bottom: 24px;">
         <div style="flex: 1; background-color: #F8FAFC; padding: 16px; border-radius: 12px; text-align: center;">
           <p style="margin: 0; font-size: 12px; color: #64748B; text-transform: uppercase;">Pagado</p>
-          <p style="margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #16A34A;">$${paidAmount}</p>
+          <p style="margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #16A34A;">${paidDual.usd}</p>
+          ${paidDual.bs ? `<p style="margin: 2px 0 0; font-size: 11px; color: #15803D; font-weight: 600;">~ ${paidDual.bs}</p>` : ''}
         </div>
         <div style="flex: 1; background-color: #F8FAFC; padding: 16px; border-radius: 12px; text-align: center;">
           <p style="margin: 0; font-size: 12px; color: #64748B; text-transform: uppercase;">Pendiente</p>
-          <p style="margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #DC2626;">$${remainingBalance}</p>
+          <p style="margin: 4px 0 0; font-size: 18px; font-weight: 700; color: #DC2626;">${remainingDual.usd}</p>
+          ${remainingDual.bs ? `<p style="margin: 2px 0 0; font-size: 11px; color: #B91C1C; font-weight: 600;">~ ${remainingDual.bs}</p>` : ''}
         </div>
       </div>
 
@@ -111,6 +141,7 @@ export function getInstallmentPlanTemplate(
       </div>
 
       <p style="color: #94A3B8; font-size: 12px; text-align: center;">Tu Lojita - Tu tienda de confianza</p>
+      ${footerNoteHtml}
     </div>
   `;
 }
@@ -120,15 +151,30 @@ export function getPaymentReminderTemplate(
   amount: number,
   dueDate: string,
   orderId: string,
+  rateContext?: ExchangeRateEmailContext | null,
+  emissionDate?: string,
 ): string {
+  const emissionFormatted =
+    emissionDate || formatDateInTimezone(new Date());
+  const issuanceNoticeHtml = renderIssuanceDateNotice(
+    emissionFormatted,
+    rateContext,
+  );
+  const footerNoteHtml = renderExchangeRateFooterNote(
+    emissionFormatted,
+    rateContext,
+  );
+  const amountDual = formatDualPrice(amount, rateContext);
+
   return `
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF;">
+      ${issuanceNoticeHtml}
       <div style="text-align: center; margin-bottom: 24px;">
         <span style="background-color: #FEF2F2; color: #DC2626; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600;">RECORDATORIO DE PAGO</span>
       </div>
       <h2 style="color: #1E293B; font-size: 20px; font-weight: 700; text-align: center;">Hola, ${customerName}</h2>
       <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center;">
-        Te recordamos que tienes una cuota pendiente por un monto de <strong>$${amount}</strong> que vence el <strong>${dueDate}</strong>.
+        Te recordamos que tienes una cuota pendiente por un monto de <strong>${amountDual.combined}</strong> que vence el <strong>${dueDate}</strong>.
       </p>
       
       <div style="text-align: center; margin: 32px 0;">
@@ -137,6 +183,7 @@ export function getPaymentReminderTemplate(
       </div>
 
       <p style="color: #94A3B8; font-size: 12px; text-align: center; margin: 0;">Evita cargos adicionales por mora pagando a tiempo.</p>
+      ${footerNoteHtml}
     </div>
   `;
 }
@@ -147,13 +194,29 @@ export function getSinglePaymentUnderReviewTemplate(
   storeName: string,
   items: { title: string; quantity: number; price: number }[],
   amount: number,
+  rateContext?: ExchangeRateEmailContext | null,
+  emissionDate?: string,
 ): string {
+  const emissionFormatted =
+    emissionDate || formatDateInTimezone(new Date());
+  const issuanceNoticeHtml = renderIssuanceDateNotice(
+    emissionFormatted,
+    rateContext,
+  );
+  const footerNoteHtml = renderExchangeRateFooterNote(
+    emissionFormatted,
+    rateContext,
+  );
+  const amountDual = formatDualPrice(amount, rateContext);
+
   const itemsHtml = items
     .map(
       (item) => `
     <tr>
       <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #475569; font-size: 14px;">${item.title} (x${item.quantity})</td>
-      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; color: #1E293B; font-weight: 600; text-align: right; font-size: 14px;">$${(item.price * item.quantity).toFixed(2)}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; vertical-align: top;">
+        ${renderDualPriceCellHtml(item.price * item.quantity, rateContext, { align: 'right' })}
+      </td>
     </tr>
   `,
     )
@@ -161,6 +224,7 @@ export function getSinglePaymentUnderReviewTemplate(
 
   return `
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 600px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      ${issuanceNoticeHtml}
       <div style="text-align: center; margin-bottom: 24px;">
         <span style="background-color: #FFF3C7; color: #D97706; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600; text-transform: uppercase;">Pago Bajo Revisión ⌛</span>
       </div>
@@ -171,7 +235,8 @@ export function getSinglePaymentUnderReviewTemplate(
 
       <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 18px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
         <p style="margin: 0; font-size: 12px; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em;">Monto Reportado</p>
-        <p style="margin: 4px 0 0; font-size: 24px; font-weight: 800; color: #4F46E5;">$${amount.toFixed(2)}</p>
+        <p style="margin: 4px 0 0; font-size: 24px; font-weight: 800; color: #4F46E5;">${amountDual.usd}</p>
+        ${amountDual.bs ? `<p style="margin: 4px 0 0; font-size: 13px; font-weight: 600; color: #4338CA;">~ ${amountDual.bs}</p>` : ''}
       </div>
 
       <h3 style="color: #1E293B; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px;">Resumen del Pedido</h3>
@@ -195,6 +260,7 @@ export function getSinglePaymentUnderReviewTemplate(
 
       <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
       <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+      ${footerNoteHtml}
     </div>
   `;
 }
@@ -212,28 +278,53 @@ export function getPaymentApprovedTemplate(
   amount: number,
   nextInstallment?: NextInstallmentScheduleInfo | null,
   remainingBalance?: number | null,
+  rateContext?: ExchangeRateEmailContext | null,
+  emissionDate?: string,
 ): string {
+  const emissionFormatted =
+    emissionDate || formatDateInTimezone(new Date());
+  const issuanceNoticeHtml = renderIssuanceDateNotice(
+    emissionFormatted,
+    rateContext,
+  );
+  const footerNoteHtml = renderExchangeRateFooterNote(
+    emissionFormatted,
+    rateContext,
+  );
+
+  const amountDual = formatDualPrice(amount, rateContext);
+  const remainingDual =
+    typeof remainingBalance === 'number'
+      ? formatDualPrice(remainingBalance, rateContext)
+      : null;
+  const nextDual = nextInstallment
+    ? formatDualPrice(nextInstallment.amount, rateContext)
+    : null;
+
   return `
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 560px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      ${issuanceNoticeHtml}
       <div style="text-align: center; margin-bottom: 24px;">
         <span style="background-color: #DCFCE7; color: #15803D; padding: 8px 18px; border-radius: 9999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">¡Pago Aprobado! 🎉</span>
       </div>
       <h2 style="color: #1E293B; font-size: 22px; font-weight: 700; margin-top: 0; text-align: center;">¡Buenas noticias, ${customerName}!</h2>
       <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
-        Tu pago de <strong>$${amount.toFixed(2)}</strong> para la orden <strong>#${orderId}</strong> en <strong>${storeName}</strong> ha sido verificado y aprobado con éxito.
+        Tu pago de <strong>${amountDual.combined}</strong> para la orden <strong>#${orderId}</strong> en <strong>${storeName}</strong> ha sido verificado y aprobado con éxito.
       </p>
 
       <div style="display: flex; gap: 12px; margin-bottom: 24px;">
         <div style="flex: 1; background-color: #F0FDF4; border: 1px solid #BBF7D0; padding: 14px; border-radius: 12px; text-align: center;">
           <p style="margin: 0; font-size: 11px; color: #15803D; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Monto Aprobado</p>
-          <p style="margin: 4px 0 0; font-size: 20px; font-weight: 800; color: #15803D;">$${amount.toFixed(2)}</p>
+          <p style="margin: 4px 0 0; font-size: 20px; font-weight: 800; color: #15803D;">${amountDual.usd}</p>
+          ${amountDual.bs ? `<p style="margin: 2px 0 0; font-size: 11px; color: #166534; font-weight: 600;">~ ${amountDual.bs}</p>` : ''}
         </div>
         ${
-          typeof remainingBalance === 'number' && remainingBalance > 0.01
+          remainingDual && typeof remainingBalance === 'number' && remainingBalance > 0.01
             ? `
         <div style="flex: 1; background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 14px; border-radius: 12px; text-align: center;">
           <p style="margin: 0; font-size: 11px; color: #64748B; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Saldo Pendiente</p>
-          <p style="margin: 4px 0 0; font-size: 20px; font-weight: 800; color: #0F172A;">$${remainingBalance.toFixed(2)}</p>
+          <p style="margin: 4px 0 0; font-size: 20px; font-weight: 800; color: #0F172A;">${remainingDual.usd}</p>
+          ${remainingDual.bs ? `<p style="margin: 2px 0 0; font-size: 11px; color: #475569; font-weight: 600;">~ ${remainingDual.bs}</p>` : ''}
         </div>
         `
             : ''
@@ -241,7 +332,7 @@ export function getPaymentApprovedTemplate(
       </div>
 
       ${
-        nextInstallment
+        nextInstallment && nextDual
           ? `
       <div style="background-color: #EFF6FF; border: 1.5px solid #BFDBFE; padding: 18px 20px; border-radius: 14px; margin-bottom: 24px;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
@@ -251,7 +342,8 @@ export function getPaymentApprovedTemplate(
         <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px dashed #BFDBFE;">
           <div>
             <p style="margin: 0; font-size: 12px; color: #64748B;">Monto a pagar:</p>
-            <p style="margin: 2px 0 0; font-size: 18px; font-weight: 800; color: #1E293B;">$${nextInstallment.amount.toFixed(2)}</p>
+            <p style="margin: 2px 0 0; font-size: 18px; font-weight: 800; color: #1E293B;">${nextDual.usd}</p>
+            ${nextDual.bs ? `<p style="margin: 2px 0 0; font-size: 11px; color: #1E40AF; font-weight: 600;">~ ${nextDual.bs}</p>` : ''}
           </div>
           <div style="text-align: right;">
             <p style="margin: 0; font-size: 12px; color: #64748B;">Fecha límite:</p>
@@ -275,6 +367,7 @@ export function getPaymentApprovedTemplate(
 
       <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
       <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+      ${footerNoteHtml}
     </div>
   `;
 }
@@ -285,15 +378,30 @@ export function getPaymentRejectedTemplate(
   storeName: string,
   amount: number,
   rejectionReason?: string,
+  rateContext?: ExchangeRateEmailContext | null,
+  emissionDate?: string,
 ): string {
+  const emissionFormatted =
+    emissionDate || formatDateInTimezone(new Date());
+  const issuanceNoticeHtml = renderIssuanceDateNotice(
+    emissionFormatted,
+    rateContext,
+  );
+  const footerNoteHtml = renderExchangeRateFooterNote(
+    emissionFormatted,
+    rateContext,
+  );
+  const amountDual = formatDualPrice(amount, rateContext);
+
   return `
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 550px; margin: 30px auto; padding: 32px; border: 1px solid #E2E8F0; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      ${issuanceNoticeHtml}
       <div style="text-align: center; margin-bottom: 24px;">
         <span style="background-color: #FEE2E2; color: #B91C1C; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 600; text-transform: uppercase;">Pago Rechazado ⚠️</span>
       </div>
       <h2 style="color: #1E293B; font-size: 20px; font-weight: 700; margin-top: 0; text-align: center;">Hola, ${customerName}</h2>
       <p style="color: #475569; font-size: 16px; line-height: 1.6; text-align: center; margin-bottom: 24px;">
-        El comercio de <strong>${storeName}</strong> ha rechazado tu reporte de pago por <strong>$${amount.toFixed(2)}</strong> de la orden #${orderId}.
+        El comercio de <strong>${storeName}</strong> ha rechazado tu reporte de pago por <strong>${amountDual.combined}</strong> de la orden #${orderId}.
       </p>
 
       ${
@@ -315,6 +423,7 @@ export function getPaymentRejectedTemplate(
 
       <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 20px;">
       <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">Tu Lojita - Tu tienda de confianza</p>
+      ${footerNoteHtml}
     </div>
   `;
 }
@@ -492,9 +601,24 @@ export function getStoreNewDisputeTemplate(
   description: string,
   totalAmount: number,
   date?: string,
+  rateContext?: ExchangeRateEmailContext | null,
+  emissionDate?: string,
 ): string {
+  const emissionFormatted =
+    emissionDate || date || formatDateInTimezone(new Date());
+  const issuanceNoticeHtml = renderIssuanceDateNotice(
+    emissionFormatted,
+    rateContext,
+  );
+  const footerNoteHtml = renderExchangeRateFooterNote(
+    emissionFormatted,
+    rateContext,
+  );
+  const totalDual = formatDualPrice(totalAmount, rateContext);
+
   return `
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 580px; margin: 30px auto; padding: 32px; border: 1px solid #FCA5A5; border-radius: 16px; background-color: #FFFFFF; box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.08);">
+      ${issuanceNoticeHtml}
       <div style="text-align: center; margin-bottom: 24px;">
         <span style="background-color: #FEF2F2; color: #DC2626; border: 1px solid #FCA5A5; padding: 6px 14px; border-radius: 9999px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
           Atención Requerida &bull; Nuevo Reclamo
@@ -514,7 +638,7 @@ export function getStoreNewDisputeTemplate(
         </div>
         <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #E2E8F0; padding-bottom: 10px; margin-bottom: 10px;">
           <span style="font-size: 13px; color: #64748B;">Monto de la orden:</span>
-          <span style="font-size: 13px; font-weight: 700; color: #16A34A;">$${Number(totalAmount).toFixed(2)}</span>
+          <span style="font-size: 13px; font-weight: 700; color: #16A34A;">${totalDual.combined}</span>
         </div>
         <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #E2E8F0; padding-bottom: 10px; margin-bottom: 10px;">
           <span style="font-size: 13px; color: #64748B;">Motivo reportado:</span>
@@ -551,6 +675,7 @@ export function getStoreNewDisputeTemplate(
       <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 0;">
         Notificación automática generada por Tu Lojita. Por favor no respondas directamente a este correo.
       </p>
+      ${footerNoteHtml}
     </div>
   `;
 }

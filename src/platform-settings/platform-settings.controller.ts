@@ -38,6 +38,25 @@ export class PlatformSettingsController {
     return this.service.getExchangeRateConfig();
   }
 
+  @Patch('ai-image/config')
+  async updateAiImageGovernanceConfig(
+    @Body() dto: { enabled?: boolean; model?: string },
+  ) {
+    if (dto.enabled !== undefined) {
+      await this.service.set(
+        PLATFORM_KEYS.AI_IMAGE_ENHANCEMENT_ENABLED,
+        dto.enabled ? 'true' : 'false',
+      );
+    }
+    if (dto.model !== undefined && dto.model.trim().length > 0) {
+      await this.service.set(
+        PLATFORM_KEYS.AI_GEMINI_MODEL,
+        dto.model.trim(),
+      );
+    }
+    return this.service.getAiImageGovernanceConfig();
+  }
+
   @Patch(':key')
   update(@Param('key') key: string, @Body('value') value: string) {
     return this.service.set(key, value);
