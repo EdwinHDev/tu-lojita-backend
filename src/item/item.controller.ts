@@ -159,6 +159,12 @@ export class ItemController {
     return this.itemService.getItemPromotionStatus(id, user);
   }
 
+  @Auth()
+  @Get(':id/owner-stats')
+  getOwnerStats(@Param('id') id: string, @GetUser() user: User) {
+    return this.itemService.getOwnerStats(id, user);
+  }
+
   @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
   findOne(@Param('id') id: string, @GetOptionalUser() user: User | null) {

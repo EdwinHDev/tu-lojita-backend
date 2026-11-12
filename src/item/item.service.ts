@@ -21,6 +21,7 @@ import { ItemPropertyTemplate } from './entities/item-property-template.entity';
 import { ItemAttributes } from './types/item-attributes.interface';
 import { CompanyActivityLogService } from 'src/company/services/company-activity-log.service';
 import { ActivityLogModule } from 'src/company/entities/company-activity-log.entity';
+import { CompanyPermission } from 'src/company/types/company-permission.enum';
 interface AttributeProperty {
   key: string;
   type: string;
@@ -448,6 +449,113 @@ export class ItemService {
     });
   }
 
+  private async resolveStoreForItem(
+    item: Item,
+  ): Promise<Store | null | undefined> {
+    if (item.store) return item.store;
+    if (item.id) {
+      const itemWithStore = await this.itemRepository.findOne({
+        where: { id: item.id },
+        relations: ['store'],
+      });
+      if (itemWithStore?.store) return itemWithStore.store;
+    }
+    if ((item as any).storeId) {
+      return this.storeRepository.findOne({
+        where: { id: (item as any).storeId },
+      });
+    }
+    return undefined;
+  }
+
+  private async computeVariantPricing(
+    vBase: number | null,
+    discountInput: number | null | undefined,
+    existingDiscount: number | null | undefined,
+    storeForVariant: Store | null | undefined,
+  ): Promise<{
+    rate: number;
+    amount: number;
+    price: number | null;
+    discountPrice: number | null;
+  }> {
+    let rate = 0;
+    let amount = 0;
+    let price: number | null = null;
+
+    if (vBase !== null && vBase > 0) {
+      if (storeForVariant) {
+        const comm = await this.commissionService.calculateCommission(
+          vBase,
+          false,
+          storeForVariant,
+        );
+        rate = comm.rate;
+        amount = comm.commissionAmount;
+        price = Math.round((vBase + amount) * 100) / 100;
+      } else {
+        price = vBase;
+      }
+    } else if (vBase !== null) {
+      price = 0;
+    }
+
+    let discountPrice: number | null =
+      discountInput !== undefined
+        ? discountInput
+        : existingDiscount !== undefined
+          ? existingDiscount
+          : null;
+
+    if (discountInput !== undefined && discountInput !== null && discountInput > 0) {
+      const discBase = parseFloat(discountInput.toString());
+      if (storeForVariant) {
+        const discComm = await this.commissionService.calculateCommission(
+          discBase,
+          false,
+          storeForVariant,
+        );
+        discountPrice = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
+      }
+    }
+
+    return { rate, amount, price, discountPrice };
+  }
+
+  private resolveVariantBaseInput(
+    dto: ItemVariantDto | undefined,
+    existing: ItemVariant | undefined,
+    item: Item,
+  ): number | null {
+    const dtoPrice =
+      dto?.price !== undefined && dto.price !== null
+        ? parseFloat(dto.price.toString())
+        : null;
+    const dtoBasePrice =
+      dto?.basePrice !== undefined && dto.basePrice !== null
+        ? parseFloat(dto.basePrice.toString())
+        : null;
+
+    if (dtoPrice !== null && dtoBasePrice !== null) {
+      return dtoPrice !== dtoBasePrice ? dtoPrice : dtoBasePrice;
+    }
+    if (dtoPrice !== null) return dtoPrice;
+    if (dtoBasePrice !== null) return dtoBasePrice;
+    if (existing?.basePrice !== undefined && existing.basePrice !== null) {
+      return parseFloat(existing.basePrice.toString());
+    }
+    if (existing?.price !== undefined && existing.price !== null) {
+      return parseFloat(existing.price.toString());
+    }
+    if (item.basePrice !== undefined && item.basePrice !== null) {
+      return parseFloat(item.basePrice.toString());
+    }
+    if (item.price !== undefined && item.price !== null) {
+      return parseFloat(item.price.toString());
+    }
+    return null;
+  }
+
   private async saveVariantsAndAxes(
     item: Item,
     storeName: string,
@@ -579,21 +687,7 @@ export class ItemService {
         where: { item: { id: item.id } },
       });
 
-      let storeForVariant: Store | null | undefined = item.store;
-      if (!storeForVariant) {
-        if (item.id) {
-          const itemWithStore = await this.itemRepository.findOne({
-            where: { id: item.id },
-            relations: ['store'],
-          });
-          storeForVariant = itemWithStore?.store;
-        }
-        if (!storeForVariant && (item as any).storeId) {
-          storeForVariant = await this.storeRepository.findOne({
-            where: { id: (item as any).storeId },
-          });
-        }
-      }
+      const storeForVariant = await this.resolveStoreForItem(item);
 
       const matchedVariantIds = new Set<string>();
 
@@ -610,68 +704,18 @@ export class ItemService {
           existing?.sku ||
           this.generateSku(storeName, item.title, combo);
 
-        let vBase: number | null = null;
-        const dtoPrice =
-          dto?.price !== undefined && dto.price !== null
-            ? parseFloat(dto.price.toString())
-            : null;
-        const dtoBasePrice =
-          dto?.basePrice !== undefined && dto.basePrice !== null
-            ? parseFloat(dto.basePrice.toString())
-            : null;
-
-        if (dtoPrice !== null && dtoBasePrice !== null) {
-          if (dtoPrice !== dtoBasePrice) {
-            // Client provided differing values (e.g. updated price while basePrice was stale from original entity)
-            vBase = dtoPrice;
-          } else {
-            vBase = dtoBasePrice;
-          }
-        } else if (dtoPrice !== null) {
-          vBase = dtoPrice;
-        } else if (dtoBasePrice !== null) {
-          vBase = dtoBasePrice;
-        } else if (existing?.basePrice !== undefined && existing.basePrice !== null) {
-          vBase = parseFloat(existing.basePrice.toString());
-        } else if (existing?.price !== undefined && existing.price !== null) {
-          vBase = parseFloat(existing.price.toString());
-        } else if (item.basePrice !== undefined && item.basePrice !== null) {
-          vBase = parseFloat(item.basePrice.toString());
-        } else if (item.price !== undefined && item.price !== null) {
-          vBase = parseFloat(item.price.toString());
-        }
-
-        let vRate = 0;
-        let vAmount = 0;
-        let vPrice: number | null = null;
-
-        if (vBase !== null && vBase > 0) {
-          if (storeForVariant) {
-            const comm = await this.commissionService.calculateCommission(vBase, false, storeForVariant);
-            vRate = comm.rate;
-            vAmount = comm.commissionAmount;
-            vPrice = Math.round((vBase + vAmount) * 100) / 100;
-          } else {
-            vPrice = vBase;
-          }
-        } else if (vBase !== null) {
-          vPrice = 0;
-        }
-
-        let vDiscount =
-          dto?.discountPrice !== undefined
-            ? dto.discountPrice
-            : existing?.discountPrice !== undefined
-              ? existing.discountPrice
-              : null;
-
-        if (dto?.discountPrice !== undefined && dto.discountPrice !== null && dto.discountPrice > 0) {
-          const discBase = parseFloat(dto.discountPrice.toString());
-          if (storeForVariant) {
-            const discComm = await this.commissionService.calculateCommission(discBase, false, storeForVariant);
-            vDiscount = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
-          }
-        }
+        const vBase = this.resolveVariantBaseInput(dto, existing, item);
+        const {
+          rate: vRate,
+          amount: vAmount,
+          price: vPrice,
+          discountPrice: vDiscount,
+        } = await this.computeVariantPricing(
+          vBase,
+          dto?.discountPrice,
+          existing?.discountPrice,
+          storeForVariant,
+        );
 
         const stockQuantity =
           dto?.stockQuantity !== undefined
@@ -746,6 +790,59 @@ export class ItemService {
             await this.itemVariantRepository.remove(oldVariant);
           }
         }
+      }
+    } else if (variantsDto && Array.isArray(variantsDto) && variantsDto.length > 0) {
+      const existingVariants = await this.itemVariantRepository.find({
+        where: { item: { id: item.id } },
+      });
+      const storeForVariant = await this.resolveStoreForItem(item);
+
+      for (const dto of variantsDto) {
+        const existing = existingVariants.find(
+          (v) =>
+            (dto.id && v.id === dto.id) ||
+            (dto.axisValues && this.areAxisValuesEqual(v.axisValues, dto.axisValues)),
+        );
+        if (!existing) continue;
+
+        if (dto.price !== undefined || dto.basePrice !== undefined) {
+          const vBase = this.resolveVariantBaseInput(dto, existing, item);
+          const pricing = await this.computeVariantPricing(
+            vBase,
+            dto.discountPrice,
+            existing.discountPrice,
+            storeForVariant,
+          );
+          existing.basePrice = vBase !== null ? vBase : undefined;
+          existing.commissionRate = pricing.rate;
+          existing.commissionAmount = pricing.amount;
+          existing.price = pricing.price !== null ? pricing.price : undefined;
+          existing.discountPrice =
+            pricing.discountPrice !== null ? pricing.discountPrice : undefined;
+        } else if (dto.discountPrice !== undefined) {
+          const pricing = await this.computeVariantPricing(
+            null,
+            dto.discountPrice,
+            existing.discountPrice,
+            storeForVariant,
+          );
+          existing.discountPrice =
+            pricing.discountPrice !== null ? pricing.discountPrice : undefined;
+        }
+
+        if (dto.stockQuantity !== undefined) {
+          existing.stockQuantity = dto.stockQuantity;
+        }
+        if (dto.isActive !== undefined) {
+          existing.isActive = dto.isActive;
+        }
+        if (dto.sku !== undefined) {
+          existing.sku = dto.sku;
+        }
+        if (dto.imageUrl !== undefined) {
+          existing.imageUrl = dto.imageUrl || undefined;
+        }
+        await this.itemVariantRepository.save(existing);
       }
     }
 
@@ -1431,6 +1528,85 @@ export class ItemService {
     return await this.mapItemResponse(item);
   }
 
+  private assertCollaboratorUpdatePermissions(
+    collab: any,
+    updateItemDto: UpdateItemDto,
+  ): void {
+    const perms: string[] = Array.isArray(collab.permissions)
+      ? collab.permissions
+      : [];
+    const hasEdit = perms.includes(CompanyPermission.INVENTORY_EDIT);
+    const hasStock = perms.includes(CompanyPermission.INVENTORY_MANAGE_STOCK);
+    const hasPrice =
+      perms.includes(CompanyPermission.INVENTORY_CHANGE_PRICE) || hasEdit;
+
+    if (!hasEdit && !hasStock && !hasPrice) {
+      throw new ForbiddenException(
+        'No tienes permisos para modificar este producto',
+      );
+    }
+
+    if (hasEdit) return;
+
+    const priceFields = new Set(['price', 'basePrice', 'discountPrice']);
+    const stockFields = new Set(['stockQuantity']);
+    const definedKeys = Object.keys(updateItemDto).filter(
+      (key) => (updateItemDto as any)[key] !== undefined,
+    );
+
+    for (const key of definedKeys) {
+      if (priceFields.has(key)) {
+        if (!hasPrice) {
+          throw new ForbiddenException(
+            'No tienes permisos para modificar el precio de este producto',
+          );
+        }
+        continue;
+      }
+      if (stockFields.has(key)) {
+        if (!hasStock) {
+          throw new ForbiddenException(
+            'No tienes permisos para modificar el stock de este producto',
+          );
+        }
+        continue;
+      }
+      if (key === 'variants' && Array.isArray(updateItemDto.variants)) {
+        for (const variantDto of updateItemDto.variants) {
+          const vKeys = Object.keys(variantDto).filter(
+            (vk) => (variantDto as any)[vk] !== undefined,
+          );
+          for (const vk of vKeys) {
+            if (vk === 'id' || vk === 'axisValues') continue;
+            if (priceFields.has(vk)) {
+              if (!hasPrice) {
+                throw new ForbiddenException(
+                  'No tienes permisos para modificar el precio de las variantes',
+                );
+              }
+              continue;
+            }
+            if (vk === 'stockQuantity' || vk === 'isActive') {
+              if (!hasStock) {
+                throw new ForbiddenException(
+                  'No tienes permisos para modificar el stock o estado de las variantes',
+                );
+              }
+              continue;
+            }
+            throw new ForbiddenException(
+              `No tienes permisos para editar el campo de variante "${vk}"`,
+            );
+          }
+        }
+        continue;
+      }
+      throw new ForbiddenException(
+        `No tienes permisos para editar el campo "${key}" de este producto`,
+      );
+    }
+  }
+
   async update(id: string, updateItemDto: UpdateItemDto, user: User) {
     const item = await this.itemRepository.findOne({
       where: { id },
@@ -1466,28 +1642,7 @@ export class ItemService {
           'No tienes autorización para gestionar artículos en esta sucursal',
         );
       }
-      const hasEdit = (collab.permissions || []).includes('inventory:edit');
-      const hasStock = (collab.permissions || []).includes(
-        'inventory:manage_stock',
-      );
-      const hasPrice =
-        (collab.permissions || []).includes('inventory:change_price') ||
-        hasEdit;
-
-      if (!hasEdit && !hasStock) {
-        throw new ForbiddenException(
-          'No tienes permisos para modificar este producto',
-        );
-      }
-      if (
-        !hasPrice &&
-        (updateItemDto.price !== undefined ||
-          updateItemDto.discountPrice !== undefined)
-      ) {
-        throw new ForbiddenException(
-          'No tienes permisos para modificar el precio de este producto',
-        );
-      }
+      this.assertCollaboratorUpdatePermissions(collab, updateItemDto);
     } else if (item.store.owner?.id !== user.id) {
       throw new ForbiddenException(
         'No tienes permiso para actualizar este producto',
@@ -1499,7 +1654,8 @@ export class ItemService {
       updateItemDto.priceType === PriceType.ON_DEMAND
     ) {
       updateItemDto.price = 0;
-      updateItemDto.discountPrice = undefined;
+      (updateItemDto as any).discountPrice = null;
+      item.discountPrice = null as any;
     }
 
     if (updateItemDto.categoryId) {
@@ -1562,7 +1718,8 @@ export class ItemService {
     ) {
       updateItemDto.basePrice = 0;
       updateItemDto.price = 0;
-      updateItemDto.discountPrice = undefined;
+      (updateItemDto as any).discountPrice = null;
+      item.discountPrice = null as any;
       item.commissionRate = 0;
       item.commissionAmount = 0;
     } else if (effectiveBase !== undefined && effectiveBase !== null && effectiveBase > 0) {
@@ -1587,7 +1744,8 @@ export class ItemService {
         );
         updateItemDto.discountPrice = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
       } else {
-        updateItemDto.discountPrice = undefined;
+        (updateItemDto as any).discountPrice = null;
+        item.discountPrice = null as any;
       }
     }
 
@@ -2145,6 +2303,123 @@ export class ItemService {
       hasActivePromotion: Boolean(active),
       activePromotion: active,
       pendingPromotion: pending,
+    };
+  }
+
+  /**
+   * Devuelve métricas comerciales de un artículo para su propietario o colaborador autorizado.
+   */
+  async getOwnerStats(
+    id: string,
+    user: User,
+  ): Promise<{
+    unitsSold: number;
+    ordersCount: number;
+    favoritesCount: number;
+    grossRevenue: number | null;
+    netRevenue: number | null;
+    canViewFinancials: boolean;
+  }> {
+    const item = await this.itemRepository.findOne({
+      where: { id },
+      relations: ['store', 'store.owner', 'store.company', 'store.company.owner'],
+    });
+
+    if (!item || item.isDeleted) {
+      throw new NotFoundException(`Item con ID ${id} no encontrado`);
+    }
+
+    let canViewFinancials = true;
+    const isCollab =
+      (user as any)?.isCollaborator === true ||
+      (user as any)?.actorType === 'COLLABORATOR';
+
+    if (user.role === UserRole.ADMIN) {
+      canViewFinancials = true;
+    } else if (isCollab) {
+      const collab = user as any;
+      if (
+        !item.store?.company?.id ||
+        item.store.company.id !== collab.company?.id
+      ) {
+        throw new ForbiddenException(
+          'No tienes permiso para ver las métricas de este producto',
+        );
+      }
+      if (
+        !collab.hasFullBranchAccess &&
+        !(collab.allowedBranchIds || []).includes(item.store.id)
+      ) {
+        throw new ForbiddenException(
+          'No tienes autorización para consultar artículos en esta sucursal',
+        );
+      }
+
+      const perms: string[] = Array.isArray(collab.permissions)
+        ? collab.permissions
+        : [];
+      const hasViewAccess =
+        perms.includes(CompanyPermission.INVENTORY_VIEW) ||
+        perms.includes(CompanyPermission.INVENTORY_EDIT) ||
+        perms.includes(CompanyPermission.INVENTORY_MANAGE_STOCK) ||
+        perms.includes(CompanyPermission.INVENTORY_CHANGE_PRICE) ||
+        perms.includes(CompanyPermission.ORDERS_VIEW) ||
+        perms.includes(CompanyPermission.METRICS_VIEW_FINANCIAL) ||
+        perms.includes(CompanyPermission.FINANCES_VIEW_SENSITIVE);
+
+      if (!hasViewAccess) {
+        throw new ForbiddenException(
+          'No tienes permisos para consultar las métricas de este artículo',
+        );
+      }
+
+      canViewFinancials =
+        perms.includes(CompanyPermission.METRICS_VIEW_FINANCIAL) ||
+        perms.includes(CompanyPermission.FINANCES_VIEW_SENSITIVE);
+    } else {
+      const isStoreOwner = item.store?.owner?.id === user.id;
+      const isCompanyOwner = item.store?.company?.owner?.id === user.id;
+      if (!isStoreOwner && !isCompanyOwner) {
+        throw new ForbiddenException(
+          'No tienes permiso para ver las métricas de este producto',
+        );
+      }
+    }
+
+    const rawStats = await this.orderItemRepository
+      .createQueryBuilder('oi')
+      .innerJoin('oi.order', 'order')
+      .select('COALESCE(SUM(oi.quantity), 0)', 'unitsSold')
+      .addSelect('COUNT(DISTINCT order.id)', 'ordersCount')
+      .addSelect('COALESCE(SUM(oi.price * oi.quantity), 0)', 'grossRevenue')
+      .addSelect(
+        'COALESCE(SUM(COALESCE(NULLIF(oi."basePrice", 0), oi.price - oi."commissionAmount") * oi.quantity), 0)',
+        'netRevenue',
+      )
+      .where('oi.itemId = :itemId', { itemId: id })
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
+      })
+      .andWhere('order.isCommissionVoided = :isVoided', { isVoided: false })
+      .getRawOne<{
+        unitsSold?: string | number | null;
+        ordersCount?: string | number | null;
+        grossRevenue?: string | number | null;
+        netRevenue?: string | number | null;
+      }>();
+
+    const unitsSold = parseInt(String(rawStats?.unitsSold ?? 0), 10) || 0;
+    const ordersCount = parseInt(String(rawStats?.ordersCount ?? 0), 10) || 0;
+    const roundMoney = (val: unknown) =>
+      Math.round((parseFloat(String(val ?? 0)) || 0) * 100) / 100;
+
+    return {
+      unitsSold,
+      ordersCount,
+      favoritesCount: item.favoritesCount ?? 0,
+      grossRevenue: canViewFinancials ? roundMoney(rawStats?.grossRevenue) : null,
+      netRevenue: canViewFinancials ? roundMoney(rawStats?.netRevenue) : null,
+      canViewFinancials,
     };
   }
 
