@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThan, MoreThan, In } from 'typeorm';
@@ -18,6 +19,9 @@ import { OrderStatus } from 'src/order/types';
 import { BillingStatus, PaymentReportStatus, FineType } from './types';
 import { MailService } from 'src/common/mail/mail.service';
 import { NotificationService } from 'src/notification/notification.service';
+import { NotificationType } from 'src/notification/entities/notification.entity';
+import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
+import { formatDualPrice } from 'src/common/utils/currency-format.utils';
 import { User } from 'src/user/entities/user.entity';
 import { SalesLedgerQueryDto } from './dto/sales-ledger-query.dto';
 
@@ -42,7 +46,22 @@ export class StoreCommissionBillingService {
     private readonly orderRepository: Repository<Order>,
     private readonly mailService: MailService,
     private readonly notificationService: NotificationService,
+    @Optional()
+    private readonly platformSettingsService?: PlatformSettingsService,
   ) {}
+
+  private resolveStoreOwner(store?: Store | null): User | null {
+    return store?.owner || store?.company?.owner || null;
+  }
+
+  private async getRateContext() {
+    if (!this.platformSettingsService) return null;
+    try {
+      return await this.platformSettingsService.getExchangeRateConfig();
+    } catch {
+      return null;
+    }
+  }
 
   // ----------------------------------------------------
   // GESTIÓN DE CONFIGURACIONES Y RANGOS (ADMIN)
@@ -144,11 +163,68 @@ export class StoreCommissionBillingService {
   async setStoreSuspension(storeId: string, suspend: boolean) {
     const store = await this.storeRepository.findOne({
       where: { id: storeId },
+      relations: ['owner', 'company', 'company.owner'],
     });
     if (!store) throw new NotFoundException('Tienda no encontrada');
+    const previousStatus = store.status;
     store.status = suspend ? StoreStatus.SUSPENDED : StoreStatus.ACTIVE;
     const savedStore = await this.storeRepository.save(store);
     this.notificationService.notifyAdminBadgesChanged().catch(() => {});
+
+    const owner = this.resolveStoreOwner(store);
+    const debt = parseFloat(store.accumulatedCommissionDebt?.toString() || '0');
+    const rateContext = await this.getRateContext();
+    const debtDual = formatDualPrice(debt, rateContext).combined;
+
+    if (suspend && previousStatus !== StoreStatus.SUSPENDED) {
+      if (owner?.email) {
+        this.mailService
+          .sendStoreSuspendedForCommissions(owner.email, store.name, debt, 0, {
+            baseCommission: debt,
+          })
+          .catch(() => {});
+      }
+      if (owner?.id) {
+        this.notificationService
+          .create({
+            userId: owner.id,
+            storeId: store.id,
+            type: NotificationType.STORE_SUSPENDED,
+            targetId: store.id,
+            channelType: 'COMMISSION_DEBT',
+            suspensionReason: 'COMMISSION_DEBT',
+            title: `Tienda suspendida por deuda · ${store.name}`,
+            body: `Tu tienda fue suspendida por saldo pendiente (${debtDual}). Toca para ver cómo pagar y reactivarla.`,
+          })
+          .catch(() => {});
+      }
+    } else if (!suspend && previousStatus === StoreStatus.SUSPENDED) {
+      if (owner?.email) {
+        this.mailService
+          .sendCommissionPaymentApprovedNotice({
+            email: owner.email,
+            storeName: store.name,
+            paidAmountUsd: 0,
+            remainingDebtUsd: debt,
+            reactivated: true,
+          })
+          .catch(() => {});
+      }
+      if (owner?.id) {
+        this.notificationService
+          .create({
+            userId: owner.id,
+            storeId: store.id,
+            type: NotificationType.COMMISSION_PAYMENT_REVIEWED,
+            targetId: store.id,
+            channelType: 'COMMISSION_DEBT',
+            title: `Tienda reactivada · ${store.name}`,
+            body: `Tu tienda vuelve a estar activa y visible para los compradores. Toca para ver tu estado de cuenta.`,
+          })
+          .catch(() => {});
+      }
+    }
+
     return savedStore;
   }
 
@@ -160,6 +236,8 @@ export class StoreCommissionBillingService {
       where: { id: storeId },
     });
     if (!store) throw new NotFoundException('Tienda no encontrada');
+
+    const settings = await this.settingsRepository.findOne({ where: {} });
 
     // Buscar facturación semanal pendiente o en mora
     const currentBilling = await this.billingRepository.findOne({
@@ -206,18 +284,61 @@ export class StoreCommissionBillingService {
       take: 50,
     });
 
+    const platformPaymentMethods = await this.platformPaymentMethodRepository.find({
+      where: { isActive: true },
+      order: { createdAt: 'ASC' },
+    });
+
+    const accumulatedDebt = parseFloat(
+      store.accumulatedCommissionDebt?.toString() || '0',
+    );
+    const hasPendingReport =
+      currentBilling?.status === BillingStatus.PAYMENT_REPORTED ||
+      paymentReports.some(
+        (r) => r.status === PaymentReportStatus.PENDING_REVIEW,
+      );
+    const latestRejected =
+      paymentReports.find((r) => r.status === PaymentReportStatus.REJECTED) ||
+      null;
+    const isSuspended = store.status === StoreStatus.SUSPENDED;
+    const isSuspendedByDebt =
+      isSuspended &&
+      (currentBilling?.status === BillingStatus.SUSPENDED ||
+        currentBilling?.status === BillingStatus.OVERDUE ||
+        currentBilling?.status === BillingStatus.PAYMENT_REPORTED ||
+        accumulatedDebt > 0);
+
     return {
       store: {
         id: store.id,
         name: store.name,
         status: store.status,
-        accumulatedCommissionDebt: parseFloat(
-          store.accumulatedCommissionDebt?.toString() || '0',
-        ),
+        accumulatedCommissionDebt: accumulatedDebt,
       },
       currentBilling,
       recentOrders,
       paymentReports,
+      settings: {
+        isEnabled: settings?.isEnabled ?? false,
+        gracePeriodDays: settings?.gracePeriodDays ?? 3,
+        fineType: settings?.fineType ?? FineType.PERCENTAGE,
+        fineValue: parseFloat(settings?.fineValue?.toString() || '10'),
+      },
+      platformPaymentMethods,
+      suspensionInfo: {
+        isSuspended,
+        isSuspendedByDebt,
+        hasPendingReport,
+        latestRejectedReport: latestRejected
+          ? {
+              id: latestRejected.id,
+              amount: parseFloat(latestRejected.amount?.toString() || '0'),
+              rejectionReason: latestRejected.rejectionReason || null,
+              reviewedAt: latestRejected.reviewedAt || null,
+              createdAt: latestRejected.createdAt,
+            }
+          : null,
+      },
     };
   }
 
@@ -267,8 +388,10 @@ export class StoreCommissionBillingService {
       const debt = parseFloat(
         store.accumulatedCommissionDebt?.toString() || '0',
       );
+      const settings = await this.settingsRepository.findOne({ where: {} });
+      const graceDays = settings?.gracePeriodDays || 3;
       const dueDate = new Date(now);
-      dueDate.setDate(dueDate.getDate() + 3);
+      dueDate.setDate(dueDate.getDate() + graceDays);
 
       billing = this.billingRepository.create({
         store,
@@ -370,7 +493,13 @@ export class StoreCommissionBillingService {
   ) {
     const report = await this.reportRepository.findOne({
       where: { id: reportId },
-      relations: ['billing', 'billing.store', 'billing.store.owner'],
+      relations: [
+        'billing',
+        'billing.store',
+        'billing.store.owner',
+        'billing.store.company',
+        'billing.store.company.owner',
+      ],
     });
     if (!report) throw new NotFoundException('Reporte de pago no encontrado');
     if (report.status !== PaymentReportStatus.PENDING_REVIEW) {
@@ -387,11 +516,17 @@ export class StoreCommissionBillingService {
 
     const billing = report.billing;
     const store = billing.store;
+    const owner = this.resolveStoreOwner(store);
+    const reportAmountUsd = parseFloat(report.amount.toString());
+    const rateContext = await this.getRateContext();
 
     if (action.status === PaymentReportStatus.APPROVED) {
       billing.paidAmount =
-        parseFloat(billing.paidAmount?.toString() || '0') +
-        parseFloat(report.amount.toString());
+        Math.round(
+          (parseFloat(billing.paidAmount?.toString() || '0') +
+            reportAmountUsd) *
+            100,
+        ) / 100;
       if (billing.paidAmount >= parseFloat(billing.totalDue.toString())) {
         billing.status = BillingStatus.PAID;
       }
@@ -403,19 +538,95 @@ export class StoreCommissionBillingService {
       );
       const newDebt = Math.max(
         0,
-        currentDebt - parseFloat(report.amount.toString()),
+        Math.round((currentDebt - reportAmountUsd) * 100) / 100,
       );
       store.accumulatedCommissionDebt = newDebt;
 
-      // Si estaba suspendida por mora, reactivarla
-      if (store.status === StoreStatus.SUSPENDED && newDebt === 0) {
+      const wasSuspended = store.status === StoreStatus.SUSPENDED;
+      const reactivated = wasSuspended && newDebt === 0;
+      // Si estaba suspendida por mora y saldó deuda, reactivarla
+      if (reactivated) {
         store.status = StoreStatus.ACTIVE;
       }
       await this.storeRepository.save(store);
+
+      const paidDual = formatDualPrice(reportAmountUsd, rateContext).combined;
+      const remainingDual = formatDualPrice(newDebt, rateContext).combined;
+
+      if (owner?.email) {
+        this.mailService
+          .sendCommissionPaymentApprovedNotice({
+            email: owner.email,
+            storeName: store.name,
+            paidAmountUsd: reportAmountUsd,
+            remainingDebtUsd: newDebt,
+            reactivated,
+          })
+          .catch(() => {});
+      }
+      if (owner?.id) {
+        this.notificationService
+          .create({
+            userId: owner.id,
+            storeId: store.id,
+            type: NotificationType.COMMISSION_PAYMENT_REVIEWED,
+            targetId: report.id,
+            channelType: 'COMMISSION_DEBT',
+            title: reactivated
+              ? `¡Pago aprobado y tienda reactivada! · ${store.name}`
+              : `Pago de comisión aprobado · ${store.name}`,
+            body: reactivated
+              ? `Se aprobó tu pago por ${paidDual}. Tu deuda quedó en $0.00 y tu tienda ya vuelve a estar activa.`
+              : `Se acreditó tu abono por ${paidDual}. Saldo pendiente: ${remainingDual}.`,
+          })
+          .catch(() => {});
+      }
     } else {
-      // Si fue rechazado, volver la factura a PENDING
-      billing.status = BillingStatus.PENDING;
+      // Si fue rechazado, restaurar estado coherente de la factura
+      if (store.status === StoreStatus.SUSPENDED) {
+        billing.status = BillingStatus.SUSPENDED;
+      } else if (
+        billing.gracePeriodEndDate &&
+        new Date(billing.gracePeriodEndDate) < new Date()
+      ) {
+        billing.status = BillingStatus.OVERDUE;
+      } else {
+        billing.status = BillingStatus.PENDING;
+      }
       await this.billingRepository.save(billing);
+
+      const currentDebt = parseFloat(
+        store.accumulatedCommissionDebt?.toString() || '0',
+      );
+      const reason =
+        action.rejectionReason || 'No se pudo validar el comprobante.';
+      const reportedDual = formatDualPrice(reportAmountUsd, rateContext).combined;
+
+      if (owner?.email) {
+        this.mailService
+          .sendCommissionPaymentRejectedNotice({
+            email: owner.email,
+            storeName: store.name,
+            reportedAmountUsd: reportAmountUsd,
+            remainingDebtUsd: currentDebt,
+            rejectionReason: reason,
+            isSuspended: store.status === StoreStatus.SUSPENDED,
+          })
+          .catch(() => {});
+      }
+      if (owner?.id) {
+        this.notificationService
+          .create({
+            userId: owner.id,
+            storeId: store.id,
+            type: NotificationType.COMMISSION_PAYMENT_REVIEWED,
+            targetId: report.id,
+            channelType: 'COMMISSION_DEBT',
+            title: `Comprobante rechazado · ${store.name}`,
+            body: `Tu pago reportado (${reportedDual}) fue rechazado: "${reason}". Toca para enviar un comprobante corregido.`,
+          })
+          .catch(() => {});
+      }
     }
 
     this.notificationService.notifyAdminBadgesChanged().catch(() => {});

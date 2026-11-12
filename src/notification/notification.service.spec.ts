@@ -208,4 +208,61 @@ describe('NotificationService FCM Push Payload & Deep-Link Metadata', () => {
     expect(multicastArg.data.targetId).toBe('mediation-req-77');
     expect(multicastArg.data.mediationId).toBe('mediation-req-77');
   });
+
+  it('includes suspensionReason=COMMISSION_DEBT in FCM data for commission store suspensions', async () => {
+    await service.create({
+      userId: 'merchant-1',
+      storeId: 'store-uuid-1',
+      title: 'Tienda suspendida por deuda de comisiones',
+      body: 'Tu tienda ha sido suspendida temporalmente.',
+      type: NotificationType.STORE_SUSPENDED,
+      targetId: 'store-uuid-1',
+      channelType: 'COMMISSION_DEBT',
+    });
+
+    expect(mockSendEachForMulticast).toHaveBeenCalledTimes(1);
+    const multicastArg = mockSendEachForMulticast.mock.calls[0][0];
+    expect(multicastArg.data).toMatchObject({
+      type: NotificationType.STORE_SUSPENDED,
+      channelType: 'COMMISSION_DEBT',
+      storeId: 'store-uuid-1',
+      targetId: 'store-uuid-1',
+      suspensionReason: 'COMMISSION_DEBT',
+    });
+  });
+
+  it('scopes collaborator permissions for commission debt alerts and debt vs strike suspensions', () => {
+    expect(
+      service.canCollaboratorReceiveNotification(['finances:view_sensitive'], {
+        type: NotificationType.COMMISSION_DEBT_REMINDER,
+      }),
+    ).toBe(true);
+    expect(
+      service.canCollaboratorReceiveNotification(['metrics:view_financial'], {
+        type: NotificationType.COMMISSION_PAYMENT_REVIEWED,
+      }),
+    ).toBe(true);
+    expect(
+      service.canCollaboratorReceiveNotification(['orders:view'], {
+        type: NotificationType.COMMISSION_DEBT_REMINDER,
+      }),
+    ).toBe(false);
+
+    expect(
+      service.canCollaboratorReceiveNotification(['finances:view_sensitive'], {
+        type: NotificationType.STORE_SUSPENDED,
+        channelType: 'COMMISSION_DEBT',
+      }),
+    ).toBe(true);
+    expect(
+      service.canCollaboratorReceiveNotification(['finances:view_sensitive'], {
+        type: NotificationType.STORE_SUSPENDED,
+      }),
+    ).toBe(false);
+    expect(
+      service.canCollaboratorReceiveNotification(['settings:manage'], {
+        type: NotificationType.STORE_SUSPENDED,
+      }),
+    ).toBe(true);
+  });
 });

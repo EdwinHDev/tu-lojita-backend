@@ -32,6 +32,45 @@ import { formatDateInTimezone } from 'src/common/utils/timezone.utils';
 export class MailService {
   private readonly logger = new Logger(MailService.name);
 
+  private escapeHtml(value: string): string {
+    return (value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private renderCommissionPaymentStepsHtml(
+    paymentMethodsSummary?: string[],
+  ): string {
+    const methodsListHtml =
+      paymentMethodsSummary && paymentMethodsSummary.length > 0
+        ? `
+          <div style="margin: 16px 0; padding: 14px 16px; border-radius: 10px; background-color: #f8fafc; border: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 700; color: #0f172a;">¿Cómo y dónde pagar? (Cuentas oficiales de Tu Lojita)</p>
+            <ul style="margin: 0; padding-left: 18px; color: #334155; font-size: 13px; line-height: 1.55;">
+              ${paymentMethodsSummary
+                .map((m) => `<li>${this.escapeHtml(m)}</li>`)
+                .join('')}
+            </ul>
+          </div>
+        `
+        : '';
+
+    return `
+      ${methodsListHtml}
+      <div style="margin: 16px 0; padding: 14px 16px; border-radius: 10px; background-color: #f1f5f9; border: 1px solid #cbd5e1;">
+        <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 700; color: #0f172a;">Pasos para reportar tu pago en Tu Lojita Empresa:</p>
+        <ol style="margin: 0; padding-left: 18px; color: #334155; font-size: 13px; line-height: 1.6;">
+          <li>Abre <strong>Tu Lojita Empresa &rarr; Mi Tienda &rarr; Deudas con la Plataforma</strong>.</li>
+          <li>Copia los datos de una cuenta oficial, realiza el pago en USD o Bs. y adjunta el comprobante.</li>
+          <li>Al aprobarse el pago completo, tu saldo queda al día y tu tienda se reactiva automáticamente.</li>
+        </ol>
+      </div>
+    `;
+  }
+
   constructor(
     private readonly mailerService: MailerService,
     @Optional()
@@ -595,11 +634,21 @@ export class MailService {
     storeName: string,
     amount: number,
     dueDate: Date,
+    options?: {
+      gracePeriodDays?: number;
+      finePreviewAmount?: number;
+      paymentMethodsSummary?: string[];
+    },
   ) {
     try {
       const rateContext = await this.getExchangeRateContext();
       const dateFormatted = formatDateInTimezone(new Date());
       const amountDual = formatDualPrice(amount, rateContext);
+      const graceDays = options?.gracePeriodDays ?? 3;
+      const fineDual =
+        options?.finePreviewAmount && options.finePreviewAmount > 0
+          ? formatDualPrice(options.finePreviewAmount, rateContext)
+          : null;
       const issuanceNoticeHtml = renderIssuanceDateNotice(
         dateFormatted,
         rateContext,
@@ -608,9 +657,13 @@ export class MailService {
         dateFormatted,
         rateContext,
       );
+      const safeStoreName = this.escapeHtml(storeName);
 
       const subject = `Liquidación Semanal de Comisiones (${amountDual.combined}) - ${storeName}`;
-      const text = `Estimado equipo de ${storeName},\n\nSe ha emitido el corte de comisiones por un monto de ${amountDual.combined}.\nFecha límite de pago: ${formatDateInTimezone(dueDate)}.\n\nPor favor ingresa a Tu Lojita Empresa para reportar tu comprobante.\n\nTu Lojita Finanzas`;
+      const fineText = fineDual
+        ? `\nRecargo estimado por mora tras el vencimiento: ${fineDual.combined}.`
+        : '';
+      const text = `Estimado equipo de ${storeName},\n\nSe ha emitido el corte semanal de comisiones por un monto de ${amountDual.combined}.\nFecha límite de pago (${graceDays} ${graceDays === 1 ? 'día' : 'días'} de gracia): ${formatDateInTimezone(dueDate)}.${fineText}\n\nIngresa a Tu Lojita Empresa -> Deudas con la Plataforma para consultar las cuentas oficiales y reportar tu comprobante.\n\nTu Lojita Finanzas`;
       await this.mailerService.sendMail({
         to: email,
         subject,
@@ -619,15 +672,20 @@ export class MailService {
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
             ${issuanceNoticeHtml}
             <h2 style="color: #1e293b; margin-bottom: 8px;">Corte Semanal de Comisiones por Ventas</h2>
-            <p style="color: #64748b; font-size: 15px;">Estimado equipo de <strong>${storeName}</strong>,</p>
+            <p style="color: #64748b; font-size: 15px;">Estimado equipo de <strong>${safeStoreName}</strong>,</p>
             <p style="color: #334155; font-size: 15px; line-height: 1.5;">Se ha emitido el corte de comisiones correspondiente a las ventas procesadas en tu tienda. El total liquidado es:</p>
             <div style="margin: 24px 0; text-align: center;">
               <span style="display: inline-block; font-size: 26px; font-weight: 800; color: #0284c7; background-color: #f0f9ff; padding: 12px 24px; border-radius: 8px; border: 1px dashed #38bdf8;">
                 ${amountDual.combined}
               </span>
             </div>
-            <p style="color: #334155; font-size: 14px;">Fecha límite de pago (con 3 días de gracia): <strong>${formatDateInTimezone(dueDate)}</strong>.</p>
-            <p style="color: #64748b; font-size: 13px;">Por favor ingresa a la aplicación <strong>Tu Lojita Empresa</strong> en la sección de Deudas con la Plataforma para reportar tu comprobante antes del vencimiento del período de gracia.</p>
+            <p style="color: #334155; font-size: 14px;">Fecha límite de pago (${graceDays} ${graceDays === 1 ? 'día' : 'días'} de gracia): <strong>${formatDateInTimezone(dueDate)}</strong>.</p>
+            ${
+              fineDual
+                ? `<p style="color: #b45309; font-size: 13px;">Si no se registra el pago antes del vencimiento, la tienda será suspendida temporalmente y se aplicará un recargo de mora de <strong>${fineDual.combined}</strong>.</p>`
+                : ''
+            }
+            ${this.renderCommissionPaymentStepsHtml(options?.paymentMethodsSummary)}
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
             <p style="color: #94a3b8; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Finanzas & Plataforma</p>
             ${footerNoteHtml}
@@ -642,15 +700,21 @@ export class MailService {
     }
   }
 
-  async sendCommissionGraceReminder(
-    email: string,
-    storeName: string,
-    amount: number,
-  ) {
+  async sendCommissionPreCutReminder(params: {
+    email: string;
+    storeName: string;
+    accumulatedAmount: number;
+    cutDateLabel?: string;
+    gracePeriodDays?: number;
+    paymentMethodsSummary?: string[];
+  }) {
     try {
       const rateContext = await this.getExchangeRateContext();
       const dateFormatted = formatDateInTimezone(new Date());
-      const amountDual = formatDualPrice(amount, rateContext);
+      const amountDual = formatDualPrice(
+        params.accumulatedAmount,
+        rateContext,
+      );
       const issuanceNoticeHtml = renderIssuanceDateNotice(
         dateFormatted,
         rateContext,
@@ -659,9 +723,103 @@ export class MailService {
         dateFormatted,
         rateContext,
       );
+      const cutLabel = params.cutDateLabel || 'este lunes';
+      const graceDays = params.gracePeriodDays ?? 3;
+      const safeStoreName = this.escapeHtml(params.storeName);
 
-      const subject = `Recordatorio: Hoy vence el plazo de pago de comisiones - ${storeName}`;
-      const text = `Hola, equipo de ${storeName},\n\nTe recordamos que hoy finaliza el período de gracia para liquidar las comisiones pendientes por ${amountDual.combined}.\nReporta tu pago a tiempo desde Tu Lojita Empresa.\n\nTu Lojita © 2026`;
+      const subject = `Recordatorio Pre-Corte: Comisiones acumuladas (${amountDual.combined}) - ${params.storeName}`;
+      const text = `Hola, equipo de ${params.storeName},\n\nTienes un saldo acumulado de comisiones por ${amountDual.combined}.\nEl corte semanal se generará ${cutLabel} (con ${graceDays} ${graceDays === 1 ? 'día' : 'días'} de gracia).\nPuedes revisar las cuentas oficiales y adelantar o planificar tu pago desde Tu Lojita Empresa -> Deudas con la Plataforma.\n\nTu Lojita © 2026`;
+      await this.mailerService.sendMail({
+        to: params.email,
+        subject,
+        text,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #bae6fd; border-radius: 12px; background-color: #f8fafc;">
+            ${issuanceNoticeHtml}
+            <h2 style="color: #0369a1; margin-bottom: 8px;">Aviso Pre-Corte Semanal de Comisiones</h2>
+            <p style="color: #334155; font-size: 15px;">Hola, equipo de <strong>${safeStoreName}</strong>,</p>
+            <p style="color: #334155; font-size: 15px; line-height: 1.5;">Te recordamos que tu tienda acumula comisiones por ventas realizadas esta semana. El próximo corte se emitirá <strong>${this.escapeHtml(cutLabel)}</strong>:</p>
+            <div style="margin: 20px 0; text-align: center;">
+              <span style="display: inline-block; font-size: 24px; font-weight: 800; color: #0369a1; background-color: #e0f2fe; padding: 12px 24px; border-radius: 8px; border: 1px solid #7dd3fc;">
+                ${amountDual.combined}
+              </span>
+            </div>
+            <p style="color: #475569; font-size: 14px; line-height: 1.5;">Tras el corte tendrás <strong>${graceDays} ${graceDays === 1 ? 'día' : 'días'} de gracia</strong> para reportar el comprobante sin interrupciones en tu catálogo.</p>
+            ${this.renderCommissionPaymentStepsHtml(params.paymentMethodsSummary)}
+            <hr style="border: none; border-top: 1px solid #cbd5e1; margin: 24px 0;" />
+            <p style="color: #64748b; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Cobranzas & Finanzas</p>
+            ${footerNoteHtml}
+          </div>
+        `,
+      });
+      this.logger.log(`Pre-cut commission reminder email sent to ${params.email}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send pre-cut commission reminder email to ${params.email}: ${error.message}`,
+      );
+    }
+  }
+
+  async sendCommissionGraceReminder(
+    email: string,
+    storeName: string,
+    amount: number,
+    options?: {
+      daysRemaining?: number;
+      dueDate?: Date;
+      finePreviewAmount?: number;
+      paymentMethodsSummary?: string[];
+    },
+  ) {
+    try {
+      const rateContext = await this.getExchangeRateContext();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const amountDual = formatDualPrice(amount, rateContext);
+      const fineDual =
+        options?.finePreviewAmount && options.finePreviewAmount > 0
+          ? formatDualPrice(options.finePreviewAmount, rateContext)
+          : null;
+      const daysRemaining = options?.daysRemaining;
+      const dueDateLabel = options?.dueDate
+        ? formatDateInTimezone(options.dueDate)
+        : null;
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        dateFormatted,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        dateFormatted,
+        rateContext,
+      );
+      const safeStoreName = this.escapeHtml(storeName);
+
+      let headline = 'Período de Gracia por Vencer Hoy';
+      let subject = `Recordatorio: Hoy vence el plazo de pago de comisiones - ${storeName}`;
+      let leadText = `Te recordamos que hoy a las <strong>11:59 PM</strong> finaliza el período de gracia para liquidar las comisiones pendientes por un monto de <strong>${amountDual.combined}</strong>.`;
+
+      if (typeof daysRemaining === 'number' && daysRemaining > 0) {
+        const dayWord = daysRemaining === 1 ? 'día' : 'días';
+        headline =
+          daysRemaining === 1
+            ? 'Último día antes del vencimiento mañana'
+            : `Faltan ${daysRemaining} ${dayWord} del período de gracia`;
+        subject = `Recordatorio (Queda${daysRemaining === 1 ? '' : 'n'} ${daysRemaining} ${dayWord}): Comisiones pendientes (${amountDual.combined}) - ${storeName}`;
+        leadText = `Tienes un saldo de comisiones pendiente por <strong>${amountDual.combined}</strong>. ${
+          daysRemaining === 1
+            ? 'Te queda <strong>1 día</strong> antes de que venza tu período de gracia'
+            : `Faltan <strong>${daysRemaining} días</strong> para el vencimiento del período de gracia`
+        }${dueDateLabel ? ` (fecha límite: <strong>${this.escapeHtml(dueDateLabel)}</strong>)` : ''}.`;
+      }
+
+      const text = `Hola, equipo de ${storeName},\n\n${
+        typeof daysRemaining === 'number' && daysRemaining > 0
+          ? `Faltan ${daysRemaining} ${daysRemaining === 1 ? 'día' : 'días'} para que venza tu período de gracia de comisiones por ${amountDual.combined}${dueDateLabel ? ` (fecha límite: ${dueDateLabel})` : ''}.`
+          : `Hoy finaliza el período de gracia para liquidar las comisiones pendientes por ${amountDual.combined}.`
+      }${
+        fineDual
+          ? `\nSi no reportas tu pago a tiempo se aplicará una multa por mora de ${fineDual.combined} y tu tienda será suspendida.`
+          : ''
+      }\nReporta tu pago a tiempo desde Tu Lojita Empresa -> Deudas con la Plataforma.\n\nTu Lojita © 2026`;
       await this.mailerService.sendMail({
         to: email,
         subject,
@@ -669,10 +827,21 @@ export class MailService {
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fed7aa; border-radius: 12px; background-color: #fffbeb;">
             ${issuanceNoticeHtml}
-            <h2 style="color: #c2410c; margin-bottom: 8px;">Período de Gracia por Vencer Hoy</h2>
-            <p style="color: #78350f; font-size: 15px;">Hola, equipo de <strong>${storeName}</strong>,</p>
-            <p style="color: #92400e; font-size: 15px; line-height: 1.5;">Te recordamos que hoy miércoles a las <strong>11:59 PM</strong> finaliza el período de gracia para liquidar las comisiones pendientes por un monto de <strong>${amountDual.combined}</strong>.</p>
-            <p style="color: #92400e; font-size: 14px; line-height: 1.5;">Evita la suspensión automática de tu tienda y la aplicación de multas reportando tu pago a tiempo desde Tu Lojita Empresa.</p>
+            <h2 style="color: #c2410c; margin-bottom: 8px;">${this.escapeHtml(headline)}</h2>
+            <p style="color: #78350f; font-size: 15px;">Hola, equipo de <strong>${safeStoreName}</strong>,</p>
+            <p style="color: #92400e; font-size: 15px; line-height: 1.5;">${leadText}</p>
+            <div style="margin: 18px 0; text-align: center;">
+              <span style="display: inline-block; font-size: 22px; font-weight: 800; color: #9a3412; background-color: #ffedd5; padding: 10px 20px; border-radius: 8px; border: 1px solid #fdba74;">
+                ${amountDual.combined}
+              </span>
+            </div>
+            ${
+              fineDual
+                ? `<p style="color: #9a3412; font-size: 13px; line-height: 1.5;">Recargo automático por mora al vencer el plazo: <strong>${fineDual.combined}</strong> (además de suspensión temporal del catálogo).</p>`
+                : ''
+            }
+            <p style="color: #92400e; font-size: 14px; line-height: 1.5;">Evita la suspensión automática de tu tienda reportando tu comprobante desde <strong>Tu Lojita Empresa</strong>.</p>
+            ${this.renderCommissionPaymentStepsHtml(options?.paymentMethodsSummary)}
             <hr style="border: none; border-top: 1px solid #fed7aa; margin: 24px 0;" />
             <p style="color: #b45309; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Cobranzas</p>
             ${footerNoteHtml}
@@ -692,12 +861,22 @@ export class MailService {
     storeName: string,
     totalDue: number,
     fineAmount: number,
+    options?: {
+      baseCommission?: number;
+      isDailyReminder?: boolean;
+      paymentMethodsSummary?: string[];
+    },
   ) {
     try {
       const rateContext = await this.getExchangeRateContext();
       const dateFormatted = formatDateInTimezone(new Date());
       const fineDual = formatDualPrice(fineAmount, rateContext);
       const totalDual = formatDualPrice(totalDue, rateContext);
+      const baseCommission =
+        typeof options?.baseCommission === 'number'
+          ? options.baseCommission
+          : Math.max(0, totalDue - fineAmount);
+      const baseDual = formatDualPrice(baseCommission, rateContext);
       const issuanceNoticeHtml = renderIssuanceDateNotice(
         dateFormatted,
         rateContext,
@@ -706,9 +885,17 @@ export class MailService {
         dateFormatted,
         rateContext,
       );
+      const safeStoreName = this.escapeHtml(storeName);
 
-      const subject = `Aviso Importante: Estado de tu tienda - ${storeName}`;
-      const text = `Estimado equipo de ${storeName},\n\nEl período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido suspendida temporalmente.\nRecargo de mora: ${fineDual.combined}.\nDeuda total a regularizar: ${totalDual.combined}.\n\nUna vez verificado el pago total, tu tienda será reactivada automáticamente.\n\nTu Lojita © 2026`;
+      const isDaily = options?.isDailyReminder === true;
+      const subject = isDaily
+        ? `Recordatorio de Tienda Suspendida (${totalDual.combined}) - Cómo reactivar ${storeName}`
+        : `Tienda Suspendida por Deuda de Comisiones (${totalDual.combined}) - ${storeName}`;
+      const text = `Estimado equipo de ${storeName},\n\n${
+        isDaily
+          ? 'Tu tienda continúa suspendida temporalmente por saldo pendiente de comisiones de plataforma.'
+          : 'El período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido suspendida temporalmente y tus productos están ocultos para los clientes.'
+      }\n\nDesglose de deuda:\n- Comisiones base: ${baseDual.combined}\n- Recargo / multa por mora: ${fineDual.combined}\n- Total a pagar para reactivar: ${totalDual.combined}\n\nCómo reactivar tu tienda:\n1. Ingresa a Tu Lojita Empresa -> Mi Tienda -> Deudas con la Plataforma.\n2. Copia los datos de una cuenta oficial, realiza el pago por el total y adjunta tu comprobante.\n3. En cuanto el administrador apruebe el pago total, tu tienda y productos se reactivarán automáticamente.\n\nTu Lojita © 2026`;
       await this.mailerService.sendMail({
         to: email,
         subject,
@@ -716,12 +903,23 @@ export class MailService {
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fecaca; border-radius: 12px; background-color: #fef2f2;">
             ${issuanceNoticeHtml}
-            <h2 style="color: #dc2626; margin-bottom: 8px;">Suspensión de Operaciones por Mora</h2>
-            <p style="color: #991b1b; font-size: 15px;">Estimado equipo de <strong>${storeName}</strong>,</p>
-            <p style="color: #991b1b; font-size: 15px; line-height: 1.5;">El período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido <strong>suspendida temporalmente</strong> y tus productos ya no serán visibles para los clientes.</p>
-            <p style="color: #7f1d1d; font-size: 14px;">Se ha aplicado un recargo por mora/multa de: <strong>${fineDual.combined}</strong>.</p>
-            <p style="color: #7f1d1d; font-size: 16px; font-weight: 700;">Deuda total a regularizar: ${totalDual.combined}.</p>
-            <p style="color: #991b1b; font-size: 13px;">Una vez verificado el pago total, tu tienda será reactivada automáticamente.</p>
+            <h2 style="color: #dc2626; margin-bottom: 8px;">${
+              isDaily
+                ? 'Tu Tienda Sigue Suspendida por Mora — Cómo Reactivarla'
+                : 'Suspensión Temporal por Deuda de Comisiones'
+            }</h2>
+            <p style="color: #991b1b; font-size: 15px;">Estimado equipo de <strong>${safeStoreName}</strong>,</p>
+            <p style="color: #991b1b; font-size: 15px; line-height: 1.5;">${
+              isDaily
+                ? 'Tu tienda permanece <strong>suspendida y oculta al público</strong> debido a facturas de comisiones vencidas pendientes de pago.'
+                : 'El período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido <strong>suspendida temporalmente</strong> y tus productos ya no son visibles para los clientes.'
+            }</p>
+            <div style="margin: 18px 0; padding: 14px 16px; border-radius: 10px; background-color: #ffffff; border: 1px solid #fca5a5;">
+              <p style="margin: 0 0 6px 0; font-size: 13px; color: #7f1d1d;">Comisiones pendientes: <strong>${baseDual.combined}</strong></p>
+              <p style="margin: 0 0 8px 0; font-size: 13px; color: #7f1d1d;">Recargo / multa por mora: <strong>${fineDual.combined}</strong></p>
+              <p style="margin: 0; font-size: 17px; font-weight: 800; color: #b91c1c;">Total a pagar para reactivar: ${totalDual.combined}</p>
+            </div>
+            ${this.renderCommissionPaymentStepsHtml(options?.paymentMethodsSummary)}
             <hr style="border: none; border-top: 1px solid #fecaca; margin: 24px 0;" />
             <p style="color: #b91c1c; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Departamento de Riesgo y Cobranzas</p>
             ${footerNoteHtml}
@@ -732,6 +930,149 @@ export class MailService {
     } catch (error) {
       this.logger.error(
         `Failed to send suspension email to ${email}: ${error.message}`,
+      );
+    }
+  }
+
+  async sendCommissionPaymentApprovedNotice(params: {
+    email: string;
+    storeName: string;
+    paidAmountUsd: number;
+    remainingDebtUsd: number;
+    reactivated: boolean;
+  }) {
+    try {
+      const rateContext = await this.getExchangeRateContext();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const paidDual = formatDualPrice(params.paidAmountUsd, rateContext);
+      const remainingDual = formatDualPrice(
+        params.remainingDebtUsd,
+        rateContext,
+      );
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        dateFormatted,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        dateFormatted,
+        rateContext,
+      );
+      const safeStoreName = this.escapeHtml(params.storeName);
+
+      const subject = params.reactivated
+        ? `Pago Aprobado y Tienda Reactivada - ${params.storeName}`
+        : `Abono de Comisión Aprobado (${paidDual.combined}) - ${params.storeName}`;
+      const text = `Hola, equipo de ${params.storeName},\n\nHemos aprobado tu reporte de pago por ${paidDual.combined}.\nSaldo pendiente actual: ${remainingDual.combined}.\n${
+        params.reactivated
+          ? 'Tu tienda y todos tus productos han sido reactivados automáticamente y vuelven a ser visibles para los compradores.'
+          : 'Tu abono fue acreditado correctamente.'
+      }\n\nTu Lojita © 2026`;
+
+      await this.mailerService.sendMail({
+        to: params.email,
+        subject,
+        text,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #bbf7d0; border-radius: 12px; background-color: #f0fdf4;">
+            ${issuanceNoticeHtml}
+            <h2 style="color: #15803d; margin-bottom: 8px;">${
+              params.reactivated
+                ? 'Pago Aprobado — ¡Tu Tienda Está Activa!'
+                : 'Pago de Comisión Aprobado'
+            }</h2>
+            <p style="color: #166534; font-size: 15px;">Hola, equipo de <strong>${safeStoreName}</strong>,</p>
+            <p style="color: #166534; font-size: 15px; line-height: 1.5;">Tu comprobante de pago por <strong>${paidDual.combined}</strong> ha sido verificado y aprobado.</p>
+            <div style="margin: 16px 0; padding: 14px 16px; border-radius: 10px; background-color: #ffffff; border: 1px solid #86efac;">
+              <p style="margin: 0 0 6px 0; font-size: 14px; color: #166534;">Monto acreditado: <strong>${paidDual.combined}</strong></p>
+              <p style="margin: 0; font-size: 14px; color: #166534;">Deuda pendiente restante: <strong>${remainingDual.combined}</strong></p>
+            </div>
+            <p style="color: #15803d; font-size: 14px; font-weight: 600;">${
+              params.reactivated
+                ? 'Tu tienda y tu catálogo público se han reactivado automáticamente.'
+                : params.remainingDebtUsd <= 0
+                  ? 'Tu tienda se encuentra completamente al día con la plataforma.'
+                  : 'Cuando liquides el saldo restante, tu cuenta quedará al día automáticamente.'
+            }</p>
+            <hr style="border: none; border-top: 1px solid #bbf7d0; margin: 24px 0;" />
+            <p style="color: #16a34a; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Finanzas & Plataforma</p>
+            ${footerNoteHtml}
+          </div>
+        `,
+      });
+      this.logger.log(`Commission payment approved email sent to ${params.email}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send commission payment approved email to ${params.email}: ${error.message}`,
+      );
+    }
+  }
+
+  async sendCommissionPaymentRejectedNotice(params: {
+    email: string;
+    storeName: string;
+    reportedAmountUsd: number;
+    remainingDebtUsd: number;
+    rejectionReason: string;
+    isSuspended?: boolean;
+  }) {
+    try {
+      const rateContext = await this.getExchangeRateContext();
+      const dateFormatted = formatDateInTimezone(new Date());
+      const reportedDual = formatDualPrice(
+        params.reportedAmountUsd,
+        rateContext,
+      );
+      const remainingDual = formatDualPrice(
+        params.remainingDebtUsd,
+        rateContext,
+      );
+      const issuanceNoticeHtml = renderIssuanceDateNotice(
+        dateFormatted,
+        rateContext,
+      );
+      const footerNoteHtml = renderExchangeRateFooterNote(
+        dateFormatted,
+        rateContext,
+      );
+      const safeStoreName = this.escapeHtml(params.storeName);
+      const safeReason = this.escapeHtml(
+        params.rejectionReason || 'No se pudo validar el comprobante.',
+      );
+
+      const subject = `Comprobante de Comisión Rechazado - ${params.storeName}`;
+      const text = `Hola, equipo de ${params.storeName},\n\nTu reporte de pago de comisiones por ${reportedDual.combined} fue rechazado.\nMotivo del rechazo: ${params.rejectionReason}\nDeuda actual pendiente: ${remainingDual.combined}.\n\nIngresa a Tu Lojita Empresa -> Deudas con la Plataforma para corregir y reenviar un nuevo comprobante.\n\nTu Lojita © 2026`;
+
+      await this.mailerService.sendMail({
+        to: params.email,
+        subject,
+        text,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fecaca; border-radius: 12px; background-color: #fef2f2;">
+            ${issuanceNoticeHtml}
+            <h2 style="color: #b91c1c; margin-bottom: 8px;">Reporte de Pago de Comisiones Rechazado</h2>
+            <p style="color: #7f1d1d; font-size: 15px;">Hola, equipo de <strong>${safeStoreName}</strong>,</p>
+            <p style="color: #7f1d1d; font-size: 15px; line-height: 1.5;">El comprobante reportado por <strong>${reportedDual.combined}</strong> no pudo ser aprobado por el equipo administrativo.</p>
+            <div style="margin: 16px 0; padding: 14px 16px; border-radius: 10px; background-color: #ffffff; border: 1px solid #fca5a5;">
+              <p style="margin: 0 0 6px 0; font-size: 13px; color: #991b1b;">Motivo informado:</p>
+              <p style="margin: 0 0 10px 0; font-size: 14px; font-weight: 700; color: #7f1d1d;">${safeReason}</p>
+              <p style="margin: 0; font-size: 13px; color: #991b1b;">Saldo actual por regularizar: <strong>${remainingDual.combined}</strong></p>
+            </div>
+            <p style="color: #991b1b; font-size: 14px; line-height: 1.5;">${
+              params.isSuspended
+                ? 'Tu tienda permanece suspendida temporalmente hasta confirmar el pago válido.'
+                : 'Por favor envía un comprobante corregido desde Tu Lojita Empresa antes de que venza el plazo.'
+            }</p>
+            ${this.renderCommissionPaymentStepsHtml()}
+            <hr style="border: none; border-top: 1px solid #fecaca; margin: 24px 0;" />
+            <p style="color: #b91c1c; font-size: 12px; text-align: center;">Tu Lojita © 2026 - Cobranzas & Verificación</p>
+            ${footerNoteHtml}
+          </div>
+        `,
+      });
+      this.logger.log(`Commission payment rejected email sent to ${params.email}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send commission payment rejected email to ${params.email}: ${error.message}`,
       );
     }
   }

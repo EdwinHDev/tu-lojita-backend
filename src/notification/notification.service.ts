@@ -8,7 +8,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, In } from 'typeorm';
+import { Repository, Not, In, MoreThanOrEqual } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { App } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
@@ -204,9 +204,22 @@ export class NotificationService {
         return hasAny(['orders:view', 'orders:process']);
 
       case NotificationType.STRIKE_APPLIED:
-      case NotificationType.STORE_SUSPENDED:
       case NotificationType.STORE_FLAGGED:
         return hasAny(['settings:manage']);
+
+      case NotificationType.STORE_SUSPENDED:
+        if (notification.channelType === 'COMMISSION_DEBT') {
+          return hasAny([
+            'settings:manage',
+            'finances:view_sensitive',
+            'metrics:view_financial',
+          ]);
+        }
+        return hasAny(['settings:manage']);
+
+      case NotificationType.COMMISSION_DEBT_REMINDER:
+      case NotificationType.COMMISSION_PAYMENT_REVIEWED:
+        return hasAny(['finances:view_sensitive', 'metrics:view_financial']);
 
       case NotificationType.ACHIEVEMENT_UNLOCKED:
       case NotificationType.DIVISION_UP:
@@ -1034,6 +1047,7 @@ export class NotificationService {
       targetId?: string;
       storeId?: string;
       channelType?: string;
+      suspensionReason?: string;
     },
   ) {
     if (!this.firebaseApp) return;
@@ -1069,6 +1083,7 @@ export class NotificationService {
           storeId: payload.storeId || '',
           orderId: payload.orderId || '',
           targetId: payload.targetId || payload.orderId || '',
+          suspensionReason: payload.suspensionReason || '',
           mediationId:
             (payload.type === NotificationType.MEDIATION_REQUEST ||
               payload.type === NotificationType.MEDIATION_RESPONSE) &&
@@ -1130,6 +1145,22 @@ export class NotificationService {
     }
   }
 
+  async hasNotificationForTargetSince(
+    type: NotificationType,
+    targetId: string,
+    since: Date,
+  ): Promise<boolean> {
+    if (!targetId) return false;
+    const count = await this.notificationRepository.count({
+      where: {
+        type,
+        targetId,
+        createdAt: MoreThanOrEqual(since),
+      },
+    });
+    return count > 0;
+  }
+
   async create(data: {
     userId: string;
     title: string;
@@ -1139,6 +1170,7 @@ export class NotificationService {
     orderId?: string;
     storeId?: string;
     channelType?: string;
+    suspensionReason?: string;
   }) {
     try {
       let notification: Notification;
@@ -1327,6 +1359,12 @@ export class NotificationService {
             persistedStoreId ||
             data.storeId ||
             (isStoreMediation && targetId ? targetId : ''),
+          suspensionReason:
+            data.suspensionReason ||
+            (data.type === NotificationType.STORE_SUSPENDED &&
+            data.channelType === 'COMMISSION_DEBT'
+              ? 'COMMISSION_DEBT'
+              : ''),
         },
       );
 
