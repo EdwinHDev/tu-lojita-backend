@@ -55,4 +55,9 @@ export class OrderPaginationDto extends PaginationDto {
   @IsBoolean()
   @Transform(({ value }) => value === 'true' || value === true)
   hasDispute?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true' || value === true)
+  hasPendingPayment?: boolean;
 }

@@ -936,7 +936,68 @@ export class OrderService {
     }
   }
 
-  async findOne(id: string) {
+  private assertCanViewOrder(order: Order, requestingUser?: any): void {
+    if (!requestingUser) return;
+
+    if (requestingUser.role === UserRole.ADMIN) return;
+    if (order.user?.id && order.user.id === requestingUser.id) return;
+
+    if (requestingUser.role === UserRole.VENDOR) {
+      if (!requestingUser.store || order.store?.id !== requestingUser.store.id) {
+        throw new ForbiddenException(
+          'No tienes autorización para ver este pedido',
+        );
+      }
+      return;
+    }
+
+    if (requestingUser.role === UserRole.COMPANY) {
+      if (requestingUser.isCollaborator) {
+        const actorCompanyId = requestingUser.company?.id;
+        const orderCompanyId = order.store?.company?.id;
+        const sameCompany = Boolean(
+          actorCompanyId && orderCompanyId && actorCompanyId === orderCompanyId,
+        );
+        const allowed: string[] = Array.isArray(requestingUser.allowedBranchIds)
+          ? requestingUser.allowedBranchIds
+          : [];
+        const hasBranchAccess =
+          Boolean(requestingUser.hasFullBranchAccess) ||
+          Boolean(order.store?.id && allowed.includes(order.store.id));
+
+        if (!sameCompany || !hasBranchAccess) {
+          throw new ForbiddenException(
+            'No tienes autorización para ver este pedido',
+          );
+        }
+        return;
+      }
+
+      const isStoreOwner = Boolean(
+        order.store?.owner?.id && order.store.owner.id === requestingUser.id,
+      );
+      const isCompanyOwner = Boolean(
+        (order.store?.company?.owner?.id &&
+          order.store.company.owner.id === requestingUser.id) ||
+          (requestingUser.company?.id &&
+            order.store?.company?.id === requestingUser.company.id),
+      );
+      if (!isStoreOwner && !isCompanyOwner) {
+        throw new ForbiddenException(
+          'No tienes autorización para ver este pedido',
+        );
+      }
+      return;
+    }
+
+    if (order.store?.owner?.id && order.store.owner.id === requestingUser.id) {
+      return;
+    }
+
+    throw new ForbiddenException('No tienes autorización para ver este pedido');
+  }
+
+  async findOne(id: string, requestingUser?: any) {
     const order = await this.orderRepository.findOne({
       where: { id },
       relations: [
@@ -974,18 +1035,19 @@ export class OrderService {
         where: { id },
       });
       if (orderReview) {
-        return this.findOne(orderReview.orderId);
+        return this.findOne(orderReview.orderId, requestingUser);
       }
       const buyerReview = await this.buyerReviewRepository.findOne({
         where: { id },
       });
       if (buyerReview) {
-        return this.findOne(buyerReview.orderId);
+        return this.findOne(buyerReview.orderId, requestingUser);
       }
 
       throw new NotFoundException(`Orden #${id} no encontrada`);
     }
 
+    this.assertCanViewOrder(order, requestingUser);
     return order;
   }
 
@@ -1004,6 +1066,7 @@ export class OrderService {
       sort,
       order,
       hasDispute,
+      hasPendingPayment,
     } = paginationDto;
 
     const queryBuilder = this.orderRepository
@@ -1062,7 +1125,7 @@ export class OrderService {
 
     if (search && search.trim().length > 0) {
       queryBuilder.andWhere(
-        '(CAST(order.id AS TEXT) ILIKE :search OR store.name ILIKE :search OR CAST(order.createdAt AS TEXT) ILIKE :search)',
+        `(CAST(order.id AS TEXT) ILIKE :search OR store.name ILIKE :search OR CAST(order.createdAt AS TEXT) ILIKE :search OR user.firstName ILIKE :search OR user.lastName ILIKE :search OR CONCAT(COALESCE(user.firstName, ''), ' ', COALESCE(user.lastName, '')) ILIKE :search OR EXISTS (SELECT 1 FROM payments sp WHERE sp."orderId" = order.id AND sp.reference ILIKE :search))`,
         { search: `%${search.trim()}%` },
       );
     }
@@ -1072,6 +1135,20 @@ export class OrderService {
         queryBuilder.andWhere('disputes.id IS NOT NULL');
       } else {
         queryBuilder.andWhere('disputes.id IS NULL');
+      }
+    }
+
+    if (hasPendingPayment !== undefined) {
+      if (hasPendingPayment) {
+        queryBuilder.andWhere(
+          'EXISTS (SELECT 1 FROM payments pp WHERE pp."orderId" = order.id AND pp.status = :pendingPaymentStatus)',
+          { pendingPaymentStatus: PaymentStatus.WAITING_VERIFICATION },
+        );
+      } else {
+        queryBuilder.andWhere(
+          'NOT EXISTS (SELECT 1 FROM payments pp WHERE pp."orderId" = order.id AND pp.status = :pendingPaymentStatus)',
+          { pendingPaymentStatus: PaymentStatus.WAITING_VERIFICATION },
+        );
       }
     }
 

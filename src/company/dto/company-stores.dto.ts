@@ -17,6 +17,13 @@ export class CompanyStoreDto {
   deletionScheduledAt?: Date | null;
   isDeleted?: boolean;
   aiEnabled?: boolean;
+  pendingOrdersCount?: number;
+  commissionDebt?: number;
+  pendingCommissionReportsCount?: number;
+  rankingDivisionTitle?: string | null;
+  currentPR?: number;
+  consecutiveSalesDays?: number;
+  inDangerZone?: boolean;
 }
 
 export class CompanyStoresResponseDto {

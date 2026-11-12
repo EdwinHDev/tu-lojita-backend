@@ -24,6 +24,10 @@ import { Payment } from 'src/payment/entities/payment.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { Subcategory } from 'src/subcategory/entities/subcategory.entity';
 import { StoreAiSettings } from 'src/store-ai/entities/store-ai-settings.entity';
+import { StoreCommissionBilling } from 'src/commission/entities/store-commission-billing.entity';
+import { CommissionPaymentReport } from 'src/commission/entities/commission-payment-report.entity';
+import { ItemPromotion } from 'src/item/entities/item-promotion.entity';
+import { StoreRanking } from 'src/ranking/entities/store-ranking.entity';
 import { FinancialAuthModule } from 'src/financial-auth/financial-auth.module';
 import { NotificationModule } from 'src/notification/notification.module';
 import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.module';
@@ -44,6 +48,10 @@ import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.
       Payment,
       OrderItem,
       Subcategory,
+      StoreCommissionBilling,
+      CommissionPaymentReport,
+      ItemPromotion,
+      StoreRanking,
     ]),
     FinancialAuthModule,
     NotificationModule,

@@ -24,6 +24,8 @@ import { MailModule } from 'src/common/mail/mail.module';
 import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.module';
 import { RankingModule } from 'src/ranking/ranking.module';
 import { StoreAutoDeletionCron } from './cron/store-auto-deletion.cron';
+import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
+import { CommissionPaymentReport } from 'src/commission/entities/commission-payment-report.entity';
 
 @Module({
   imports: [
@@ -48,6 +50,8 @@ import { StoreAutoDeletionCron } from './cron/store-auto-deletion.cron';
       CompanyActivityLog,
       Installment,
       OrderDispute,
+      StorePaymentMethod,
+      CommissionPaymentReport,
     ]),
   ],
   controllers: [StoreController],

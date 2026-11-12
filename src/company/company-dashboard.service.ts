@@ -25,14 +25,17 @@ import {
   getStartOfTodayInTimezone,
   getStartOfMonthInTimezone,
   formatTimeInTimezone,
+  getLocalDate,
 } from 'src/common/utils/timezone.utils';
 
 import {
   DashboardAnalyticsQueryDto,
   DashboardAnalyticsResponseDto,
   DashboardPeriod,
+  OperationalSummaryDto,
   PaymentMethodShareDto,
   SalesChartPointDto,
+  StoreOperationalAlertDto,
   StorePerformanceDto,
   TopProductDto,
   TopDesiredProductDto,
@@ -41,6 +44,14 @@ import { Payment } from 'src/payment/entities/payment.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { PaymentStatus } from 'src/payment/types/payment-status.enum';
 import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
+import { StoreCommissionBilling } from 'src/commission/entities/store-commission-billing.entity';
+import { CommissionPaymentReport } from 'src/commission/entities/commission-payment-report.entity';
+import { PaymentReportStatus } from 'src/commission/types';
+import { ItemPromotion } from 'src/item/entities/item-promotion.entity';
+import { ItemPromotionStatus } from 'src/item/types/item-promotion-status.enum';
+import { StoreRanking } from 'src/ranking/entities/store-ranking.entity';
+import { DIVISION_TITLES, normalizeDivision } from 'src/ranking/types';
+import { CompanyPermission } from './types/company-permission.enum';
 
 @Injectable()
 export class CompanyDashboardService {
@@ -59,6 +70,14 @@ export class CompanyDashboardService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(StoreCommissionBilling)
+    private readonly storeCommissionBillingRepository: Repository<StoreCommissionBilling>,
+    @InjectRepository(CommissionPaymentReport)
+    private readonly commissionPaymentReportRepository: Repository<CommissionPaymentReport>,
+    @InjectRepository(ItemPromotion)
+    private readonly itemPromotionRepository: Repository<ItemPromotion>,
+    @InjectRepository(StoreRanking)
+    private readonly storeRankingRepository: Repository<StoreRanking>,
     private readonly platformSettingsService: PlatformSettingsService,
   ) {}
 
@@ -134,12 +153,13 @@ export class CompanyDashboardService {
       throw new NotFoundException('Empresa no encontrada');
     }
 
-    let storeIds = company.stores.map((store) => store.id);
+    let activeStores = (company.stores || []).filter((s) => !s.isDeleted);
     if (allowedStoreIds) {
-      storeIds = storeIds.filter((id) => allowedStoreIds.includes(id));
+      activeStores = activeStores.filter((s) => allowedStoreIds.includes(s.id));
     }
+    const storeIds = activeStores.map((store) => store.id);
 
-    // Si no hay tiendas, retornar estadísticas en 0
+    // Si no hay tiendas activas autorizadas, retornar estadísticas en 0
     if (storeIds.length === 0) {
       return {
         salesToday: {
@@ -162,8 +182,10 @@ export class CompanyDashboardService {
       };
     }
 
-    // Calcular fechas según la zona horaria de la primera tienda o Caracas por defecto
-    const timezone = company.stores[0]?.timezone || 'America/Caracas';
+    const canViewFinancial = this.canActorViewFinancialMetrics(actor);
+
+    // Calcular fechas según la zona horaria de la primera tienda activa o Caracas por defecto
+    const timezone = activeStores[0]?.timezone || 'America/Caracas';
     const startOfToday = getStartOfTodayInTimezone(new Date(), timezone);
     const startOfYesterday = new Date(startOfToday);
     startOfYesterday.setDate(startOfYesterday.getDate() - 1);
@@ -173,80 +195,86 @@ export class CompanyDashboardService {
 
     const startOfMonth = getStartOfMonthInTimezone(new Date(), timezone);
 
-    // 1. Ventas de hoy (incluye órdenes pagadas total o parcialmente)
-    const salesToday = await this.orderRepository
-      .createQueryBuilder('order')
-      .select('SUM(order.finalAmount)', 'total')
-      .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-      })
-      .andWhere('order.createdAt >= :startOfToday', {
-        startOfToday: startOfToday.toISOString(),
-      })
-      .getRawOne<{ total: string | null }>();
+    // 1. Ventas de hoy y ayer (solo si tiene permiso financiero)
+    const [salesToday, salesYesterday] = canViewFinancial
+      ? await Promise.all([
+          this.orderRepository
+            .createQueryBuilder('order')
+            .select('SUM(order.finalAmount)', 'total')
+            .where('order.storeId IN (:...storeIds)', { storeIds })
+            .andWhere('order.status IN (:...statuses)', {
+              statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
+            })
+            .andWhere('order.createdAt >= :startOfToday', {
+              startOfToday: startOfToday.toISOString(),
+            })
+            .getRawOne<{ total: string | null }>(),
+          this.orderRepository
+            .createQueryBuilder('order')
+            .select('SUM(order.finalAmount)', 'total')
+            .where('order.storeId IN (:...storeIds)', { storeIds })
+            .andWhere('order.status IN (:...statuses)', {
+              statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
+            })
+            .andWhere(
+              'order.createdAt >= :startOfYesterday AND order.createdAt < :startOfToday',
+              {
+                startOfYesterday: startOfYesterday.toISOString(),
+                startOfToday: startOfToday.toISOString(),
+              },
+            )
+            .getRawOne<{ total: string | null }>(),
+        ])
+      : [null, null];
 
-    // Ventas de ayer para calcular porcentaje
-    const salesYesterday = await this.orderRepository
-      .createQueryBuilder('order')
-      .select('SUM(order.finalAmount)', 'total')
-      .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-      })
-      .andWhere(
-        'order.createdAt >= :startOfYesterday AND order.createdAt < :startOfToday',
-        {
-          startOfYesterday: startOfYesterday.toISOString(),
-          startOfToday: startOfToday.toISOString(),
-        },
-      )
-      .getRawOne<{ total: string | null }>();
-
-    const salesTodayAmount = parseFloat(salesToday?.total || '0');
-    const salesYesterdayAmount = parseFloat(salesYesterday?.total || '0');
+    const salesTodayAmount = canViewFinancial
+      ? parseFloat(salesToday?.total || '0')
+      : 0;
+    const salesYesterdayAmount = canViewFinancial
+      ? parseFloat(salesYesterday?.total || '0')
+      : 0;
     const salesPercentage =
-      salesYesterdayAmount > 0
+      canViewFinancial && salesYesterdayAmount > 0
         ? ((salesTodayAmount - salesYesterdayAmount) / salesYesterdayAmount) *
           100
         : 0;
 
-    // 2. Total de tiendas
-    const totalStores = company.stores.length;
-    const newStoresThisMonth = await this.storeRepository.count({
-      where: {
-        company: { id: companyId },
-        createdAt: MoreThanOrEqual(startOfMonth),
-      },
-    });
+    // 2. Total de tiendas activas autorizadas
+    const totalStores = activeStores.length;
+    const newStoresThisMonth = activeStores.filter(
+      (s) => s.createdAt != null && new Date(s.createdAt) >= startOfMonth,
+    ).length;
 
-    // 3. Total de productos
-    const totalProducts = await this.itemRepository.count({
-      where: { store: { company: { id: companyId } } },
-    });
-
-    const newProductsThisWeek = await this.itemRepository.count({
-      where: {
-        store: { company: { id: companyId } },
-        createdAt: MoreThanOrEqual(startOfWeek),
-      },
-    });
-
-    // 4. Total de clientes (usuarios únicos que han hecho órdenes con pago)
-    const customersQuery = await this.orderRepository
-      .createQueryBuilder('order')
-      .select('COUNT(DISTINCT order.userId)', 'total')
-      .where('order.storeId IN (:...storeIds)', { storeIds })
-      .getRawOne<{ total: string | null }>();
-
-    const newCustomersThisMonth = await this.orderRepository
-      .createQueryBuilder('order')
-      .select('COUNT(DISTINCT order.userId)', 'total')
-      .where('order.storeId IN (:...storeIds)', { storeIds })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-      })
-      .getRawOne<{ total: string | null }>();
+    // 3. Total de productos activos acotados estrictamente a storeIds
+    const [totalProducts, newProductsThisWeek, customersQuery, newCustomersThisMonth] =
+      await Promise.all([
+        this.itemRepository
+          .createQueryBuilder('item')
+          .innerJoin('item.store', 'store')
+          .where('store.id IN (:...storeIds)', { storeIds })
+          .andWhere('item.isDeleted = false')
+          .getCount(),
+        this.itemRepository
+          .createQueryBuilder('item')
+          .innerJoin('item.store', 'store')
+          .where('store.id IN (:...storeIds)', { storeIds })
+          .andWhere('item.isDeleted = false')
+          .andWhere('item.createdAt >= :startOfWeek', { startOfWeek })
+          .getCount(),
+        this.orderRepository
+          .createQueryBuilder('order')
+          .select('COUNT(DISTINCT order.userId)', 'total')
+          .where('order.storeId IN (:...storeIds)', { storeIds })
+          .getRawOne<{ total: string | null }>(),
+        this.orderRepository
+          .createQueryBuilder('order')
+          .select('COUNT(DISTINCT order.userId)', 'total')
+          .where('order.storeId IN (:...storeIds)', { storeIds })
+          .andWhere('order.status IN (:...statuses)', {
+            statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
+          })
+          .getRawOne<{ total: string | null }>(),
+      ]);
 
     return {
       salesToday: {
@@ -475,8 +503,60 @@ export class CompanyDashboardService {
       stores = stores.filter((s) => allowedStoreIds.includes(s.id));
     }
 
-    const globalAiEnabled =
-      await this.platformSettingsService.isAiImageEnhancementEnabled();
+    if (stores.length === 0) {
+      return {
+        stores: [],
+        total: 0,
+      };
+    }
+
+    const storeIds = stores.map((s) => s.id);
+    const canViewFinancial = this.canActorViewFinancialMetrics(actor);
+
+    const [
+      globalAiEnabled,
+      pendingOrdersRows,
+      pendingReportsRows,
+      rankings,
+    ] = await Promise.all([
+      this.platformSettingsService.isAiImageEnhancementEnabled(),
+      this.orderRepository
+        .createQueryBuilder('order')
+        .innerJoin('order.store', 'store')
+        .select('store.id', 'storeId')
+        .addSelect('COUNT(order.id)', 'cnt')
+        .where('store.id IN (:...storeIds)', { storeIds })
+        .andWhere('order.status IN (:...statuses)', {
+          statuses: [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID],
+        })
+        .groupBy('store.id')
+        .getRawMany<{ storeId: string; cnt: string }>(),
+      canViewFinancial
+        ? this.commissionPaymentReportRepository
+            .createQueryBuilder('report')
+            .innerJoin('report.billing', 'billing')
+            .innerJoin('billing.store', 'store')
+            .select('store.id', 'storeId')
+            .addSelect('COUNT(report.id)', 'cnt')
+            .where('store.id IN (:...storeIds)', { storeIds })
+            .andWhere('report.status = :status', {
+              status: PaymentReportStatus.PENDING_REVIEW,
+            })
+            .groupBy('store.id')
+            .getRawMany<{ storeId: string; cnt: string }>()
+        : Promise.resolve([]),
+      this.storeRankingRepository
+        .createQueryBuilder('ranking')
+        .where('ranking.storeId IN (:...storeIds)', { storeIds })
+        .getMany(),
+    ]);
+
+    const pendingOrdersAgg = this.groupGroupedCounts(pendingOrdersRows);
+    const pendingReportsAgg = canViewFinancial
+      ? this.groupGroupedCounts(pendingReportsRows)
+      : { total: 0, byStore: new Map<string, number>() };
+    const rankingByStoreId = new Map(rankings.map((r) => [r.storeId, r]));
+
     const totalCompanyStores = stores.length;
     const companyStores: CompanyStoreDto[] = await Promise.all(
       stores.map(async (store) => {
@@ -486,18 +566,46 @@ export class CompanyDashboardService {
           timezone,
         );
 
-        // Calcular ventas de hoy para esta tienda
-        const salesToday = await this.orderRepository
-          .createQueryBuilder('order')
-          .select('SUM(order.finalAmount)', 'total')
-          .where('order.storeId = :storeId', { storeId: store.id })
-          .andWhere('order.status IN (:...statuses)', {
-            statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-          })
-          .andWhere('order.createdAt >= :startOfToday', {
-            startOfToday: storeStartOfToday.toISOString(),
-          })
-          .getRawOne<{ total: string | null }>();
+        const salesToday = canViewFinancial
+          ? await this.orderRepository
+              .createQueryBuilder('order')
+              .select('SUM(order.finalAmount)', 'total')
+              .where('order.storeId = :storeId', { storeId: store.id })
+              .andWhere('order.status IN (:...statuses)', {
+                statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
+              })
+              .andWhere('order.createdAt >= :startOfToday', {
+                startOfToday: storeStartOfToday.toISOString(),
+              })
+              .getRawOne<{ total: string | null }>()
+          : null;
+
+        const salesTodayAmount = canViewFinancial
+          ? Math.round(parseFloat(salesToday?.total || '0') * 100) / 100
+          : 0;
+
+        const commissionDebt =
+          canViewFinancial && !store.isCommissionExempt
+            ? Math.round(
+                parseFloat(
+                  store.accumulatedCommissionDebt?.toString() || '0',
+                ) * 100,
+              ) / 100
+            : 0;
+
+        const ranking = rankingByStoreId.get(store.id);
+        let rankingDivisionTitle: string | null = null;
+        let currentPR = 0;
+        let consecutiveSalesDays = 0;
+        let inDangerZone = false;
+
+        if (ranking) {
+          const normalized = normalizeDivision(ranking.division);
+          rankingDivisionTitle = DIVISION_TITLES[normalized] || normalized;
+          currentPR = Number(ranking.currentPR || 0);
+          consecutiveSalesDays = Number(ranking.consecutiveSalesDays || 0);
+          inDangerZone = Boolean(ranking.inDangerZone || ranking.isFlagged);
+        }
 
         return {
           id: store.id,
@@ -507,8 +615,8 @@ export class CompanyDashboardService {
           address: store.addresses?.[0]?.address || undefined,
           logo: store.logo,
           status: store.status,
-          productsCount: store.items?.length || 0,
-          salesToday: parseFloat(salesToday?.total || '0'),
+          productsCount: (store.items || []).filter((i) => !i.isDeleted).length,
+          salesToday: salesTodayAmount,
           currency: 'USD',
           instagram: store.instagram,
           tiktok: store.tiktok,
@@ -520,6 +628,15 @@ export class CompanyDashboardService {
               store.aiSettings?.isEnabled &&
               store.aiSettings?.apiKeyHint,
           ),
+          pendingOrdersCount: pendingOrdersAgg.byStore.get(store.id) || 0,
+          commissionDebt,
+          pendingCommissionReportsCount: canViewFinancial
+            ? pendingReportsAgg.byStore.get(store.id) || 0
+            : 0,
+          rankingDivisionTitle,
+          currentPR,
+          consecutiveSalesDays,
+          inDangerZone,
         };
       }),
     );
@@ -653,8 +770,16 @@ export class CompanyDashboardService {
         topProducts: [],
         topDesiredProducts: [],
         paymentMethods: [],
+        operationalSummary: this.emptyOperationalSummary(),
       };
     }
+
+    const activeTargetStores = targetStores.filter((s) => !s.isDeleted);
+    const canViewFinancial = this.canActorViewFinancialMetrics(actor);
+    const operationalQueriesPromise = this.fetchOperationalSummaryQueries(
+      activeTargetStores,
+      canViewFinancial,
+    );
 
     // 1. Órdenes del período actual
     const currentOrders = await this.orderRepository
@@ -734,6 +859,7 @@ export class CompanyDashboardService {
     // 4. Cuentas por cobrar activas (saldo de compras en cuotas vigentes)
     const activeInstallmentOrders = await this.orderRepository
       .createQueryBuilder('order')
+      .leftJoinAndSelect('order.store', 'store')
       .where('order.storeId IN (:...targetStoreIds)', { targetStoreIds })
       .andWhere('order.isPartialPayment = true')
       .andWhere('order.status IN (:...statuses)', {
@@ -932,10 +1058,18 @@ export class CompanyDashboardService {
       const topItemsRaw = await this.orderItemRepository
         .createQueryBuilder('oi')
         .innerJoin('oi.order', 'order')
+        .leftJoin('order.store', 'orderStore')
         .leftJoin('oi.item', 'item')
+        .leftJoin('item.store', 'itemStore')
         .select('oi.title', 'title')
         .addSelect('item.id', 'itemId')
         .addSelect('item.mainImage', 'mainImage')
+        .addSelect('itemStore.id', 'itemStoreId')
+        .addSelect('itemStore.name', 'itemStoreName')
+        .addSelect('itemStore.branchName', 'itemStoreBranchName')
+        .addSelect('orderStore.id', 'orderStoreId')
+        .addSelect('orderStore.name', 'orderStoreName')
+        .addSelect('orderStore.branchName', 'orderStoreBranchName')
         .addSelect('SUM(oi.quantity)', 'unitsSold')
         .addSelect('SUM(oi.price * oi.quantity)', 'totalRevenue')
         .where('order.storeId IN (:...targetStoreIds)', { targetStoreIds })
@@ -952,18 +1086,36 @@ export class CompanyDashboardService {
         .groupBy('oi.title')
         .addGroupBy('item.id')
         .addGroupBy('item.mainImage')
+        .addGroupBy('itemStore.id')
+        .addGroupBy('itemStore.name')
+        .addGroupBy('itemStore.branchName')
+        .addGroupBy('orderStore.id')
+        .addGroupBy('orderStore.name')
+        .addGroupBy('orderStore.branchName')
         .orderBy('SUM(oi.quantity)', 'DESC')
         .limit(5)
         .getRawMany();
 
-      topProducts = topItemsRaw.map((raw) => ({
-        itemId: raw.itemId || '',
-        title: raw.title || 'Producto',
-        mainImage: raw.mainImage || null,
-        unitsSold: parseInt(raw.unitsSold || '0', 10),
-        totalRevenue:
-          Math.round(parseFloat(raw.totalRevenue || '0') * 100) / 100,
-      }));
+      topProducts = topItemsRaw.map((raw) => {
+        const resolvedStoreId = raw.itemStoreId || raw.orderStoreId || null;
+        const baseName = raw.itemStoreName || raw.orderStoreName || null;
+        const branchName =
+          raw.itemStoreBranchName || raw.orderStoreBranchName || null;
+        const resolvedStoreName = baseName
+          ? baseName + (branchName ? ` (${branchName})` : '')
+          : null;
+
+        return {
+          itemId: raw.itemId || '',
+          title: raw.title || 'Producto',
+          mainImage: raw.mainImage || null,
+          unitsSold: parseInt(raw.unitsSold || '0', 10),
+          totalRevenue:
+            Math.round(parseFloat(raw.totalRevenue || '0') * 100) / 100,
+          storeId: resolvedStoreId,
+          storeName: resolvedStoreName,
+        };
+      });
     } catch {
       topProducts = [];
     }
@@ -1011,6 +1163,7 @@ export class CompanyDashboardService {
     try {
       const topDesiredRaw = await this.itemRepository
         .createQueryBuilder('item')
+        .leftJoinAndSelect('item.store', 'store')
         .leftJoinAndSelect('item.variants', 'variants')
         .where('item.storeId IN (:...targetStoreIds)', { targetStoreIds })
         .andWhere('item.isActive = true')
@@ -1041,11 +1194,25 @@ export class CompanyDashboardService {
           stockQuantity: stock,
           trackInventory: it.trackInventory,
           hasVariants: it.hasVariants || false,
+          storeId: it.store?.id || null,
+          storeName: it.store
+            ? it.store.name +
+              (it.store.branchName ? ` (${it.store.branchName})` : '')
+            : null,
         };
       });
     } catch (err) {
       console.error('Error fetching top desired products:', err);
     }
+
+    const operationalQueries = await operationalQueriesPromise;
+    const operationalSummary = this.composeOperationalSummary(
+      activeTargetStores,
+      canViewFinancial,
+      operationalQueries,
+      currentOrders,
+      activeInstallmentOrders,
+    );
 
     return {
       period,
@@ -1077,6 +1244,316 @@ export class CompanyDashboardService {
       topProducts,
       topDesiredProducts,
       paymentMethods,
+      operationalSummary,
+    };
+  }
+
+  private canActorViewFinancialMetrics(actor: any): boolean {
+    if (!actor || typeof actor !== 'object') return true;
+    if (!actor.isCollaborator) return true;
+    const perms: string[] = Array.isArray(actor.permissions)
+      ? actor.permissions
+      : [];
+    return perms.includes(CompanyPermission.METRICS_VIEW_FINANCIAL);
+  }
+
+  private formatStoreDisplayName(store: Store): string {
+    return store.name + (store.branchName ? ` (${store.branchName})` : '');
+  }
+
+  private groupGroupedCounts(
+    rows: Array<{ storeId?: string | null; cnt?: string | number | null }>,
+  ): { total: number; byStore: Map<string, number> } {
+    const byStore = new Map<string, number>();
+    let total = 0;
+    for (const row of rows) {
+      const storeId = row?.storeId;
+      const count = parseInt(String(row?.cnt ?? '0'), 10) || 0;
+      total += count;
+      if (storeId) {
+        byStore.set(storeId, (byStore.get(storeId) || 0) + count);
+      }
+    }
+    return { total, byStore };
+  }
+
+  private emptyOperationalSummary(): OperationalSummaryDto {
+    return {
+      totalCommissionDebt: 0,
+      storesWithDebtCount: 0,
+      pendingCommissionReportsCount: 0,
+      activePromotionsCount: 0,
+      pendingPromotionsCount: 0,
+      topDivision: null,
+      topDivisionTitle: null,
+      highestPR: 0,
+      maxConsecutiveSalesDays: 0,
+      dailyMissionsCompletedToday: 0,
+      storesInDangerZoneCount: 0,
+      storesScheduledForDeletionCount: 0,
+      storeAlerts: [],
+      topRankingStoreId: null,
+      topRankingStoreName: null,
+    };
+  }
+
+  private async fetchOperationalSummaryQueries(
+    activeTargetStores: Store[],
+    canViewFinancial: boolean,
+  ): Promise<{
+    pendingReportsRows: Array<{ storeId: string; cnt: string }>;
+    activePromosRows: Array<{ storeId: string; cnt: string }>;
+    pendingPromosRows: Array<{ storeId: string; cnt: string }>;
+    rankings: StoreRanking[];
+  }> {
+    if (activeTargetStores.length === 0) {
+      return {
+        pendingReportsRows: [],
+        activePromosRows: [],
+        pendingPromosRows: [],
+        rankings: [],
+      };
+    }
+
+    const now = new Date();
+    const activeStoreIds = activeTargetStores.map((s) => s.id);
+
+    const [pendingReportsRows, activePromosRows, pendingPromosRows, rankings] =
+      await Promise.all([
+        canViewFinancial
+          ? this.commissionPaymentReportRepository
+              .createQueryBuilder('report')
+              .innerJoin('report.billing', 'billing')
+              .innerJoin('billing.store', 'store')
+              .select('store.id', 'storeId')
+              .addSelect('COUNT(report.id)', 'cnt')
+              .where('store.id IN (:...activeStoreIds)', { activeStoreIds })
+              .andWhere('report.status = :status', {
+                status: PaymentReportStatus.PENDING_REVIEW,
+              })
+              .groupBy('store.id')
+              .getRawMany<{ storeId: string; cnt: string }>()
+          : Promise.resolve([]),
+        this.itemPromotionRepository
+          .createQueryBuilder('promo')
+          .select('promo.storeId', 'storeId')
+          .addSelect('COUNT(promo.id)', 'cnt')
+          .where('promo.storeId IN (:...activeStoreIds)', { activeStoreIds })
+          .andWhere('promo.status = :status', {
+            status: ItemPromotionStatus.APPROVED,
+          })
+          .andWhere('(promo.expiresAt IS NULL OR promo.expiresAt > :now)', {
+            now,
+          })
+          .groupBy('promo.storeId')
+          .getRawMany<{ storeId: string; cnt: string }>(),
+        this.itemPromotionRepository
+          .createQueryBuilder('promo')
+          .select('promo.storeId', 'storeId')
+          .addSelect('COUNT(promo.id)', 'cnt')
+          .where('promo.storeId IN (:...activeStoreIds)', { activeStoreIds })
+          .andWhere('promo.status = :status', {
+            status: ItemPromotionStatus.PENDING,
+          })
+          .groupBy('promo.storeId')
+          .getRawMany<{ storeId: string; cnt: string }>(),
+        this.storeRankingRepository
+          .createQueryBuilder('ranking')
+          .where('ranking.storeId IN (:...activeStoreIds)', { activeStoreIds })
+          .getMany(),
+      ]);
+
+    return {
+      pendingReportsRows,
+      activePromosRows,
+      pendingPromosRows,
+      rankings,
+    };
+  }
+
+  private composeOperationalSummary(
+    activeTargetStores: Store[],
+    canViewFinancial: boolean,
+    queries: {
+      pendingReportsRows: Array<{ storeId: string; cnt: string }>;
+      activePromosRows: Array<{ storeId: string; cnt: string }>;
+      pendingPromosRows: Array<{ storeId: string; cnt: string }>;
+      rankings: StoreRanking[];
+    },
+    currentOrders: Order[],
+    activeInstallmentOrders: Order[],
+  ): OperationalSummaryDto {
+    if (activeTargetStores.length === 0) {
+      return this.emptyOperationalSummary();
+    }
+
+    const now = new Date();
+    const storeById = new Map(activeTargetStores.map((s) => [s.id, s]));
+    const storeTimezoneMap = new Map(
+      activeTargetStores.map((s) => [s.id, s.timezone || 'America/Caracas']),
+    );
+
+    const nonExemptStores = activeTargetStores.filter(
+      (s) => !s.isCommissionExempt,
+    );
+    const totalCommissionDebt = canViewFinancial
+      ? Math.round(
+          nonExemptStores.reduce(
+            (sum, s) =>
+              sum + parseFloat(s.accumulatedCommissionDebt?.toString() || '0'),
+            0,
+          ) * 100,
+        ) / 100
+      : 0;
+    const storesWithDebtCount = canViewFinancial
+      ? nonExemptStores.filter(
+          (s) =>
+            parseFloat(s.accumulatedCommissionDebt?.toString() || '0') > 0,
+        ).length
+      : 0;
+
+    const storesScheduledForDeletionCount = activeTargetStores.filter(
+      (s) =>
+        s.deletionScheduledAt != null &&
+        new Date(s.deletionScheduledAt) > now,
+    ).length;
+
+    const pendingReportsAgg = canViewFinancial
+      ? this.groupGroupedCounts(queries.pendingReportsRows)
+      : { total: 0, byStore: new Map<string, number>() };
+    const activePromosAgg = this.groupGroupedCounts(queries.activePromosRows);
+    const pendingPromosAgg = this.groupGroupedCounts(queries.pendingPromosRows);
+
+    const pendingOrdersMap = new Map<string, number>();
+    for (const order of currentOrders) {
+      if (
+        order.status === OrderStatus.PENDING ||
+        order.status === OrderStatus.PARTIALLY_PAID
+      ) {
+        const orderStoreId = order.store?.id || (order as any).storeId;
+        if (orderStoreId) {
+          pendingOrdersMap.set(
+            orderStoreId,
+            (pendingOrdersMap.get(orderStoreId) || 0) + 1,
+          );
+        }
+      }
+    }
+
+    const receivablesMap = new Map<string, number>();
+    if (canViewFinancial) {
+      for (const order of activeInstallmentOrders) {
+        const orderStoreId = order.store?.id || (order as any).storeId;
+        if (orderStoreId) {
+          const bal = parseFloat(order.remainingBalance?.toString() || '0');
+          receivablesMap.set(
+            orderStoreId,
+            (receivablesMap.get(orderStoreId) || 0) + bal,
+          );
+        }
+      }
+    }
+
+    const storeAlerts: StoreOperationalAlertDto[] = activeTargetStores.map(
+      (st) => {
+        const commissionDebt =
+          canViewFinancial && !st.isCommissionExempt
+            ? Math.round(
+                parseFloat(st.accumulatedCommissionDebt?.toString() || '0') *
+                  100,
+              ) / 100
+            : 0;
+        const accountsReceivable = canViewFinancial
+          ? Math.round((receivablesMap.get(st.id) || 0) * 100) / 100
+          : 0;
+        const isScheduledForDeletion =
+          st.deletionScheduledAt != null &&
+          new Date(st.deletionScheduledAt) > now;
+
+        return {
+          storeId: st.id,
+          storeName: this.formatStoreDisplayName(st),
+          pendingOrders: pendingOrdersMap.get(st.id) || 0,
+          accountsReceivable,
+          commissionDebt,
+          pendingCommissionReportsCount: canViewFinancial
+            ? pendingReportsAgg.byStore.get(st.id) || 0
+            : 0,
+          activePromotionsCount: activePromosAgg.byStore.get(st.id) || 0,
+          pendingPromotionsCount: pendingPromosAgg.byStore.get(st.id) || 0,
+          isScheduledForDeletion,
+        };
+      },
+    );
+
+    let topDivision: string | null = null;
+    let topDivisionTitle: string | null = null;
+    let highestPR = 0;
+    let maxConsecutiveSalesDays = 0;
+    let dailyMissionsCompletedToday = 0;
+    let storesInDangerZoneCount = 0;
+    let topRankingStoreId: string | null = null;
+    let topRankingStoreName: string | null = null;
+
+    if (queries.rankings.length > 0) {
+      let bestRanking = queries.rankings[0];
+      for (const ranking of queries.rankings) {
+        const pr = Number(ranking.currentPR || 0);
+        if (pr > Number(bestRanking.currentPR || 0)) {
+          bestRanking = ranking;
+        }
+        const streak = Number(ranking.consecutiveSalesDays || 0);
+        if (streak > maxConsecutiveSalesDays) {
+          maxConsecutiveSalesDays = streak;
+        }
+        if (ranking.inDangerZone || ranking.isFlagged) {
+          storesInDangerZoneCount += 1;
+        }
+        if (ranking.lastMissionDate) {
+          const tz = storeTimezoneMap.get(ranking.storeId) || 'America/Caracas';
+          const missionDay = getLocalDate(new Date(ranking.lastMissionDate), tz);
+          const today = getLocalDate(now, tz);
+          if (
+            missionDay.year === today.year &&
+            missionDay.month === today.month &&
+            missionDay.day === today.day
+          ) {
+            dailyMissionsCompletedToday += Number(
+              ranking.dailyMissionsCompletedToday || 0,
+            );
+          }
+        }
+      }
+
+      const normalized = normalizeDivision(bestRanking.division);
+      topDivision = normalized;
+      topDivisionTitle = DIVISION_TITLES[normalized] || normalized;
+      highestPR = Number(bestRanking.currentPR || 0);
+      topRankingStoreId = bestRanking.storeId || null;
+      const topStore = topRankingStoreId
+        ? storeById.get(topRankingStoreId)
+        : undefined;
+      topRankingStoreName = topStore
+        ? this.formatStoreDisplayName(topStore)
+        : null;
+    }
+
+    return {
+      totalCommissionDebt,
+      storesWithDebtCount,
+      pendingCommissionReportsCount: pendingReportsAgg.total,
+      activePromotionsCount: activePromosAgg.total,
+      pendingPromotionsCount: pendingPromosAgg.total,
+      topDivision,
+      topDivisionTitle,
+      highestPR,
+      maxConsecutiveSalesDays,
+      dailyMissionsCompletedToday,
+      storesInDangerZoneCount,
+      storesScheduledForDeletionCount,
+      storeAlerts,
+      topRankingStoreId,
+      topRankingStoreName,
     };
   }
 }

@@ -47,6 +47,11 @@ import {
   MediationStatus,
   MediationTopic,
 } from './entities/mediation-request.entity';
+import { StoreStrike } from './entities/store-strike.entity';
+import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
+import { CommissionPaymentReport } from 'src/commission/entities/commission-payment-report.entity';
+import { PaymentReportStatus } from 'src/commission/types';
+import { CompanyPermission } from 'src/company/types/company-permission.enum';
 import { BlockCustomerDto } from './dto/block-customer.dto';
 import { CreateMediationRequestDto } from './dto/create-mediation-request.dto';
 import { RespondMediationRequestDto } from './dto/respond-mediation-request.dto';
@@ -96,6 +101,12 @@ export class StoreService {
     private readonly platformSettings: PlatformSettingsService,
     private readonly rankingService: RankingService,
     private readonly rankingSettingsService: RankingSettingsService,
+    @InjectRepository(StoreStrike)
+    private readonly storeStrikeRepository: Repository<StoreStrike>,
+    @InjectRepository(StorePaymentMethod)
+    private readonly storePaymentMethodRepository: Repository<StorePaymentMethod>,
+    @InjectRepository(CommissionPaymentReport)
+    private readonly commissionPaymentReportRepository: Repository<CommissionPaymentReport>,
   ) {}
 
   async create(createStoreDto: CreateStoreDto, user: User) {
@@ -418,7 +429,7 @@ export class StoreService {
     delete store.aiSettings;
 
     store.productsCount = await this.itemRepository.count({
-      where: { store: { id: store.id } },
+      where: { store: { id: store.id }, isDeleted: false },
     });
 
     await this.enrichStoresWithRankingAssets([store]);
@@ -1063,74 +1074,319 @@ export class StoreService {
     }
   }
 
-  async getStoreDashboardData(storeId: string): Promise<StoreDashboardDto> {
-    const store = await this.storeRepository.findOne({
-      where: { id: storeId },
-    });
-    const timezone = store?.timezone || 'America/Caracas';
-    const startOfToday = getStartOfTodayInTimezone(new Date(), timezone);
+  private resolveStoreDashboardPermissions(store: Store, actor: any): {
+    canViewFinancial: boolean;
+    canViewSalesHistory: boolean;
+    canViewOrders: boolean;
+    canViewDisputes: boolean;
+    canViewStrikes: boolean;
+    canViewMediations: boolean;
+    canViewCustomerData: boolean;
+  } {
+    if (!actor) {
+      throw new ForbiddenException(
+        'No tienes autorización para consultar el panel de esta sucursal',
+      );
+    }
 
-    // 1. Sales today
-    const salesToday = await this.orderRepository
-      .createQueryBuilder('order')
-      .select('SUM(order.finalAmount)', 'total')
-      .where('order.storeId = :storeId', { storeId })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-      })
-      .andWhere('order.createdAt >= :startOfToday', {
-        startOfToday: startOfToday.toISOString(),
-      })
-      .getRawOne();
+    const isCollaborator = Boolean(actor.isCollaborator);
+    if (isCollaborator) {
+      const actorCompanyId = actor.company?.id ?? actor.companyId;
+      const storeCompanyId = store.company?.id;
+      const sameCompany = Boolean(
+        actorCompanyId && storeCompanyId && actorCompanyId === storeCompanyId,
+      );
+      const hasBranchAccess =
+        Boolean(actor.hasFullBranchAccess) ||
+        (Array.isArray(actor.allowedBranchIds) &&
+          actor.allowedBranchIds.includes(store.id));
 
-    // 2. Total items
-    const totalItems = await this.itemRepository.count({
-      where: { store: { id: storeId } },
-    });
+      if (!sameCompany || !hasBranchAccess) {
+        throw new ForbiddenException(
+          'No tienes autorización para consultar el panel de esta sucursal',
+        );
+      }
 
-    // 3. Total categories
-    const totalCategories = await this.storeCategoryRepository.count({
-      where: { store: { id: storeId } },
-    });
-
-    // 4. Total customers (unique users who purchased)
-    const totalCustomersQuery = await this.orderRepository
-      .createQueryBuilder('order')
-      .select('COUNT(DISTINCT order.userId)', 'total')
-      .where('order.storeId = :storeId', { storeId })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-      })
-      .getRawOne();
-
-    // 5. Recent sales
-    const orders = await this.orderRepository
-      .createQueryBuilder('order')
-      .leftJoinAndSelect('order.store', 'store')
-      .leftJoinAndSelect('order.orderItems', 'orderItem')
-      .leftJoinAndSelect('orderItem.variant', 'variant')
-      .leftJoinAndSelect('orderItem.item', 'item')
-      .leftJoinAndSelect('item.variants', 'itemVariants')
-      .where('order.storeId = :storeId', { storeId })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID],
-      })
-      .orderBy('order.createdAt', 'DESC')
-      .take(5)
-      .getMany();
-
-    const recentSales = orders.map((order) => {
-      const firstItem = order.orderItems?.[0];
-      const itemImageUrl = this.resolveOrderItemImageUrl(firstItem);
-      const count = order.orderItems?.length || 0;
-      const itemTitle =
-        (firstItem?.title || firstItem?.item?.title || 'Producto') +
-        (count > 1 ? ` (+${count - 1})` : '');
+      const perms: string[] = Array.isArray(actor.permissions)
+        ? actor.permissions
+        : [];
+      const canViewFinancial = perms.includes(
+        CompanyPermission.METRICS_VIEW_FINANCIAL,
+      );
+      const canViewSalesHistory =
+        canViewFinancial ||
+        perms.includes(CompanyPermission.METRICS_VIEW_SALES_HISTORY);
+      const canViewOrders =
+        perms.includes(CompanyPermission.ORDERS_VIEW) ||
+        perms.includes(CompanyPermission.ORDERS_PROCESS);
+      const canViewDisputes =
+        perms.includes(CompanyPermission.DISPUTES_VIEW) ||
+        perms.includes(CompanyPermission.DISPUTES_RESPOND) ||
+        perms.includes(CompanyPermission.DISPUTES_RESOLVE);
+      const canManageBranches =
+        actor.collaboratorRole?.toLowerCase?.() === 'administrador' ||
+        perms.includes(CompanyPermission.BRANCHES_MANAGE);
 
       return {
+        canViewFinancial,
+        canViewSalesHistory,
+        canViewOrders,
+        canViewDisputes,
+        canViewStrikes: canManageBranches || canViewOrders,
+        canViewMediations: false,
+        canViewCustomerData: perms.includes(
+          CompanyPermission.ORDERS_VIEW_CUSTOMER_DATA,
+        ),
+      };
+    }
+
+    const isAdmin = actor.role === UserRole.ADMIN;
+    const isStoreOwner = Boolean(store.owner?.id && store.owner.id === actor.id);
+    const isCompanyOwner = Boolean(
+      store.company?.owner?.id && store.company.owner.id === actor.id,
+    );
+
+    if (!isAdmin && !isStoreOwner && !isCompanyOwner) {
+      throw new ForbiddenException(
+        'No tienes autorización para consultar el panel de esta sucursal',
+      );
+    }
+
+    return {
+      canViewFinancial: true,
+      canViewSalesHistory: true,
+      canViewOrders: true,
+      canViewDisputes: true,
+      canViewStrikes: true,
+      canViewMediations: true,
+      canViewCustomerData: true,
+    };
+  }
+
+  private buildOrderPreviewSummary(order: Order): {
+    itemTitle: string;
+    itemImageUrl: string | null;
+  } {
+    const firstItem = order.orderItems?.[0];
+    const itemImageUrl = this.resolveOrderItemImageUrl(firstItem);
+    const count = order.orderItems?.length || 0;
+    const itemTitle =
+      (firstItem?.title || firstItem?.item?.title || 'Producto') +
+      (count > 1 ? ` (+${count - 1})` : '');
+    return { itemTitle, itemImageUrl };
+  }
+
+  async getStoreDashboardData(
+    storeId: string,
+    actor: any,
+  ): Promise<StoreDashboardDto> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      relations: ['company', 'company.owner', 'owner', 'aiSettings'],
+    });
+
+    if (!store || store.isDeleted) {
+      throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
+    }
+
+    const permissions = this.resolveStoreDashboardPermissions(store, actor);
+
+    const now = new Date();
+    const timezone = store.timezone || 'America/Caracas';
+    const startOfToday = getStartOfTodayInTimezone(now, timezone);
+    const startOfYesterday = new Date(startOfToday);
+    startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+    const paidStatuses = [OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID];
+    const pendingStatuses = [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID];
+
+    const [
+      salesTodayRow,
+      salesYesterdayRow,
+      totalItems,
+      totalCategories,
+      totalCustomersRow,
+      recentOrders,
+      pendingOrdersCount,
+      pendingOrdersEntities,
+      openDisputesCount,
+      pendingCommissionReportsCount,
+      activeStrikesCount,
+      pendingMediationRequestsCount,
+      paymentMethodsCount,
+      globalAiEnabled,
+    ] = await Promise.all([
+      permissions.canViewFinancial
+        ? this.orderRepository
+            .createQueryBuilder('order')
+            .select('SUM(order.finalAmount)', 'total')
+            .where('order.storeId = :storeId', { storeId })
+            .andWhere('order.status IN (:...statuses)', {
+              statuses: paidStatuses,
+            })
+            .andWhere('order.createdAt >= :startOfToday', {
+              startOfToday: startOfToday.toISOString(),
+            })
+            .getRawOne()
+        : Promise.resolve(null),
+      permissions.canViewFinancial
+        ? this.orderRepository
+            .createQueryBuilder('order')
+            .select('SUM(order.finalAmount)', 'total')
+            .where('order.storeId = :storeId', { storeId })
+            .andWhere('order.status IN (:...statuses)', {
+              statuses: paidStatuses,
+            })
+            .andWhere(
+              'order.createdAt >= :startOfYesterday AND order.createdAt < :startOfToday',
+              {
+                startOfYesterday: startOfYesterday.toISOString(),
+                startOfToday: startOfToday.toISOString(),
+              },
+            )
+            .getRawOne()
+        : Promise.resolve(null),
+      this.itemRepository.count({
+        where: { store: { id: storeId }, isDeleted: false },
+      }),
+      this.storeCategoryRepository.count({
+        where: { store: { id: storeId } },
+      }),
+      this.orderRepository
+        .createQueryBuilder('order')
+        .select('COUNT(DISTINCT order.userId)', 'total')
+        .where('order.storeId = :storeId', { storeId })
+        .andWhere('order.status IN (:...statuses)', {
+          statuses: paidStatuses,
+        })
+        .getRawOne(),
+      permissions.canViewSalesHistory
+        ? this.orderRepository
+            .createQueryBuilder('order')
+            .leftJoinAndSelect('order.store', 'store')
+            .leftJoinAndSelect('order.orderItems', 'orderItem')
+            .leftJoinAndSelect('orderItem.variant', 'variant')
+            .leftJoinAndSelect('orderItem.item', 'item')
+            .leftJoinAndSelect('item.variants', 'itemVariants')
+            .where('order.storeId = :storeId', { storeId })
+            .andWhere('order.status IN (:...statuses)', {
+              statuses: paidStatuses,
+            })
+            .orderBy('order.createdAt', 'DESC')
+            .take(5)
+            .getMany()
+        : Promise.resolve([]),
+      permissions.canViewOrders
+        ? this.orderRepository.count({
+            where: {
+              store: { id: storeId },
+              status: In(pendingStatuses),
+            },
+          })
+        : Promise.resolve(0),
+      permissions.canViewOrders
+        ? this.orderRepository
+            .createQueryBuilder('order')
+            .leftJoinAndSelect('order.user', 'user')
+            .leftJoinAndSelect('order.orderItems', 'orderItem')
+            .leftJoinAndSelect('orderItem.variant', 'variant')
+            .leftJoinAndSelect('orderItem.item', 'item')
+            .leftJoinAndSelect('item.variants', 'itemVariants')
+            .where('order.storeId = :storeId', { storeId })
+            .andWhere('order.status IN (:...statuses)', {
+              statuses: pendingStatuses,
+            })
+            .orderBy('order.createdAt', 'DESC')
+            .take(5)
+            .getMany()
+        : Promise.resolve([]),
+      permissions.canViewDisputes
+        ? this.disputeRepository
+            .createQueryBuilder('dispute')
+            .innerJoin('dispute.order', 'order')
+            .where('order.storeId = :storeId', { storeId })
+            .andWhere('dispute.status IN (:...statuses)', {
+              statuses: [
+                DisputeStatus.OPEN,
+                DisputeStatus.ADMIN_REVIEW,
+                DisputeStatus.MERCHANT_RESPONDED,
+              ],
+            })
+            .getCount()
+        : Promise.resolve(0),
+      permissions.canViewFinancial
+        ? this.commissionPaymentReportRepository
+            .createQueryBuilder('report')
+            .innerJoin('report.billing', 'billing')
+            .innerJoin('billing.store', 'store')
+            .where('store.id = :storeId', { storeId })
+            .andWhere('report.status = :status', {
+              status: PaymentReportStatus.PENDING_REVIEW,
+            })
+            .getCount()
+        : Promise.resolve(0),
+      permissions.canViewStrikes
+        ? this.storeStrikeRepository.count({
+            where: {
+              storeId,
+              expiresAt: MoreThan(now),
+              isRevoked: false,
+            },
+          })
+        : Promise.resolve(0),
+      permissions.canViewMediations
+        ? this.mediationRequestRepository.count({
+            where: {
+              storeId,
+              status: MediationStatus.PENDING,
+            },
+          })
+        : Promise.resolve(0),
+      this.storePaymentMethodRepository.count({
+        where: {
+          store: { id: storeId },
+          isActive: true,
+        },
+      }),
+      this.platformSettings.isAiImageEnhancementEnabled(),
+    ]);
+
+    const salesTodayAmount = permissions.canViewFinancial
+      ? Math.round(parseFloat(salesTodayRow?.total || '0') * 100) / 100
+      : 0;
+    const salesYesterdayAmount = permissions.canViewFinancial
+      ? parseFloat(salesYesterdayRow?.total || '0')
+      : 0;
+    const salesTodayPercentage =
+      permissions.canViewFinancial && salesYesterdayAmount > 0
+        ? Math.round(
+            ((salesTodayAmount - salesYesterdayAmount) / salesYesterdayAmount) *
+              1000,
+          ) / 10
+        : 0;
+
+    const commissionDebt =
+      permissions.canViewFinancial && !store.isCommissionExempt
+        ? Math.round(
+            parseFloat(store.accumulatedCommissionDebt?.toString() || '0') *
+              100,
+          ) / 100
+        : 0;
+
+    const aiEnabled = Boolean(
+      globalAiEnabled &&
+        store.aiSettings?.isEnabled &&
+        store.aiSettings?.apiKeyHint,
+    );
+
+    const recentSales = recentOrders.map((order) => {
+      const { itemTitle, itemImageUrl } = this.buildOrderPreviewSummary(order);
+      return {
         id: order.id,
-        storeName: order.store?.name || '',
-        amount: parseFloat(order.finalAmount.toString()),
+        storeName: order.store?.name || store.name || '',
+        amount: permissions.canViewFinancial
+          ? parseFloat(order.finalAmount.toString())
+          : 0,
         currency: 'USD',
         time: formatTimeInTimezone(new Date(order.createdAt), timezone),
         orderId: order.id,
@@ -1140,17 +1396,48 @@ export class StoreService {
       };
     });
 
+    const pendingOrders = pendingOrdersEntities.map((order) => {
+      const { itemTitle, itemImageUrl } = this.buildOrderPreviewSummary(order);
+      const customerName = permissions.canViewCustomerData
+        ? `${order.user?.firstName || ''} ${order.user?.lastName || ''}`.trim() ||
+          'Cliente'
+        : 'Cliente';
+      return {
+        id: order.id,
+        orderId: order.id,
+        customerName,
+        amount: permissions.canViewFinancial
+          ? parseFloat(order.finalAmount.toString())
+          : 0,
+        currency: 'USD',
+        time: formatTimeInTimezone(new Date(order.createdAt), timezone),
+        status: order.status,
+        itemTitle,
+        itemImageUrl,
+      };
+    });
+
     return {
       stats: {
         salesToday: {
-          amount: parseFloat(salesToday?.total || '0'),
+          amount: salesTodayAmount,
+          percentage: salesTodayPercentage,
           currency: 'USD',
         },
         totalItems,
         totalCategories,
-        totalCustomers: parseInt(totalCustomersQuery?.total || '0'),
+        totalCustomers: parseInt(totalCustomersRow?.total || '0', 10),
+        pendingOrdersCount,
+        openDisputesCount,
+        commissionDebt,
+        pendingCommissionReportsCount,
+        activeStrikesCount,
+        pendingMediationRequestsCount,
+        paymentMethodsCount,
+        aiEnabled,
       },
       recentSales,
+      pendingOrders,
     };
   }
 

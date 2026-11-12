@@ -198,6 +198,14 @@ export class StoreCommissionBillingService {
       take: 50,
     });
 
+    // Buscar comprobantes de pago de la tienda (historial completo)
+    const paymentReports = await this.reportRepository.find({
+      where: { billing: { store: { id: storeId } } },
+      relations: ['paymentMethod', 'reviewedBy'],
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+
     return {
       store: {
         id: store.id,
@@ -209,6 +217,7 @@ export class StoreCommissionBillingService {
       },
       currentBilling,
       recentOrders,
+      paymentReports,
     };
   }
 
@@ -222,11 +231,61 @@ export class StoreCommissionBillingService {
       receiptImageUrl: string;
     },
   ) {
-    const billing = await this.billingRepository.findOne({
-      where: { id: billingId, store: { id: storeId } },
-    });
-    if (!billing)
-      throw new NotFoundException('Facturación semanal no encontrada');
+    let billing: StoreCommissionBilling | null = null;
+    if (billingId && billingId.trim().length > 0) {
+      billing = await this.billingRepository.findOne({
+        where: { id: billingId, store: { id: storeId } },
+        relations: ['store'],
+      });
+    }
+
+    if (!billing) {
+      // Buscar última facturación activa o pendiente de la tienda
+      billing = await this.billingRepository.findOne({
+        where: {
+          store: { id: storeId },
+          status: In([
+            BillingStatus.PENDING,
+            BillingStatus.PAYMENT_REPORTED,
+            BillingStatus.OVERDUE,
+            BillingStatus.SUSPENDED,
+          ]),
+        },
+        relations: ['store'],
+        order: { createdAt: 'DESC' },
+      });
+    }
+
+    if (!billing) {
+      // Si no existe facturación semanal generada todavía, creamos un registro de ciclo abierto
+      const store = await this.storeRepository.findOne({
+        where: { id: storeId },
+      });
+      if (!store) throw new NotFoundException('Tienda no encontrada');
+
+      const now = new Date();
+      const debt = parseFloat(
+        store.accumulatedCommissionDebt?.toString() || '0',
+      );
+      const dueDate = new Date(now);
+      dueDate.setDate(dueDate.getDate() + 3);
+
+      billing = this.billingRepository.create({
+        store,
+        periodStartDate: now,
+        periodEndDate: now,
+        totalSalesAmount: 0,
+        commissionAmount: debt,
+        fineAmount: 0,
+        totalDue: debt > 0 ? debt : dto.amount,
+        paidAmount: 0,
+        dueDate,
+        gracePeriodEndDate: dueDate,
+        status: BillingStatus.PENDING,
+        associatedOrderIds: [],
+      });
+      billing = await this.billingRepository.save(billing);
+    }
 
     const method = await this.platformPaymentMethodRepository.findOne({
       where: { id: dto.paymentMethodId },
@@ -246,6 +305,10 @@ export class StoreCommissionBillingService {
     });
     const savedReport = await this.reportRepository.save(report);
 
+    // Actualizar estado de billing a PAYMENT_REPORTED
+    billing.status = BillingStatus.PAYMENT_REPORTED;
+    await this.billingRepository.save(billing);
+
     this.notificationService
       .notifyAdminActionRequired({
         type: 'COMMISSION_PAYMENT_PENDING',
@@ -262,7 +325,39 @@ export class StoreCommissionBillingService {
       })
       .catch(() => {});
 
+    this.notificationService.notifyAdminBadgesChanged().catch(() => {});
+
     return savedReport;
+  }
+
+  // ----------------------------------------------------
+  // LISTADO DE REPORTES DE PAGO (ADMIN)
+  // ----------------------------------------------------
+  async getPaymentReports(options?: {
+    status?: PaymentReportStatus;
+    storeId?: string;
+  }) {
+    const where: any = {};
+    if (options?.status) {
+      where.status = options.status;
+    }
+    if (options?.storeId) {
+      where.billing = { store: { id: options.storeId } };
+    }
+
+    const isPending = options?.status === PaymentReportStatus.PENDING_REVIEW;
+
+    return this.reportRepository.find({
+      where,
+      relations: [
+        'billing',
+        'billing.store',
+        'billing.store.owner',
+        'paymentMethod',
+        'reviewedBy',
+      ],
+      order: { createdAt: isPending ? 'ASC' : 'DESC' },
+    });
   }
 
   // ----------------------------------------------------
@@ -278,6 +373,11 @@ export class StoreCommissionBillingService {
       relations: ['billing', 'billing.store', 'billing.store.owner'],
     });
     if (!report) throw new NotFoundException('Reporte de pago no encontrado');
+    if (report.status !== PaymentReportStatus.PENDING_REVIEW) {
+      throw new BadRequestException(
+        'El reporte ya ha sido auditado previamente',
+      );
+    }
 
     report.status = action.status;
     report.rejectionReason = action.rejectionReason || null;

@@ -68,6 +68,8 @@ export class TopProductDto {
   mainImage: string | null;
   unitsSold: number;
   totalRevenue: number;
+  storeId?: string | null;
+  storeName?: string | null;
 }
 
 export class PaymentMethodShareDto {
@@ -87,6 +89,38 @@ export class TopDesiredProductDto {
   stockQuantity: number | null;
   trackInventory: boolean;
   hasVariants?: boolean;
+  storeId?: string | null;
+  storeName?: string | null;
+}
+
+export class StoreOperationalAlertDto {
+  storeId: string;
+  storeName: string;
+  pendingOrders: number;
+  accountsReceivable: number;
+  commissionDebt: number;
+  pendingCommissionReportsCount: number;
+  activePromotionsCount: number;
+  pendingPromotionsCount: number;
+  isScheduledForDeletion: boolean;
+}
+
+export class OperationalSummaryDto {
+  totalCommissionDebt: number;
+  storesWithDebtCount: number;
+  pendingCommissionReportsCount: number;
+  activePromotionsCount: number;
+  pendingPromotionsCount: number;
+  topDivision: string | null;
+  topDivisionTitle: string | null;
+  highestPR: number;
+  maxConsecutiveSalesDays: number;
+  dailyMissionsCompletedToday: number;
+  storesInDangerZoneCount: number;
+  storesScheduledForDeletionCount: number;
+  storeAlerts?: StoreOperationalAlertDto[];
+  topRankingStoreId?: string | null;
+  topRankingStoreName?: string | null;
 }
 
 export class DashboardAnalyticsResponseDto {
@@ -101,4 +135,5 @@ export class DashboardAnalyticsResponseDto {
   topProducts: TopProductDto[];
   topDesiredProducts?: TopDesiredProductDto[];
   paymentMethods: PaymentMethodShareDto[];
+  operationalSummary?: OperationalSummaryDto;
 }

@@ -95,6 +95,15 @@ export class CommissionController {
   }
 
   @Auth(UserRole.ADMIN)
+  @Get('admin/payment-reports')
+  getPaymentReports(
+    @Query('status') status?: PaymentReportStatus,
+    @Query('storeId') storeId?: string,
+  ) {
+    return this.billingService.getPaymentReports({ status, storeId });
+  }
+
+  @Auth(UserRole.ADMIN)
   @UseGuards(FinancialAdminGuard)
   @Patch('payment-reports/:id/review')
   reviewPaymentReport(

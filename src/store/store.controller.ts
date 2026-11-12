@@ -62,8 +62,8 @@ export class StoreController {
 
   @Auth()
   @Get(':id/dashboard')
-  getDashboard(@Param('id') id: string) {
-    return this.storeService.getStoreDashboardData(id);
+  getDashboard(@Param('id') id: string, @GetUser() user: User) {
+    return this.storeService.getStoreDashboardData(id, user);
   }
 
   @Auth()
