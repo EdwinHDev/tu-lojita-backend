@@ -64,7 +64,7 @@ export class MailService {
         <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 700; color: #0f172a;">Pasos para reportar tu pago en Tu Lojita Empresa:</p>
         <ol style="margin: 0; padding-left: 18px; color: #334155; font-size: 13px; line-height: 1.6;">
           <li>Abre <strong>Tu Lojita Empresa &rarr; Mi Tienda &rarr; Deudas con la Plataforma</strong>.</li>
-          <li>Copia los datos de una cuenta oficial, realiza el pago en USD o Bs. y adjunta el comprobante.</li>
+          <li>Copia los datos de una cuenta oficial, realiza el pago en Bolívares según la tasa del día y adjunta el comprobante.</li>
           <li>Al aprobarse el pago completo, tu saldo queda al día y tu tienda se reactiva automáticamente.</li>
         </ol>
       </div>
@@ -895,7 +895,7 @@ export class MailService {
         isDaily
           ? 'Tu tienda continúa suspendida temporalmente por saldo pendiente de comisiones de plataforma.'
           : 'El período de gracia para el pago de comisiones ha concluido sin confirmación de pago. Tu tienda ha sido suspendida temporalmente y tus productos están ocultos para los clientes.'
-      }\n\nDesglose de deuda:\n- Comisiones base: ${baseDual.combined}\n- Recargo / multa por mora: ${fineDual.combined}\n- Total a pagar para reactivar: ${totalDual.combined}\n\nCómo reactivar tu tienda:\n1. Ingresa a Tu Lojita Empresa -> Mi Tienda -> Deudas con la Plataforma.\n2. Copia los datos de una cuenta oficial, realiza el pago por el total y adjunta tu comprobante.\n3. En cuanto el administrador apruebe el pago total, tu tienda y productos se reactivarán automáticamente.\n\nTu Lojita © 2026`;
+      }\n\nDesglose de deuda:\n- Comisiones base: ${baseDual.combined}\n- Recargo / multa por mora: ${fineDual.combined}\n- Total a pagar para reactivar: ${totalDual.combined}\n\nCómo reactivar tu tienda:\n1. Ingresa a Tu Lojita Empresa -> Mi Tienda -> Deudas con la Plataforma.\n2. Copia los datos de una cuenta oficial, realiza el pago en Bolívares según la tasa del día y adjunta tu comprobante.\n3. En cuanto el administrador apruebe el pago total, tu tienda y productos se reactivarán automáticamente.\n\nTu Lojita © 2026`;
       await this.mailerService.sendMail({
         to: email,
         subject,

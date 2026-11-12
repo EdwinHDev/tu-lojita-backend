@@ -88,6 +88,8 @@ describe('MailService commission & reactivation email templates', () => {
     expect(call.html).toContain('$5.00');
     expect(call.html).toContain('$30.00');
     expect(call.html).toContain('Zelle: pagos@tulojita.com');
+    expect(call.html).toContain('en Bolívares según la tasa del día');
+    expect(call.text).toContain('en Bolívares según la tasa del día');
     expect(call.html).toContain('reactiva automáticamente');
   });
 
