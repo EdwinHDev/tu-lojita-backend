@@ -54,10 +54,13 @@ export class FavoriteService {
       };
     } else {
       // Precio efectivo al momento de guardar
-      const currentPrice =
-        item.discountPrice != null && item.discountPrice < item.price
-          ? item.discountPrice
-          : item.price;
+      const hasValidDiscount =
+        item.discountPrice != null &&
+        Number(item.discountPrice) > 0 &&
+        Number(item.discountPrice) < Number(item.price);
+      const currentPrice = hasValidDiscount
+        ? Number(item.discountPrice)
+        : Number(item.price);
 
       const newFavorite = this.favoriteRepository.create({
         userId,
@@ -106,10 +109,13 @@ export class FavoriteService {
 
     return favorites.map((fav) => {
       const item = fav.item;
-      const currentPrice =
-        item.discountPrice != null && item.discountPrice < item.price
-          ? Number(item.discountPrice)
-          : Number(item.price);
+      const hasValidDiscount =
+        item.discountPrice != null &&
+        Number(item.discountPrice) > 0 &&
+        Number(item.discountPrice) < Number(item.price);
+      const currentPrice = hasValidDiscount
+        ? Number(item.discountPrice)
+        : Number(item.price);
 
       const priceWhenAdded = Number(fav.priceWhenAdded);
       const priceDropped = currentPrice < priceWhenAdded;

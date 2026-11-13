@@ -43,6 +43,7 @@ import { DisputeStatus } from 'src/order-dispute/types/dispute.enum';
 import { BookingType } from 'src/item/types/booking-type.enum';
 import { ItemType } from 'src/item/types/item-type.enum';
 import { ItemPreorderConfig } from 'src/item/entities/item-preorder-config.entity';
+import { calculateActiveStoreDebt } from './utils/installment-math.util';
 import { PreOrderStatus } from './types/preorder-status.enum';
 import { OrderSlotBooking } from './entities/order-slot-booking.entity';
 import { SlotBookingStatus } from './types/slot-booking-status.enum';
@@ -1366,7 +1367,10 @@ export class OrderService {
           ) {
             const preorderConfig = await queryRunner.manager.findOne(
               ItemPreorderConfig,
-              { where: { item: { id: orderItem.item.id } } },
+              {
+                where: { item: { id: orderItem.item.id } },
+                lock: { mode: 'pessimistic_write' },
+              },
             );
             if (preorderConfig && preorderConfig.reservedPreOrderUnits > 0) {
               preorderConfig.reservedPreOrderUnits = Math.max(
@@ -2195,7 +2199,7 @@ export class OrderService {
     return saved;
   }
 
-  async validateCart(dto: ValidateCartDto) {
+  async validateCart(dto: ValidateCartDto, userId?: string) {
     const { storeId, items: itemsDto, isPartialPayment = false } = dto;
     const errors: {
       itemId?: string;
@@ -2239,6 +2243,7 @@ export class OrderService {
           'store',
           'customizationGroupsRel',
           'customizationGroupsRel.options',
+          'preorderConfig',
         ],
       });
 
@@ -2259,14 +2264,42 @@ export class OrderService {
         });
       }
 
-      if (item.itemType === ItemType.PRODUCT) {
-        if (item.bookingType === BookingType.PRE_ORDER) {
-          hasPreOrderItem = true;
-        } else {
-          hasProductItem = true;
-        }
+      if (item.bookingType === BookingType.PRE_ORDER) {
+        hasPreOrderItem = true;
+      } else if (item.itemType === ItemType.PRODUCT) {
+        hasProductItem = true;
       } else if (item.itemType === ItemType.SERVICE) {
         hasServiceItem = true;
+      }
+
+      if (
+        isPartialPayment &&
+        item.bookingType !== BookingType.PRE_ORDER &&
+        item.allowInstallments === false
+      ) {
+        errors.push({
+          itemId: itemDto.itemId,
+          code: 'ITEM_INSTALLMENTS_NOT_ALLOWED',
+          message: `El artículo "${item.title}" no admite compra en cuotas.`,
+        });
+      }
+
+      if (item.bookingType === BookingType.PRE_ORDER && item.preorderConfig) {
+        if (
+          item.preorderConfig.reservedPreOrderUnits + itemDto.quantity >
+          item.preorderConfig.maxPreOrderUnits
+        ) {
+          const availableUnits = Math.max(
+            0,
+            item.preorderConfig.maxPreOrderUnits -
+              item.preorderConfig.reservedPreOrderUnits,
+          );
+          errors.push({
+            itemId: itemDto.itemId,
+            code: 'PREORDER_QUOTA_EXCEEDED',
+            message: `Cupo máximo de preventa alcanzado para "${item.title}". Disponibles: ${availableUnits}.`,
+          });
+        }
       }
 
       const isServiceWithSlots =
@@ -2491,8 +2524,9 @@ export class OrderService {
       });
     }
 
-    // 3. Validar políticas de pagos parciales (si aplica)
-    if (isPartialPayment) {
+    // 3. Validar políticas de pagos parciales (si aplica y no es preventa exclusiva)
+    const effectiveIsPartialPayment = isPartialPayment && !hasPreOrderItem;
+    if (effectiveIsPartialPayment) {
       if (!store.allowPartialPayments) {
         errors.push({
           storeId,
@@ -2534,7 +2568,7 @@ export class OrderService {
 
     // 4. Calcular desglose financiero de cotización (pricingSummary)
     let feeAmount = 0;
-    if (isPartialPayment && store.allowPartialPayments) {
+    if (effectiveIsPartialPayment && store.allowPartialPayments) {
       const feePercent = parseFloat(
         (store.partialPaymentsFeePercentage || 0).toString(),
       );
@@ -2545,6 +2579,71 @@ export class OrderService {
     // En el nuevo modelo, los precios públicos ya tienen la comisión incorporada.
     // El cliente no paga comisión como recargo en el checkout; sólo paga subtotal + feeAmount de financiamiento.
     const finalAmount = Math.round((calculatedSubtotal + feeAmount) * 100) / 100;
+
+    // 5. Validar elegibilidad crediticia del comprador (cédula, mora, rechazos, límite de crédito)
+    if (effectiveIsPartialPayment && userId) {
+      const buyer = await this.userRepository.findOneBy({ id: userId });
+      if (!buyer || !buyer.identification || buyer.identification.trim() === '') {
+        errors.push({
+          storeId,
+          code: 'IDENTIFICATION_REQUIRED',
+          message:
+            'Debes registrar tu cédula de identidad para realizar compras en cuotas.',
+        });
+      }
+
+      const overdueInstallment = await this.dataSource
+        .getRepository(Installment)
+        .findOne({
+          where: {
+            status: InstallmentStatus.OVERDUE,
+            order: { user: { id: userId } },
+          },
+          relations: ['order', 'order.user'],
+        });
+      if (overdueInstallment) {
+        errors.push({
+          storeId,
+          code: 'OVERDUE_INSTALLMENTS_LOCK',
+          message:
+            'Posees cuotas vencidas pendientes. Regulariza tu saldo para comprar en cuotas.',
+        });
+      }
+
+      const rejectedInStore = await this.orderRepository.findOne({
+        where: {
+          user: { id: userId },
+          store: { id: storeId },
+          status: In([OrderStatus.PENDING, OrderStatus.REJECTED]),
+          payments: { status: PaymentStatus.REJECTED },
+        },
+        relations: ['payments'],
+      });
+      if (rejectedInStore) {
+        errors.push({
+          storeId,
+          code: 'REJECTED_PAYMENT_LOCK',
+          message:
+            'Tienes un pago rechazado pendiente de resolver en esta tienda.',
+        });
+      }
+
+      const maxLimit = parseFloat((store.maxCreditLimit ?? 0).toString());
+      if (maxLimit > 0) {
+        const activeStoreDebt = await calculateActiveStoreDebt(
+          this.dataSource.manager,
+          userId,
+          storeId,
+        );
+        if (activeStoreDebt + finalAmount > maxLimit + 0.001) {
+          errors.push({
+            storeId,
+            code: 'CREDIT_LIMIT_EXCEEDED',
+            message: `Excedes el límite de crédito disponible en esta tienda ($${maxLimit.toFixed(2)}). Deuda activa: $${activeStoreDebt.toFixed(2)}, compra actual: $${finalAmount.toFixed(2)}.`,
+          });
+        }
+      }
+    }
 
     return {
       isValid: errors.length === 0,

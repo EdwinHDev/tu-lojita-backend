@@ -59,6 +59,15 @@ export class ItemController {
     return this.itemService.findAll(paginationDto, user);
   }
 
+  @Auth()
+  @Get('store/:storeId/owner-summary')
+  getStoreOwnerSummary(
+    @Param('storeId') storeId: string,
+    @GetUser() user: User,
+  ) {
+    return this.itemService.getStoreOwnerSummary(storeId, user);
+  }
+
   @UseGuards(OptionalJwtAuthGuard)
   @Get('store/:storeId')
   findByStore(

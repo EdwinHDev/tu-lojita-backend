@@ -517,6 +517,16 @@ export class ItemService {
         );
         discountPrice = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
       }
+    } else if (discountInput !== undefined && (discountInput === null || Number(discountInput) <= 0)) {
+      discountPrice = null;
+    }
+
+    if (
+      discountPrice !== null &&
+      (Number(discountPrice) <= 0 ||
+        (price !== null && Number(price) > 0 && Number(discountPrice) >= Number(price)))
+    ) {
+      discountPrice = null;
     }
 
     return { rate, amount, price, discountPrice };
@@ -861,7 +871,7 @@ export class ItemService {
           v.price !== null && v.price !== undefined
             ? parseFloat(v.price.toString())
             : parseFloat((item.price ?? 0).toString());
-        return effDiscount !== null && effDiscount < effPrice
+        return effDiscount !== null && effDiscount > 0 && effDiscount < effPrice
           ? effDiscount
           : effPrice;
       });
@@ -1071,7 +1081,7 @@ export class ItemService {
       price = 0;
     }
 
-    if (discountPrice !== undefined && discountPrice !== null && discountPrice > 0) {
+    if (discountPrice !== undefined && discountPrice !== null && Number(discountPrice) > 0) {
       const discBase = parseFloat(discountPrice.toString());
       const discComm = await this.commissionService.calculateCommission(
         discBase,
@@ -1079,6 +1089,11 @@ export class ItemService {
         store,
       );
       discountPrice = Math.round((discBase + discComm.commissionAmount) * 100) / 100;
+      if (price > 0 && discountPrice >= price) {
+        discountPrice = undefined;
+      }
+    } else {
+      discountPrice = undefined;
     }
 
     // Validar que si trackInventory es true, el stock inicial sea > 0 (si no tiene variantes ni es preorder ni servicio)
@@ -1193,6 +1208,7 @@ export class ItemService {
       isFeatured,
       hasDiscount,
       onlyInStock,
+      onlyOutOfStock,
       priceType,
       itemType,
     } = paginationDto;
@@ -1297,7 +1313,9 @@ export class ItemService {
 
     if (hasDiscount) {
       // Filtrar items que tienen precio de descuento activo
-      queryBuilder.andWhere('item.discountPrice IS NOT NULL');
+      queryBuilder.andWhere(
+        'item.discountPrice IS NOT NULL AND item.discountPrice > 0 AND item.discountPrice < item.price',
+      );
     }
 
     // Filtro de Publicación e Inventario
@@ -1326,13 +1344,32 @@ export class ItemService {
       );
     }
 
+    if (onlyOutOfStock) {
+      queryBuilder.andWhere(
+        '(item.trackInventory = true AND ((item.hasVariants = false AND COALESCE(item.stockQuantity, 0) <= 0) OR (item.hasVariants = true AND NOT EXISTS (SELECT 1 FROM item_variants v WHERE v."itemId" = item.id AND v."isActive" = true AND v."stockQuantity" > 0))))',
+      );
+    }
+
     // Ordenamiento (Normal o Aleatorio para Postgres)
+    const normalizedOrder: 'ASC' | 'DESC' =
+      typeof order === 'string' && order.toUpperCase() === 'ASC'
+        ? 'ASC'
+        : 'DESC';
+
     if (sort === 'random') {
       // Para RANDOM() en Postgres con DISTINCT/Pagination, añadimos el select
       queryBuilder.addSelect('RANDOM()', 'temp_random');
       queryBuilder.orderBy('temp_random', 'ASC');
     } else {
-      queryBuilder.orderBy(`item.${sort}`, order);
+      const allowedSortColumns = [
+        'createdAt',
+        'price',
+        'stockQuantity',
+        'favoritesCount',
+        'title',
+      ];
+      const safeSort = allowedSortColumns.includes(sort) ? sort : 'createdAt';
+      queryBuilder.orderBy(`item.${safeSort}`, normalizedOrder);
     }
 
     const [data, total] = await queryBuilder.getManyAndCount();
@@ -1470,9 +1507,13 @@ export class ItemService {
         } else {
           const store = await this.storeRepository.findOne({
             where: { id: storeId },
-            relations: ['owner'],
+            relations: ['owner', 'company', 'company.owner'],
           });
-          if (store && store.owner?.id === user.id) {
+          if (
+            store &&
+            (store.owner?.id === user.id ||
+              store.company?.owner?.id === user.id)
+          ) {
             includeInactive = true;
           }
         }
@@ -2303,6 +2344,120 @@ export class ItemService {
       hasActivePromotion: Boolean(active),
       activePromotion: active,
       pendingPromotion: pending,
+    };
+  }
+
+  /**
+   * Devuelve el resumen de conteos de catálogo de una sucursal para su propietario o colaborador autorizado.
+   */
+  async getStoreOwnerSummary(
+    storeId: string,
+    user: User,
+  ): Promise<{
+    total: number;
+    published: number;
+    paused: number;
+    outOfStock: number;
+    discounted: number;
+    products: number;
+    services: number;
+  }> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      relations: ['owner', 'company', 'company.owner'],
+    });
+
+    if (!store) {
+      throw new NotFoundException(`Tienda con ID ${storeId} no encontrada`);
+    }
+
+    const isCollab =
+      (user as any)?.isCollaborator === true ||
+      (user as any)?.actorType === 'COLLABORATOR';
+
+    if (user.role === UserRole.ADMIN) {
+      // Admin autorizado
+    } else if (isCollab) {
+      const collab = user as any;
+      if (!store.company?.id || store.company.id !== collab.company?.id) {
+        throw new ForbiddenException(
+          'No tienes permiso para consultar el resumen de esta tienda',
+        );
+      }
+      if (
+        !collab.hasFullBranchAccess &&
+        !(collab.allowedBranchIds || []).includes(storeId)
+      ) {
+        throw new ForbiddenException(
+          'No tienes autorización para consultar artículos en esta sucursal',
+        );
+      }
+    } else {
+      const isStoreOwner = store.owner?.id === user.id;
+      const isCompanyOwner = store.company?.owner?.id === user.id;
+      if (!isStoreOwner && !isCompanyOwner) {
+        throw new ForbiddenException(
+          'No tienes permiso para consultar el resumen de esta tienda',
+        );
+      }
+    }
+
+    const items = await this.itemRepository.find({
+      where: { store: { id: storeId }, isDeleted: false },
+      relations: ['variants'],
+    });
+
+    let published = 0;
+    let paused = 0;
+    let outOfStock = 0;
+    let discounted = 0;
+    let products = 0;
+    let services = 0;
+
+    for (const item of items) {
+      if (item.isActive) {
+        published++;
+      } else {
+        paused++;
+      }
+
+      if (item.trackInventory) {
+        if (item.hasVariants) {
+          const hasStockInAnyVariant = (item.variants || []).some(
+            (v) => v.isActive && Number(v.stockQuantity ?? 0) > 0,
+          );
+          if (!hasStockInAnyVariant) {
+            outOfStock++;
+          }
+        } else if (Number(item.stockQuantity ?? 0) <= 0) {
+          outOfStock++;
+        }
+      }
+
+      const priceNum = Number(item.price ?? 0);
+      const discountNum =
+        item.discountPrice !== null && item.discountPrice !== undefined
+          ? Number(item.discountPrice)
+          : 0;
+      if (discountNum > 0 && discountNum < priceNum) {
+        discounted++;
+      }
+
+      if (item.itemType === ItemType.SERVICE) {
+        services++;
+      } else {
+        products++;
+      }
+    }
+
+    return {
+      total: items.length,
+      published,
+      paused,
+      outOfStock,
+      discounted,
+      products,
+      services,
     };
   }
 

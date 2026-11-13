@@ -132,6 +132,24 @@ export class CommissionService {
     }
 
     if (installments.length > 0) {
+      const totalStoredPortion = installments.reduce(
+        (sum, inst) =>
+          sum + parseFloat((inst.platformCommissionPortion || 0).toString()),
+        0,
+      );
+
+      if (totalStoredPortion > 0) {
+        const paidStoredPortion = installments
+          .filter((inst) => inst.status === InstallmentStatus.PAID)
+          .reduce(
+            (sum, inst) =>
+              sum +
+              parseFloat((inst.platformCommissionPortion || 0).toString()),
+            0,
+          );
+        return Math.min(commAmount, Math.round(paidStoredPortion * 100) / 100);
+      }
+
       if (paidInstallmentsCount <= 0) {
         return 0;
       }

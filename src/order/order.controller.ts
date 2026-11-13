@@ -96,8 +96,11 @@ export class OrderController {
   }
 
   @Post('validate-cart')
-  validateCart(@Body() validateCartDto: ValidateCartDto) {
-    return this.orderService.validateCart(validateCartDto);
+  validateCart(
+    @Body() validateCartDto: ValidateCartDto,
+    @GetUser() user: User,
+  ) {
+    return this.orderService.validateCart(validateCartDto, user?.id);
   }
 
   @Post()

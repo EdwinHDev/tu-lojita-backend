@@ -14,6 +14,9 @@ import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
 import { DisputeStatus, DisputeType } from 'src/order-dispute/types';
 import { OrderSlotBooking } from '../entities/order-slot-booking.entity';
 import { SlotBookingStatus } from '../types/slot-booking-status.enum';
+import { PreOrderStatus } from '../types/preorder-status.enum';
+import { BookingType } from 'src/item/types/booking-type.enum';
+import { ItemPreorderConfig } from 'src/item/entities/item-preorder-config.entity';
 
 @Injectable()
 export class OrderAutoCancellationCron {
@@ -109,6 +112,32 @@ export class OrderAutoCancellationCron {
         for (const sb of activeBookings) {
           sb.status = SlotBookingStatus.CANCELLED;
           await queryRunner.manager.save(sb);
+        }
+
+        // 1c. Liberar cupos reservados de preventa (PRE_ORDER) si aplica
+        if (order.preOrderStatus !== PreOrderStatus.NONE) {
+          order.preOrderStatus = PreOrderStatus.CANCELLED;
+          for (const orderItem of order.orderItems || []) {
+            if (
+              orderItem.item &&
+              orderItem.item.bookingType === BookingType.PRE_ORDER
+            ) {
+              const preorderConfig = await queryRunner.manager.findOne(
+                ItemPreorderConfig,
+                {
+                  where: { item: { id: orderItem.item.id } },
+                  lock: { mode: 'pessimistic_write' },
+                },
+              );
+              if (preorderConfig && preorderConfig.reservedPreOrderUnits > 0) {
+                preorderConfig.reservedPreOrderUnits = Math.max(
+                  0,
+                  preorderConfig.reservedPreOrderUnits - orderItem.quantity,
+                );
+                await queryRunner.manager.save(preorderConfig);
+              }
+            }
+          }
         }
 
         // 2. Marcar orden como CANCELLED

@@ -10,6 +10,7 @@ import { ItemService } from './item.service';
 import { CompanyPermission } from '../company/types/company-permission.enum';
 import { OrderStatus } from '../order/types/order-status.enum';
 import { UserRole } from '../user/types/user-role.enum';
+import { ItemType } from './types/item-type.enum';
 
 function createOrderItemQb(rawResult: Record<string, any>) {
   const calls: Array<{ sql: string; params?: Record<string, any> }> = [];
@@ -429,6 +430,184 @@ describe('ItemService owner-stats & granular collaborator RBAC', () => {
           } as any,
         ),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('getStoreOwnerSummary', () => {
+    const sampleStore = {
+      id: 'store-1',
+      name: 'Sucursal Principal',
+      owner: { id: 'owner-1' },
+      company: { id: 'company-1', owner: { id: 'owner-1' } },
+    };
+
+    const sampleItems = [
+      {
+        id: 'i-1',
+        isActive: true,
+        isDeleted: false,
+        itemType: ItemType.PRODUCT,
+        trackInventory: true,
+        hasVariants: false,
+        stockQuantity: 10,
+        price: 20,
+        discountPrice: 15,
+        variants: [],
+      },
+      {
+        id: 'i-2',
+        isActive: true,
+        isDeleted: false,
+        itemType: ItemType.PRODUCT,
+        trackInventory: true,
+        hasVariants: false,
+        stockQuantity: 0,
+        price: 12,
+        discountPrice: null,
+        variants: [],
+      },
+      {
+        id: 'i-3',
+        isActive: false,
+        isDeleted: false,
+        itemType: ItemType.PRODUCT,
+        trackInventory: true,
+        hasVariants: true,
+        stockQuantity: 0,
+        price: 30,
+        discountPrice: null,
+        variants: [
+          { id: 'v-1', isActive: true, stockQuantity: 0 },
+          { id: 'v-2', isActive: false, stockQuantity: 5 },
+        ],
+      },
+      {
+        id: 'i-4',
+        isActive: true,
+        isDeleted: false,
+        itemType: ItemType.SERVICE,
+        trackInventory: false,
+        hasVariants: false,
+        stockQuantity: 0,
+        price: 45,
+        discountPrice: null,
+        variants: [],
+      },
+    ];
+
+    it('computes accurate store catalog summary counts for store owner and branch collaborator', async () => {
+      const { service, itemRepo } = createServiceHarness();
+      const storeRepo = (service as any).storeRepository;
+      storeRepo.findOne = jest.fn(async () => sampleStore);
+      itemRepo.find = jest.fn(async () => sampleItems);
+
+      const ownerSummary = await service.getStoreOwnerSummary('store-1', {
+        id: 'owner-1',
+        role: UserRole.COMPANY,
+      } as any);
+
+      expect(ownerSummary).toEqual({
+        total: 4,
+        published: 3,
+        paused: 1,
+        outOfStock: 2,
+        discounted: 1,
+        products: 3,
+        services: 1,
+      });
+
+      const collabSummary = await service.getStoreOwnerSummary('store-1', {
+        id: 'collab-1',
+        isCollaborator: true,
+        company: { id: 'company-1' },
+        hasFullBranchAccess: false,
+        allowedBranchIds: ['store-1'],
+      } as any);
+
+      expect(collabSummary).toEqual(ownerSummary);
+    });
+
+    it('rejects unauthorized user or collaborator from another branch with ForbiddenException', async () => {
+      const { service } = createServiceHarness();
+      const storeRepo = (service as any).storeRepository;
+      storeRepo.findOne = jest.fn(async () => sampleStore);
+
+      await expect(
+        service.getStoreOwnerSummary('store-1', {
+          id: 'stranger-1',
+          role: UserRole.COMPANY,
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.getStoreOwnerSummary('store-1', {
+          id: 'collab-other',
+          isCollaborator: true,
+          company: { id: 'company-1' },
+          hasFullBranchAccess: false,
+          allowedBranchIds: ['store-2'],
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('findAll onlyOutOfStock filter & sort allowlist', () => {
+    function createFindAllHarness() {
+      const { service, itemRepo } = createServiceHarness();
+      const andWhereCalls: Array<{ sql: string; params?: any }> = [];
+      const orderByCalls: Array<{ sort: string; order: string }> = [];
+      const qb: any = {
+        leftJoinAndSelect: jest.fn(() => qb),
+        leftJoin: jest.fn(() => qb),
+        limit: jest.fn(() => qb),
+        offset: jest.fn(() => qb),
+        andWhere: jest.fn((sql: string, params?: any) => {
+          andWhereCalls.push({ sql, params });
+          return qb;
+        }),
+        addSelect: jest.fn(() => qb),
+        orderBy: jest.fn((sort: string, order: string) => {
+          orderByCalls.push({ sort, order });
+          return qb;
+        }),
+        getManyAndCount: jest.fn(async () => [[], 0]),
+      };
+      itemRepo.createQueryBuilder = jest.fn(() => qb);
+      return { service, andWhereCalls, orderByCalls };
+    }
+
+    it('applies onlyOutOfStock SQL predicate and allowlists sort columns safely', async () => {
+      const { service, andWhereCalls, orderByCalls } = createFindAllHarness();
+
+      await service.findAll(
+        {
+          includeInactive: true,
+          onlyOutOfStock: true,
+          sort: 'favoritesCount',
+          order: 'DESC',
+        } as any,
+        null,
+      );
+
+      expect(
+        andWhereCalls.some((c) => c.sql.includes('NOT EXISTS (SELECT 1 FROM item_variants')),
+      ).toBe(true);
+      expect(orderByCalls).toEqual([{ sort: 'item.favoritesCount', order: 'DESC' }]);
+    });
+
+    it('falls back to item.createdAt when sort is not in allowlist', async () => {
+      const { service, orderByCalls } = createFindAllHarness();
+
+      await service.findAll(
+        {
+          includeInactive: true,
+          sort: 'maliciousColumn; DROP TABLE items;--',
+          order: 'asc' as any,
+        } as any,
+        null,
+      );
+
+      expect(orderByCalls).toEqual([{ sort: 'item.createdAt', order: 'ASC' }]);
     });
   });
 });
