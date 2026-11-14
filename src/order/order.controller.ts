@@ -194,8 +194,17 @@ export class OrderController {
   }
 
   @Get('user/installments/calendar')
-  getUserInstallmentsCalendar(@GetUser() user: User) {
-    return this.orderService.getUserInstallmentsCalendar(user.id);
+  getUserInstallmentsCalendar(
+    @GetUser() user: User,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: 'active' | 'paid' | 'all',
+  ) {
+    return this.orderService.getUserInstallmentsCalendar(user.id, {
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 20,
+      status: status || 'all',
+    });
   }
 
   @Get('store/:storeId/installments/receivables')

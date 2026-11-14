@@ -13,6 +13,9 @@ export class Payment extends TimestampEntity {
   @Column('decimal', { precision: 12, scale: 2 })
   amount: number;
 
+  @Column('decimal', { precision: 12, scale: 4, nullable: true })
+  exchangeRate?: number | null;
+
   @Column('text')
   currency: string; // Ej: 'USD' | 'VES'
 

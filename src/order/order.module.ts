@@ -21,6 +21,7 @@ import { OrderDisputeModule } from 'src/order-dispute/order-dispute.module';
 import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
 import { OrderSlotBooking } from './entities/order-slot-booking.entity';
 import { CompanyModule } from 'src/company/company.module';
+import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { CompanyModule } from 'src/company/company.module';
     RankingModule,
     OrderDisputeModule,
     CompanyModule,
+    PlatformSettingsModule,
   ],
   controllers: [OrderController],
   providers: [OrderService, DebtCollectionCron, OrderAutoCancellationCron],

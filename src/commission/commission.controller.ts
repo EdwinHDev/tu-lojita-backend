@@ -18,6 +18,7 @@ import { StoreCommissionBillingService } from './commission-billing.service';
 import { PaymentReportStatus } from './types';
 import { CommissionMetricsResponseDto } from './dto/commission-metrics-response.dto';
 import { SalesLedgerQueryDto } from './dto/sales-ledger-query.dto';
+import { CommissionOrdersQueryDto } from './dto/commission-orders-query.dto';
 
 @Controller('commissions')
 export class CommissionController {
@@ -131,8 +132,18 @@ export class CommissionController {
   // ----------------------------------------------------
   @Auth(UserRole.VENDOR, UserRole.COMPANY, UserRole.ADMIN)
   @Get('stores/:id/debt-hub')
-  getStoreDebtHub(@Param('id') storeId: string) {
-    return this.billingService.getStoreDebtHub(storeId);
+  getStoreDebtHub(@Param('id') storeId: string, @GetUser() user: User) {
+    return this.billingService.getStoreDebtHub(storeId, user);
+  }
+
+  @Auth(UserRole.VENDOR, UserRole.COMPANY, UserRole.ADMIN)
+  @Get('stores/:id/orders')
+  getStoreCommissionOrders(
+    @Param('id') storeId: string,
+    @Query() query: CommissionOrdersQueryDto,
+    @GetUser() user: User,
+  ) {
+    return this.billingService.getStoreCommissionOrders(storeId, query, user);
   }
 
   @Auth(UserRole.VENDOR, UserRole.COMPANY, UserRole.ADMIN)

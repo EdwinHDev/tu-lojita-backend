@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In, Not, MoreThan } from 'typeorm';
@@ -29,6 +30,7 @@ import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
 import { MailService } from 'src/common/mail/mail.service';
 import { CompanyActivityLogService } from 'src/company/services/company-activity-log.service';
+import { CompanyCrmService } from 'src/company/services/company-crm.service';
 import { ActivityLogModule } from 'src/company/entities/company-activity-log.entity';
 import { InstallmentPeriod } from 'src/store/types/installment-period.enum';
 import { Payment } from 'src/payment/entities/payment.entity';
@@ -42,12 +44,14 @@ import { OrderDispute } from 'src/order-dispute/entities/order-dispute.entity';
 import { DisputeStatus } from 'src/order-dispute/types/dispute.enum';
 import { BookingType } from 'src/item/types/booking-type.enum';
 import { ItemType } from 'src/item/types/item-type.enum';
+import { PriceType } from 'src/item/types/price-type.enum';
 import { ItemPreorderConfig } from 'src/item/entities/item-preorder-config.entity';
 import { calculateActiveStoreDebt } from './utils/installment-math.util';
 import { PreOrderStatus } from './types/preorder-status.enum';
 import { OrderSlotBooking } from './entities/order-slot-booking.entity';
 import { SlotBookingStatus } from './types/slot-booking-status.enum';
 import { ItemTimeSlot } from 'src/item/entities/item-time-slot.entity';
+import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
 
 @Injectable()
 export class OrderService {
@@ -82,9 +86,24 @@ export class OrderService {
     private readonly commissionService: CommissionService,
     private readonly rankingService: RankingService,
     private readonly activityLogService: CompanyActivityLogService,
+    @Optional()
+    private readonly platformSettingsService?: PlatformSettingsService,
+    @Optional()
+    private readonly crmService?: CompanyCrmService,
   ) {}
 
   private readonly logger = new Logger(OrderService.name);
+
+  private async resolveCurrentExchangeRate(): Promise<number | null> {
+    try {
+      const cfg = await this.platformSettingsService?.getExchangeRateConfig();
+      return cfg && typeof cfg.rate === 'number' && cfg.rate > 0
+        ? Number(cfg.rate.toFixed(4))
+        : null;
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * @deprecated Use PaymentService.createWithOrder() for atomic order creation and payment receipt submission.
@@ -203,6 +222,18 @@ export class OrderService {
         if (item.store.id !== storeId) {
           throw new BadRequestException(
             `El item "${item.title}" no pertenece a la tienda seleccionada. Solo puedes ordenar items de una misma tienda.`,
+          );
+        }
+
+        if (item.priceType === PriceType.ON_DEMAND) {
+          throw new BadRequestException(
+            `El artículo "${item.title}" es bajo cotización ("A consultar") y no admite compra directa en el carrito. Solicita una cotización con la tienda.`,
+          );
+        }
+
+        if (item.priceType === PriceType.FREE && itemDto.quantity > 1) {
+          throw new BadRequestException(
+            `El artículo gratuito "${item.title}" está limitado a máximo 1 unidad por pedido.`,
           );
         }
 
@@ -506,6 +537,27 @@ export class OrderService {
           }
         }
 
+        if (itemDto.crmOfferCode && this.crmService) {
+          const crmOfferPrice =
+            await this.crmService.resolveValidOfferForCustomerItem(
+              itemDto.crmOfferCode,
+              userId,
+              item.id,
+              queryRunner.manager,
+              true,
+            );
+          if (crmOfferPrice !== null && crmOfferPrice > 0) {
+            unitPublicPrice = crmOfferPrice;
+            merchantBasePrice =
+              itemCommRate > 0
+                ? Math.round((crmOfferPrice / (1 + itemCommRate / 100)) * 100) /
+                  100
+                : crmOfferPrice;
+            itemCommAmount =
+              Math.round((crmOfferPrice - merchantBasePrice) * 100) / 100;
+          }
+        }
+
         const totalLinePrice =
           unitPublicPrice * itemDto.quantity + customizationExtra;
         const priceAtOrder =
@@ -562,6 +614,11 @@ export class OrderService {
       // 5. Lógica de recargos por pago parcial (Fase 4 extendida)
       let feeAmount = 0;
       if (isPartialPayment) {
+        if (subtotal <= 0) {
+          throw new BadRequestException(
+            'No se admiten pagos parciales o en cuotas para pedidos sin costo ($0.00).',
+          );
+        }
         if (!store.allowPartialPayments) {
           throw new BadRequestException(
             'Esta tienda no admite pagos parciales',
@@ -658,6 +715,7 @@ export class OrderService {
       }
 
       // 6. Crear y guardar la Orden
+      const activeExchangeRate = await this.resolveCurrentExchangeRate();
       const order = queryRunner.manager.create(Order, {
         store,
         user,
@@ -672,6 +730,7 @@ export class OrderService {
           ? PreOrderStatus.AWAITING_STOCK
           : PreOrderStatus.NONE,
         status: OrderStatus.PENDING,
+        exchangeRate: activeExchangeRate,
       });
 
       if (isPartialPayment) {
@@ -2264,6 +2323,23 @@ export class OrderService {
         });
       }
 
+      if (item.priceType === PriceType.ON_DEMAND) {
+        errors.push({
+          itemId: itemDto.itemId,
+          code: 'ON_DEMAND_REQUIRES_QUOTE',
+          message: `El artículo "${item.title}" es bajo cotización ("A consultar") y no admite compra directa a $0.00. Solicita una cotización con la tienda.`,
+        });
+        continue;
+      }
+
+      if (item.priceType === PriceType.FREE && itemDto.quantity > 1) {
+        errors.push({
+          itemId: itemDto.itemId,
+          code: 'FREE_ITEM_QTY_LIMIT',
+          message: `El artículo gratuito "${item.title}" está limitado a máximo 1 unidad por pedido.`,
+        });
+      }
+
       if (item.bookingType === BookingType.PRE_ORDER) {
         hasPreOrderItem = true;
       } else if (item.itemType === ItemType.PRODUCT) {
@@ -2422,6 +2498,20 @@ export class OrderService {
           vDiscount !== null && vDiscount > 0 && vDiscount < vPrice
             ? vDiscount
             : vPrice;
+      }
+
+      if (itemDto.crmOfferCode && this.crmService) {
+        const crmOfferPrice =
+          await this.crmService.resolveValidOfferForCustomerItem(
+            itemDto.crmOfferCode,
+            userId,
+            item.id,
+            undefined,
+            false,
+          );
+        if (crmOfferPrice !== null && crmOfferPrice > 0) {
+          effectivePrice = crmOfferPrice;
+        }
       }
 
       // Validar cambio de precio
@@ -2658,12 +2748,102 @@ export class OrderService {
     };
   }
 
-  async getUserInstallmentsCalendar(userId: string) {
-    return await this.dataSource.getRepository(Installment).find({
+  async getUserInstallmentsCalendar(
+    userId: string,
+    options?: {
+      page?: number;
+      limit?: number;
+      status?: 'active' | 'paid' | 'all';
+    },
+  ) {
+    const page = Math.max(1, Number(options?.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options?.limit) || 20));
+    const status = options?.status || 'all';
+
+    const allInstallments = await this.dataSource.getRepository(Installment).find({
       where: { order: { user: { id: userId } } },
-      relations: ['order', 'order.store'],
+      relations: [
+        'order',
+        'order.store',
+        'order.store.company',
+        'order.payments',
+      ],
       order: { dueDate: 'ASC' },
     });
+
+    // Compute 1..N ordinal installmentNumber per order sorted by dueDate ASC
+    const orderCounters = new Map<string, number>();
+    const enriched = allInstallments.map((inst) => {
+      const orderId = inst.order?.id ?? '';
+      const nextNum = (orderCounters.get(orderId) ?? 0) + 1;
+      orderCounters.set(orderId, nextNum);
+      return Object.assign(inst, { installmentNumber: nextNum });
+    });
+
+    const isPaidStatus = (s: any) =>
+      String(s ?? '').toUpperCase() === 'PAID';
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const activeAll = enriched.filter((inst) => !isPaidStatus(inst.status));
+    const paidAll = enriched.filter((inst) => isPaidStatus(inst.status));
+
+    const totalActiveDebtUsd = Number(
+      activeAll
+        .reduce((sum, inst) => {
+          const amount = Number(inst.amount ?? (inst as any).amountUsd ?? 0);
+          const paid = Number(inst.paidAmount ?? (inst as any).paidAmountUsd ?? 0);
+          const rem = Math.max(0, amount - paid);
+          return sum + rem;
+        }, 0)
+        .toFixed(2),
+    );
+
+    const overdueCount = activeAll.filter((inst) => {
+      if (String(inst.status ?? '').toUpperCase() === 'OVERDUE') return true;
+      if (!inst.dueDate) return false;
+      const d = new Date(inst.dueDate);
+      return d < todayStart;
+    }).length;
+
+    const nearestDueDate =
+      activeAll.length > 0 && activeAll[0].dueDate
+        ? activeAll[0].dueDate
+        : null;
+
+    const summary = {
+      totalActiveDebtUsd,
+      overdueCount,
+      nearestDueDate,
+      totalActiveCount: activeAll.length,
+      totalPaidCount: paidAll.length,
+    };
+
+    let filtered = enriched;
+    if (status === 'active') {
+      filtered = activeAll;
+    } else if (status === 'paid') {
+      // Paid history sorted newest dueDate first
+      filtered = [...paidAll].sort((a, b) => {
+        const da = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+        const db = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+        return db - da;
+      });
+    }
+
+    const total = filtered.length;
+    const offset = (page - 1) * limit;
+    const items = filtered.slice(offset, offset + limit);
+    const hasMore = offset + items.length < total;
+
+    return {
+      summary,
+      items,
+      total,
+      page,
+      limit,
+      hasMore,
+    };
   }
 
   async getStoreReceivables(storeId: string, storeOwnerId: string) {
@@ -2746,6 +2926,9 @@ export class OrderService {
       remainingBalance: parseFloat(order.remainingBalance.toString()),
       isFullyPaid: order.isFullyPaid,
       status: order.status,
+      exchangeRate: order.exchangeRate
+        ? parseFloat(order.exchangeRate.toString())
+        : null,
       store: {
         id: order.store.id,
         name: order.store.name,
@@ -2766,12 +2949,20 @@ export class OrderService {
         paidAmount: parseFloat((inst.paidAmount || 0).toString()),
         lateFeeApplied: parseFloat((inst.lateFeeApplied || 0).toString()),
         dueDate: inst.dueDate,
+        paymentDate: inst.paymentDate,
+        paidExchangeRate: inst.paidExchangeRate
+          ? Number(inst.paidExchangeRate)
+          : null,
+        paidAmountBs: inst.paidAmountBs ? Number(inst.paidAmountBs) : null,
         status: inst.status,
         extensionStatus: inst.extensionStatus,
       })),
       payments: order.payments.map((p) => ({
         id: p.id,
         amount: parseFloat(p.amount.toString()),
+        exchangeRate: p.exchangeRate
+          ? parseFloat(p.exchangeRate.toString())
+          : null,
         reference: p.reference,
         status: p.status,
         paymentDate: p.createdAt,
@@ -2857,6 +3048,7 @@ export class OrderService {
       }
 
       // Create approved payment
+      const activeExchangeRate = await this.resolveCurrentExchangeRate();
       const payment = queryRunner.manager.create(Payment, {
         amount: paymentAmount,
         currency: 'USD',
@@ -2867,6 +3059,7 @@ export class OrderService {
         user: order.user,
         store: order.store,
         installmentIndex,
+        exchangeRate: activeExchangeRate,
       });
 
       const savedPayment = await queryRunner.manager.save(payment);
@@ -2908,6 +3101,27 @@ export class OrderService {
 
         const isFullySettled = newBalance === 0;
 
+        const manualRate =
+          activeExchangeRate ??
+          (order.exchangeRate
+            ? parseFloat(order.exchangeRate.toString())
+            : null);
+
+        const sealPaidRate = (inst: Installment) => {
+          const existingRate =
+            inst.paidExchangeRate !== null &&
+            inst.paidExchangeRate !== undefined
+              ? parseFloat(inst.paidExchangeRate.toString())
+              : null;
+          const effectiveRate =
+            existingRate && existingRate > 0 ? existingRate : manualRate;
+          inst.paidExchangeRate = effectiveRate;
+          if (effectiveRate !== null && effectiveRate > 0) {
+            const paidVal = parseFloat((inst.paidAmount || 0).toString());
+            inst.paidAmountBs = Math.round(paidVal * effectiveRate * 100) / 100;
+          }
+        };
+
         if (isFullySettled) {
           for (const inst of installments) {
             inst.paidAmount = inst.amount;
@@ -2915,6 +3129,7 @@ export class OrderService {
             if (!inst.paymentDate) {
               inst.paymentDate = new Date();
             }
+            sealPaidRate(inst);
             await queryRunner.manager.save(inst);
           }
         } else {
@@ -2934,6 +3149,7 @@ export class OrderService {
               if (!inst.paymentDate) {
                 inst.paymentDate = new Date();
               }
+              sealPaidRate(inst);
               await queryRunner.manager.save(inst);
             } else {
               const paidVal = Math.round(totalApprovedCents) / 100;
@@ -2942,6 +3158,8 @@ export class OrderService {
               if (inst.status !== InstallmentStatus.OVERDUE) {
                 inst.status = InstallmentStatus.PENDING;
               }
+              inst.paidExchangeRate = null;
+              inst.paidAmountBs = null;
               await queryRunner.manager.save(inst);
             }
           }

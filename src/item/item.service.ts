@@ -4,9 +4,10 @@ import {
   HttpStatus,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { Item } from './entities/item.entity';
@@ -66,9 +67,19 @@ import { ItemPromotionStatus } from './types/item-promotion-status.enum';
 import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
 import { RequestPromotionDto } from './dto/request-promotion.dto';
 import { CommissionService } from 'src/commission/commission.service';
+import { NotificationService } from 'src/notification/notification.service';
+import { NotificationType } from 'src/notification/entities/notification.entity';
 
 @Injectable()
 export class ItemService {
+  public static readonly PRICE_TYPE_LABELS: Record<PriceType, string> = {
+    [PriceType.FIXED]: 'Precio Fijo',
+    [PriceType.STARTING_AT]: 'A partir de (Desde)',
+    [PriceType.NEGOTIABLE]: 'Precio Negociable',
+    [PriceType.ON_DEMAND]: 'A Consultar / Bajo Cotización',
+    [PriceType.FREE]: 'Gratis ($0.00)',
+  };
+
   constructor(
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
@@ -100,7 +111,173 @@ export class ItemService {
     private readonly bookingService: BookingService,
     private readonly activityLogService: CompanyActivityLogService,
     private readonly commissionService: CommissionService,
-  ) {}
+    @Optional()
+    private readonly notificationService?: NotificationService,
+  ) {
+    if (
+      this.platformSettingsService &&
+      typeof this.platformSettingsService.registerPriceTypesGovernanceHandler ===
+        'function'
+    ) {
+      this.platformSettingsService.registerPriceTypesGovernanceHandler({
+        getStatus: () => this.getPriceTypesGovernanceStatus(),
+        updateAndCascade: (types: PriceType[], adminUser?: User) =>
+          this.updateEnabledPriceTypesAndCascade(types, adminUser),
+      });
+    }
+  }
+
+  private async getEnabledPriceTypesSafe(): Promise<PriceType[]> {
+    if (
+      this.platformSettingsService &&
+      typeof this.platformSettingsService.getEnabledPriceTypes === 'function'
+    ) {
+      return this.platformSettingsService.getEnabledPriceTypes();
+    }
+    return Object.values(PriceType);
+  }
+
+  private hasVaryingPricesInVariants(
+    variants?: Array<{
+      isActive?: boolean;
+      price?: number | null;
+      basePrice?: number | null;
+      discountPrice?: number | null;
+    }>,
+    fallbackPrice = 0,
+  ): boolean {
+    if (!variants || variants.length === 0) return false;
+    const activeVariants = variants.filter((v) => v.isActive !== false);
+    if (activeVariants.length < 2) return false;
+    const effPrices = activeVariants.map((v) => {
+      const baseOrPrice =
+        v.basePrice !== undefined && v.basePrice !== null
+          ? Number(v.basePrice)
+          : v.price !== undefined && v.price !== null
+            ? Number(v.price)
+            : Number(fallbackPrice || 0);
+      const disc =
+        v.discountPrice !== undefined && v.discountPrice !== null
+          ? Number(v.discountPrice)
+          : null;
+      return disc !== null && disc > 0 && disc < baseOrPrice
+        ? disc
+        : baseOrPrice;
+    });
+    const minP = Math.min(...effPrices);
+    const maxP = Math.max(...effPrices);
+    return minP < maxP;
+  }
+
+  private hasPaidVariants(
+    variants?: Array<{
+      isActive?: boolean;
+      price?: number | null;
+      basePrice?: number | null;
+    }>,
+  ): boolean {
+    if (!variants || variants.length === 0) return false;
+    return variants
+      .filter((v) => v.isActive !== false)
+      .some((v) => Number(v.basePrice ?? v.price ?? 0) > 0);
+  }
+
+  private hasPaidCustomizations(groups?: any[]): boolean {
+    if (!groups || !Array.isArray(groups) || groups.length === 0) return false;
+    return groups.some(
+      (g) =>
+        Array.isArray(g?.options) &&
+        g.options.some((o: any) => Number(o?.price ?? 0) > 0),
+    );
+  }
+
+  private async validatePriceTypeGovernanceAndSemantics(params: {
+    isCreate: boolean;
+    explicitPriceType?: PriceType;
+    effectivePriceType: PriceType;
+    targetIsActive: boolean;
+    hasVariants: boolean;
+    variants?: Array<any>;
+    customizationGroups?: any[];
+    itemType: ItemType;
+    requiresBooking: boolean;
+    fallbackPrice?: number;
+    variantsEdited?: boolean;
+    customizationsEdited?: boolean;
+  }): Promise<void> {
+    const enabledPriceTypes = await this.getEnabledPriceTypesSafe();
+    const hasVaryingVariants =
+      params.hasVariants &&
+      this.hasVaryingPricesInVariants(params.variants, params.fallbackPrice ?? 0);
+
+    const resolvedPriceType = hasVaryingVariants
+      ? PriceType.STARTING_AT
+      : params.effectivePriceType;
+
+    const isEnabled = enabledPriceTypes.includes(resolvedPriceType);
+    const label =
+      ItemService.PRICE_TYPE_LABELS[resolvedPriceType] || resolvedPriceType;
+
+    if (!isEnabled) {
+      if (params.isCreate) {
+        throw new BadRequestException(
+          `El tipo de precio "${label}" está deshabilitado actualmente en la plataforma.`,
+        );
+      }
+      if (params.targetIsActive) {
+        throw new BadRequestException(
+          `No puedes publicar este artículo porque su tipo de precio ("${label}") está deshabilitado en la plataforma. Cambia el tipo de precio para volver a publicarlo.`,
+        );
+      }
+      if (
+        params.explicitPriceType !== undefined &&
+        !enabledPriceTypes.includes(params.explicitPriceType)
+      ) {
+        const expLabel =
+          ItemService.PRICE_TYPE_LABELS[params.explicitPriceType] ||
+          params.explicitPriceType;
+        throw new BadRequestException(
+          `El tipo de precio "${expLabel}" está deshabilitado actualmente en la plataforma.`,
+        );
+      }
+    }
+
+    const shouldValidateSemantics =
+      params.isCreate ||
+      params.explicitPriceType !== undefined ||
+      params.variantsEdited === true ||
+      params.customizationsEdited === true;
+
+    if (!shouldValidateSemantics) {
+      return;
+    }
+
+    if (resolvedPriceType === PriceType.STARTING_AT) {
+      const hasPaidExtras = this.hasPaidCustomizations(
+        params.customizationGroups,
+      );
+      const isServiceOrBooking =
+        params.itemType === ItemType.SERVICE || params.requiresBooking === true;
+      if (!hasVaryingVariants && !hasPaidExtras && !isServiceOrBooking) {
+        throw new BadRequestException(
+          'El tipo de precio "A partir de (Desde)" solo puede usarse en artículos con variantes de distinto precio, opciones de personalización con costo adicional o servicios/reservas.',
+        );
+      }
+    }
+
+    if (resolvedPriceType === PriceType.FREE) {
+      const hasPaidVars =
+        params.hasVariants && this.hasPaidVariants(params.variants);
+      const hasPaidExtras = this.hasPaidCustomizations(
+        params.customizationGroups,
+      );
+      if (hasPaidVars || hasPaidExtras) {
+        throw new BadRequestException(
+          'Un artículo gratuito ("Gratis") no puede tener variantes ni opciones de personalización con costo adicional.',
+        );
+      }
+    }
+  }
 
   private async enrichStoresWithBranchStatus(
     stores: Store[],
@@ -886,12 +1063,22 @@ export class ItemService {
       const maxPrice = Math.max(...prices);
       const minBasePrice = Math.min(...basePrices);
 
+      const resolvedVariantPriceType =
+        minPrice < maxPrice ? PriceType.STARTING_AT : PriceType.FIXED;
+      if (resolvedVariantPriceType === PriceType.STARTING_AT && item.isActive) {
+        const enabledPriceTypes = await this.getEnabledPriceTypesSafe();
+        if (!enabledPriceTypes.includes(PriceType.STARTING_AT)) {
+          throw new BadRequestException(
+            'El tipo de precio "A partir de (Desde)" está deshabilitado en la plataforma, por lo que no puedes publicar variantes con precios distintos entre sí.',
+          );
+        }
+      }
+
       item.price = minPrice;
       if (minBasePrice > 0) {
         item.basePrice = minBasePrice;
       }
-      item.priceType =
-        minPrice < maxPrice ? PriceType.STARTING_AT : PriceType.FIXED;
+      item.priceType = resolvedVariantPriceType;
       await this.itemRepository.save(item);
     }
   }
@@ -1049,6 +1236,19 @@ export class ItemService {
       priceType,
     } = itemData;
     let { price, discountPrice } = itemData;
+
+    await this.validatePriceTypeGovernanceAndSemantics({
+      isCreate: true,
+      explicitPriceType: priceType,
+      effectivePriceType: priceType ?? PriceType.FIXED,
+      targetIsActive: createItemDto.isActive ?? true,
+      hasVariants: Boolean(createItemDto.hasVariants),
+      variants: createItemDto.variants,
+      customizationGroups: createItemDto.customizationGroups,
+      itemType: itemData.itemType,
+      requiresBooking: Boolean(itemData.requiresBooking),
+      fallbackPrice: Number(itemData.basePrice ?? price ?? 0),
+    });
 
     // Determinar precio base (ganancia neta de la tienda)
     let basePrice = 0;
@@ -1658,6 +1858,8 @@ export class ItemService {
         'category',
         'variantAxes',
         'variants',
+        'customizationGroupsRel',
+        'customizationGroupsRel.options',
       ],
     });
 
@@ -1689,6 +1891,49 @@ export class ItemService {
         'No tienes permiso para actualizar este producto',
       );
     }
+
+    const effectiveHasVariantsForValidation =
+      updateItemDto.hasVariants !== undefined
+        ? Boolean(updateItemDto.hasVariants)
+        : Boolean(item.hasVariants);
+    const effectiveVariantsForValidation =
+      updateItemDto.variants !== undefined
+        ? updateItemDto.variants
+        : item.variants;
+    const effectiveGroupsForValidation =
+      updateItemDto.customizationGroups !== undefined
+        ? updateItemDto.customizationGroups
+        : item.customizationGroupsRel;
+    const effectivePriceTypeForValidation =
+      updateItemDto.priceType ?? item.priceType ?? PriceType.FIXED;
+    const effectiveIsActiveForValidation =
+      updateItemDto.isActive !== undefined
+        ? Boolean(updateItemDto.isActive)
+        : Boolean(item.isActive);
+
+    await this.validatePriceTypeGovernanceAndSemantics({
+      isCreate: false,
+      explicitPriceType: updateItemDto.priceType,
+      effectivePriceType: effectivePriceTypeForValidation,
+      targetIsActive: effectiveIsActiveForValidation,
+      hasVariants: effectiveHasVariantsForValidation,
+      variants: effectiveVariantsForValidation,
+      customizationGroups: effectiveGroupsForValidation,
+      itemType: updateItemDto.itemType ?? item.itemType,
+      requiresBooking:
+        updateItemDto.requiresBooking !== undefined
+          ? Boolean(updateItemDto.requiresBooking)
+          : Boolean(item.requiresBooking),
+      fallbackPrice: Number(
+        updateItemDto.basePrice ??
+          updateItemDto.price ??
+          item.basePrice ??
+          item.price ??
+          0,
+      ),
+      variantsEdited: updateItemDto.variants !== undefined,
+      customizationsEdited: updateItemDto.customizationGroups !== undefined,
+    });
 
     if (
       updateItemDto.priceType === PriceType.FREE ||
@@ -2609,5 +2854,208 @@ export class ItemService {
     }
 
     return expiredList.length;
+  }
+
+  /**
+   * Retorna la configuración de tipos de precio habilitados junto con el conteo
+   * en vivo de artículos activos y tiendas que utilizan cada tipo.
+   */
+  async getPriceTypesGovernanceStatus() {
+    const enabledPriceTypes = await this.getEnabledPriceTypesSafe();
+
+    const rawStats = await this.itemRepository
+      .createQueryBuilder('item')
+      .select('item.priceType', 'priceType')
+      .addSelect('COUNT(item.id)', 'activeItemsCount')
+      .addSelect('COUNT(DISTINCT item.storeId)', 'affectedStoresCount')
+      .where('item.isActive = :isActive', { isActive: true })
+      .andWhere('item.isDeleted = :isDeleted', { isDeleted: false })
+      .groupBy('item.priceType')
+      .getRawMany<{
+        priceType: PriceType;
+        activeItemsCount: string | number;
+        affectedStoresCount: string | number;
+      }>();
+
+    const statsMap = new Map(
+      rawStats.map((r) => [
+        r.priceType,
+        {
+          activeItemsCount: parseInt(String(r.activeItemsCount ?? 0), 10) || 0,
+          affectedStoresCount:
+            parseInt(String(r.affectedStoresCount ?? 0), 10) || 0,
+        },
+      ]),
+    );
+
+    return {
+      enabledPriceTypes,
+      items: Object.values(PriceType).map((type) => ({
+        priceType: type,
+        label: ItemService.PRICE_TYPE_LABELS[type],
+        enabled: enabledPriceTypes.includes(type),
+        isLocked: type === PriceType.FIXED,
+        activeItemsCount: statsMap.get(type)?.activeItemsCount ?? 0,
+        affectedStoresCount: statsMap.get(type)?.affectedStoresCount ?? 0,
+      })),
+    };
+  }
+
+  /**
+   * Despublica en cascada todos los artículos activos cuyo tipo de precio fue
+   * deshabilitado y envía exactamente una notificación consolidada por tienda.
+   */
+  async disableItemsByPriceTypes(disabledTypes: PriceType[], actor?: User) {
+    const targetTypes = (disabledTypes || []).filter(
+      (t) => t !== PriceType.FIXED,
+    );
+    if (targetTypes.length === 0) {
+      return {
+        unpublishedItemsCount: 0,
+        notifiedStoresCount: 0,
+        affectedStores: [],
+      };
+    }
+
+    const affectedItems = await this.itemRepository.find({
+      where: {
+        priceType: In(targetTypes),
+        isActive: true,
+        isDeleted: false,
+      },
+      relations: ['store', 'store.owner', 'store.company', 'store.company.owner'],
+    });
+
+    if (affectedItems.length === 0) {
+      return {
+        unpublishedItemsCount: 0,
+        notifiedStoresCount: 0,
+        affectedStores: [],
+      };
+    }
+
+    const affectedIds = affectedItems.map((it) => it.id);
+    await this.itemRepository.update({ id: In(affectedIds) }, { isActive: false });
+
+    const byStore = new Map<string, { store: Store; items: Item[] }>();
+    for (const item of affectedItems) {
+      if (!item.store?.id) continue;
+      const existing = byStore.get(item.store.id);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        byStore.set(item.store.id, { store: item.store, items: [item] });
+      }
+    }
+
+    let notifiedStoresCount = 0;
+    const affectedStores: Array<{
+      storeId: string;
+      storeName: string;
+      unpublishedCount: number;
+    }> = [];
+
+    for (const { store, items } of byStore.values()) {
+      const uniqueLabels = Array.from(
+        new Set(
+          items.map(
+            (i) => ItemService.PRICE_TYPE_LABELS[i.priceType] || i.priceType,
+          ),
+        ),
+      ).join(', ');
+
+      const sampleTitles = items
+        .slice(0, 3)
+        .map((i) => `"${i.title}"`)
+        .join(', ');
+      const extraCount = items.length - 3;
+      const previewText =
+        extraCount > 0 ? `${sampleTitles} y ${extraCount} más` : sampleTitles;
+
+      const companyId = store.company?.id;
+      if (companyId && actor && this.activityLogService?.log) {
+        await this.activityLogService.log({
+          companyId,
+          storeId: store.id,
+          user: actor,
+          module: ActivityLogModule.INVENTORY,
+          action: 'PRICE_TYPE_DISABLED_UNPUBLISH',
+          description: `Se despublicaron ${items.length} artículo(s) porque el tipo de precio (${uniqueLabels}) fue deshabilitado en la plataforma.`,
+          metadata: {
+            disabledPriceTypes: Array.from(
+              new Set(items.map((i) => i.priceType)),
+            ),
+            unpublishedCount: items.length,
+            itemIds: items.map((i) => i.id),
+          },
+        });
+      }
+
+      const ownerId = store.owner?.id || store.company?.owner?.id;
+      if (ownerId && this.notificationService?.create) {
+        const body =
+          items.length === 1
+            ? `Se deshabilitó el tipo de precio "${uniqueLabels}" en la plataforma, por lo que tu artículo "${items[0].title}" de la tienda "${store.name}" quedó despublicado. Puedes cambiar su tipo de precio en tu catálogo para volver a publicarlo.`
+            : `Se deshabilitó el tipo de precio "${uniqueLabels}" en la plataforma, por lo que ${items.length} artículos de tu tienda "${store.name}" (${previewText}) quedaron despublicados. Puedes cambiar su tipo de precio en tu catálogo para volver a publicarlos.`;
+
+        await this.notificationService.create({
+          userId: ownerId,
+          storeId: store.id,
+          type: NotificationType.ITEM_HIDDEN,
+          title: 'Artículos despublicados por tipo de precio deshabilitado',
+          body,
+        });
+        notifiedStoresCount++;
+      }
+
+      affectedStores.push({
+        storeId: store.id,
+        storeName: store.name,
+        unpublishedCount: items.length,
+      });
+    }
+
+    return {
+      unpublishedItemsCount: affectedItems.length,
+      notifiedStoresCount,
+      affectedStores,
+    };
+  }
+
+  /**
+   * Actualiza los tipos de precio habilitados en la plataforma y despublica en cascada
+   * los artículos activos cuyos tipos hayan sido deshabilitados.
+   */
+  async updateEnabledPriceTypesAndCascade(
+    requestedTypes: PriceType[],
+    adminUser?: User,
+  ) {
+    const previousEnabled = await this.getEnabledPriceTypesSafe();
+    const nextEnabled =
+      await this.platformSettingsService.setEnabledPriceTypes(requestedTypes);
+    const disabledTypes = Object.values(PriceType).filter(
+      (t) => t !== PriceType.FIXED && !nextEnabled.includes(t),
+    );
+    const newlyDisabled = previousEnabled.filter(
+      (t) => t !== PriceType.FIXED && !nextEnabled.includes(t),
+    );
+
+    const cascadeResult =
+      disabledTypes.length > 0
+        ? await this.disableItemsByPriceTypes(
+            newlyDisabled.length > 0 ? newlyDisabled : disabledTypes,
+            adminUser,
+          )
+        : {
+            unpublishedItemsCount: 0,
+            notifiedStoresCount: 0,
+            affectedStores: [],
+          };
+
+    const status = await this.getPriceTypesGovernanceStatus();
+    return {
+      ...status,
+      cascadeResult,
+    };
   }
 }

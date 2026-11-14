@@ -47,6 +47,7 @@ export enum NotificationType {
   CATEGORY_RIVALRY = 'CATEGORY_RIVALRY',
   RANK_SHIELD_EXPIRING = 'RANK_SHIELD_EXPIRING',
   DANGER_ZONE_ALERT = 'DANGER_ZONE_ALERT',
+  CRM_OFFER = 'CRM_OFFER',
 }
 
 @Entity('notifications')

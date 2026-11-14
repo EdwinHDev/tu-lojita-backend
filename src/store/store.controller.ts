@@ -78,8 +78,8 @@ export class StoreController {
 
   @Auth()
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.storeService.remove(id);
+  remove(@Param('id') id: string, @GetUser() user: User) {
+    return this.storeService.remove(id, user);
   }
 
   // --- Branch Lifecycle Endpoints (Deactivation & Scheduled Deletion) ---

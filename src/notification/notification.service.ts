@@ -1048,6 +1048,8 @@ export class NotificationService {
       storeId?: string;
       channelType?: string;
       suspensionReason?: string;
+      itemId?: string;
+      offerCode?: string;
     },
   ) {
     if (!this.firebaseApp) return;
@@ -1083,6 +1085,8 @@ export class NotificationService {
           storeId: payload.storeId || '',
           orderId: payload.orderId || '',
           targetId: payload.targetId || payload.orderId || '',
+          itemId: payload.itemId || '',
+          offerCode: payload.offerCode || '',
           suspensionReason: payload.suspensionReason || '',
           mediationId:
             (payload.type === NotificationType.MEDIATION_REQUEST ||
@@ -1171,6 +1175,8 @@ export class NotificationService {
     storeId?: string;
     channelType?: string;
     suspensionReason?: string;
+    itemId?: string;
+    offerCode?: string;
   }) {
     try {
       let notification: Notification;
@@ -1355,6 +1361,8 @@ export class NotificationService {
               ? targetId
               : ''),
           targetId: targetId || '',
+          itemId: data.itemId || '',
+          offerCode: data.offerCode || '',
           storeId:
             persistedStoreId ||
             data.storeId ||

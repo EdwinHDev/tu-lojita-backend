@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlatformSetting } from './entities/platform-setting.entity';
+import { PriceType } from 'src/item/types/price-type.enum';
 
 export const PLATFORM_KEYS = {
   MEDIATION_COOLDOWN_DAYS: 'mediation_cooldown_days',
@@ -27,6 +28,9 @@ export const PLATFORM_KEYS = {
   BCV_RATE_LAST_SYNC: 'bcv_rate_last_sync',
   AI_IMAGE_ENHANCEMENT_ENABLED: 'ai_image_enhancement_enabled',
   AI_GEMINI_MODEL: 'ai_gemini_model',
+  ITEM_ENABLED_PRICE_TYPES: 'item_enabled_price_types',
+  CRM_OFFER_SERVICE_ENABLED: 'crm_offer_service_enabled',
+  CRM_OFFER_FEE_PER_CAMPAIGN: 'crm_offer_fee_per_campaign',
 } as const;
 
 export const DEFAULT_AI_GEMINI_MODEL = 'gemini-2.5-flash-image';
@@ -64,6 +68,10 @@ export class PlatformSettingsService {
       [PLATFORM_KEYS.BCV_RATE_LAST_SYNC]: new Date().toISOString(),
       [PLATFORM_KEYS.AI_IMAGE_ENHANCEMENT_ENABLED]: 'true',
       [PLATFORM_KEYS.AI_GEMINI_MODEL]: DEFAULT_AI_GEMINI_MODEL,
+      [PLATFORM_KEYS.ITEM_ENABLED_PRICE_TYPES]:
+        'FIXED,STARTING_AT,NEGOTIABLE,ON_DEMAND,FREE',
+      [PLATFORM_KEYS.CRM_OFFER_SERVICE_ENABLED]: 'true',
+      [PLATFORM_KEYS.CRM_OFFER_FEE_PER_CAMPAIGN]: '1.00',
     };
 
     for (const [key, value] of Object.entries(defaults)) {
@@ -222,6 +230,109 @@ export class PlatformSettingsService {
     return { enabled, model };
   }
 
+  async getEnabledPriceTypes(): Promise<PriceType[]> {
+    const raw = await this.get(PLATFORM_KEYS.ITEM_ENABLED_PRICE_TYPES);
+    const validValues = new Set<string>(Object.values(PriceType));
+    if (!raw || raw.trim().length === 0) {
+      return Object.values(PriceType);
+    }
+    const parsed = raw
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter((s): s is PriceType => validValues.has(s));
+    if (!parsed.includes(PriceType.FIXED)) {
+      parsed.unshift(PriceType.FIXED);
+    }
+    return Array.from(new Set(parsed));
+  }
+
+  async setEnabledPriceTypes(types: PriceType[]): Promise<PriceType[]> {
+    const validValues = new Set<string>(Object.values(PriceType));
+    const normalized = Array.from(
+      new Set([
+        PriceType.FIXED,
+        ...(types || [])
+          .map((t) => String(t).trim().toUpperCase())
+          .filter((t): t is PriceType => validValues.has(t)),
+      ]),
+    );
+    await this.set(PLATFORM_KEYS.ITEM_ENABLED_PRICE_TYPES, normalized.join(','));
+    return normalized;
+  }
+
+  private priceTypesGovernanceHandler?: {
+    getStatus: () => Promise<any>;
+    updateAndCascade: (types: PriceType[], adminUser?: any) => Promise<any>;
+  };
+
+  registerPriceTypesGovernanceHandler(handler: {
+    getStatus: () => Promise<any>;
+    updateAndCascade: (types: PriceType[], adminUser?: any) => Promise<any>;
+  }) {
+    this.priceTypesGovernanceHandler = handler;
+  }
+
+  async getPriceTypesGovernanceStatus() {
+    if (!this.priceTypesGovernanceHandler) {
+      const enabledPriceTypes = await this.getEnabledPriceTypes();
+      return { enabledPriceTypes, items: [] };
+    }
+    return this.priceTypesGovernanceHandler.getStatus();
+  }
+
+  async updateEnabledPriceTypesAndCascade(types: PriceType[], adminUser?: any) {
+    if (!this.priceTypesGovernanceHandler) {
+      const enabledPriceTypes = await this.setEnabledPriceTypes(types);
+      return {
+        enabledPriceTypes,
+        items: [],
+        cascadeResult: {
+          unpublishedItemsCount: 0,
+          notifiedStoresCount: 0,
+          affectedStores: [],
+        },
+      };
+    }
+    return this.priceTypesGovernanceHandler.updateAndCascade(types, adminUser);
+  }
+
+  async getCrmOfferConfig(): Promise<{
+    enabled: boolean;
+    feePerCampaign: number;
+  }> {
+    const [enabledStr, feeStr] = await Promise.all([
+      this.get(PLATFORM_KEYS.CRM_OFFER_SERVICE_ENABLED),
+      this.get(PLATFORM_KEYS.CRM_OFFER_FEE_PER_CAMPAIGN),
+    ]);
+    const parsedFee = parseFloat(feeStr || '1.00');
+    return {
+      enabled: enabledStr !== 'false',
+      feePerCampaign:
+        !Number.isNaN(parsedFee) && parsedFee >= 0
+          ? Number(parsedFee.toFixed(2))
+          : 1.0,
+    };
+  }
+
+  async setCrmOfferConfig(config: {
+    enabled?: boolean;
+    feePerCampaign?: number;
+  }): Promise<{ enabled: boolean; feePerCampaign: number }> {
+    if (config.enabled !== undefined) {
+      await this.set(
+        PLATFORM_KEYS.CRM_OFFER_SERVICE_ENABLED,
+        config.enabled ? 'true' : 'false',
+      );
+    }
+    if (config.feePerCampaign !== undefined) {
+      const fee = Number(config.feePerCampaign);
+      if (!Number.isNaN(fee) && fee >= 0) {
+        await this.set(PLATFORM_KEYS.CRM_OFFER_FEE_PER_CAMPAIGN, fee.toFixed(2));
+      }
+    }
+    return this.getCrmOfferConfig();
+  }
+
   async getPublicSettings(): Promise<{
     officialSupportWhatsapp: string;
     whatsappSupportEnabled: boolean;
@@ -245,15 +356,29 @@ export class PlatformSettingsService {
     aiImageEnhancement: {
       enabled: boolean;
     };
+    enabledPriceTypes: PriceType[];
+    crmOffer: {
+      enabled: boolean;
+      feePerCampaign: number;
+    };
   }> {
-    const [whatsapp, enabled, featuredShowcase, exchangeRate, aiEnabled] =
-      await Promise.all([
-        this.getOfficialSupportWhatsapp(),
-        this.isWhatsappSupportEnabled(),
-        this.getFeaturedShowcaseConfig(),
-        this.getExchangeRateConfig(),
-        this.isAiImageEnhancementEnabled(),
-      ]);
+    const [
+      whatsapp,
+      enabled,
+      featuredShowcase,
+      exchangeRate,
+      aiEnabled,
+      enabledPriceTypes,
+      crmOffer,
+    ] = await Promise.all([
+      this.getOfficialSupportWhatsapp(),
+      this.isWhatsappSupportEnabled(),
+      this.getFeaturedShowcaseConfig(),
+      this.getExchangeRateConfig(),
+      this.isAiImageEnhancementEnabled(),
+      this.getEnabledPriceTypes(),
+      this.getCrmOfferConfig(),
+    ]);
     return {
       officialSupportWhatsapp: whatsapp,
       whatsappSupportEnabled: enabled,
@@ -262,6 +387,8 @@ export class PlatformSettingsService {
       aiImageEnhancement: {
         enabled: aiEnabled,
       },
+      enabledPriceTypes,
+      crmOffer,
     };
   }
 

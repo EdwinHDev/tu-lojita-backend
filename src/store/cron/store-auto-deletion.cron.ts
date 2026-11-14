@@ -44,10 +44,17 @@ export class StoreAutoDeletionCron {
 
     for (const store of expiredStores) {
       try {
-        await this.storeService.executeSoftDeleteStore(store.id);
-        this.logger.log(
-          `Baja definitiva completada para sucursal: ${store.name} (${store.id})`,
-        );
+        const result =
+          await this.storeService.executeScheduledDeletionIfEligible(store.id);
+        if (result.deleted) {
+          this.logger.log(
+            `Baja definitiva completada para sucursal: ${store.name} (${store.id})`,
+          );
+        } else {
+          this.logger.warn(
+            `Baja definitiva omitida para sucursal ${store.name} (${store.id}): ${result.reason}`,
+          );
+        }
       } catch (error) {
         this.logger.error(
           `Error al ejecutar baja definitiva de sucursal ${store.id}: ${error.message}`,

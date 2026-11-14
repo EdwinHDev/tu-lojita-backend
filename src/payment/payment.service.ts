@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In, EntityManager, MoreThan } from 'typeorm';
@@ -29,6 +30,7 @@ import { ItemVariant } from 'src/item/entities/item-variant.entity';
 import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { Installment } from 'src/order/entities/installment.entity';
 import { CompanyActivityLogService } from 'src/company/services/company-activity-log.service';
+import { CompanyCrmService } from 'src/company/services/company-crm.service';
 import { ActivityLogModule } from 'src/company/entities/company-activity-log.entity';
 import { InstallmentStatus } from 'src/order/types';
 import { StoreStatus } from 'src/store/types/status.enum';
@@ -38,6 +40,7 @@ import { ItemTimeSlot } from 'src/item/entities/item-time-slot.entity';
 import { OrderSlotBooking } from 'src/order/entities/order-slot-booking.entity';
 import { SlotBookingStatus } from 'src/order/types/slot-booking-status.enum';
 import { ItemType } from 'src/item/types/item-type.enum';
+import { PriceType } from 'src/item/types/price-type.enum';
 import { BookingType } from 'src/item/types/booking-type.enum';
 import { ItemPreorderConfig } from 'src/item/entities/item-preorder-config.entity';
 import { DepositType } from 'src/item/types/deposit-type.enum';
@@ -71,7 +74,37 @@ export class PaymentService {
     private readonly commissionService: CommissionService,
     private readonly platformSettingsService: PlatformSettingsService,
     private readonly activityLogService: CompanyActivityLogService,
+    @Optional()
+    private readonly crmService?: CompanyCrmService,
   ) {}
+
+  private async resolveCurrentExchangeRate(): Promise<number | null> {
+    try {
+      const cfg = await this.platformSettingsService?.getExchangeRateConfig();
+      return cfg && typeof cfg.rate === 'number' && cfg.rate > 0
+        ? Number(cfg.rate.toFixed(4))
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private applyInstallmentPaidRate(
+    inst: Installment,
+    fallbackRate: number | null,
+  ): void {
+    const existingRate =
+      inst.paidExchangeRate !== null && inst.paidExchangeRate !== undefined
+        ? parseFloat(inst.paidExchangeRate.toString())
+        : null;
+    const effectiveRate =
+      existingRate && existingRate > 0 ? existingRate : fallbackRate;
+    inst.paidExchangeRate = effectiveRate;
+    if (effectiveRate !== null && effectiveRate > 0) {
+      const paidVal = parseFloat((inst.paidAmount || 0).toString());
+      inst.paidAmountBs = Math.round(paidVal * effectiveRate * 100) / 100;
+    }
+  }
 
   async verifyPayment(
     paymentId: string,
@@ -332,6 +365,13 @@ export class PaymentService {
           (inst) => inst.status === InstallmentStatus.PAID,
         ).length;
 
+        const currentPaymentRate =
+          payment.exchangeRate && parseFloat(payment.exchangeRate.toString()) > 0
+            ? parseFloat(payment.exchangeRate.toString())
+            : order.exchangeRate && parseFloat(order.exchangeRate.toString()) > 0
+              ? parseFloat(order.exchangeRate.toString())
+              : await this.resolveCurrentExchangeRate();
+
         // Amortización equitativa por cuota pagada
         if (order.isPartialPayment) {
           const installments = installmentsForValidation;
@@ -365,6 +405,7 @@ export class PaymentService {
                   approvedPayments[approvedPayments.length - 1].createdAt,
                 );
               }
+              this.applyInstallmentPaidRate(inst, currentPaymentRate);
               await queryRunner.manager.save(inst);
             }
           } else {
@@ -387,12 +428,15 @@ export class PaymentService {
                     approvedPayments[0].createdAt,
                   );
                 }
+                this.applyInstallmentPaidRate(installment, currentPaymentRate);
                 await queryRunner.manager.save(installment);
               } else {
                 const paidVal = Math.round(totalApprovedCents) / 100;
                 totalApprovedCents = 0;
                 installment.paidAmount = paidVal;
                 installment.status = InstallmentStatus.PENDING;
+                installment.paidExchangeRate = null;
+                installment.paidAmountBs = null;
                 await queryRunner.manager.save(installment);
               }
             }
@@ -447,6 +491,10 @@ export class PaymentService {
               if (inst.status !== InstallmentStatus.PAID) {
                 inst.status = InstallmentStatus.PAID;
                 inst.paidAmount = inst.amount;
+                if (!inst.paymentDate) {
+                  inst.paymentDate = new Date();
+                }
+                this.applyInstallmentPaidRate(inst, currentPaymentRate);
                 await queryRunner.manager.save(inst);
               }
             }
@@ -1049,6 +1097,8 @@ export class PaymentService {
         }
       }
 
+      const activeExchangeRate = await this.resolveCurrentExchangeRate();
+
       const payment = queryRunner.manager.create(Payment, {
         ...createPaymentDto,
         order,
@@ -1056,6 +1106,7 @@ export class PaymentService {
         store,
         status: PaymentStatus.WAITING_VERIFICATION,
         installmentIndex,
+        exchangeRate: activeExchangeRate,
       });
 
       savedPayment = await queryRunner.manager.save(payment);
@@ -1328,6 +1379,22 @@ export class PaymentService {
           throw new BadRequestException(
             `El item "${item.title}" no pertenece a la tienda seleccionada. Solo puedes ordenar items de una misma tienda.`,
           );
+        }
+
+        if (item.priceType === PriceType.ON_DEMAND) {
+          throw new BadRequestException({
+            statusCode: 400,
+            code: 'ON_DEMAND_REQUIRES_QUOTE',
+            message: `El artículo "${item.title}" es Bajo Pedido / Cotización. Solicita una cotización directa con la tienda antes de ordenar.`,
+          });
+        }
+
+        if (item.priceType === PriceType.FREE && itemDto.quantity > 1) {
+          throw new BadRequestException({
+            statusCode: 400,
+            code: 'FREE_ITEM_QTY_LIMIT',
+            message: `El artículo gratuito "${item.title}" está limitado a 1 unidad por orden.`,
+          });
         }
 
         if (
@@ -1639,6 +1706,27 @@ export class PaymentService {
           }
         }
 
+        if (itemDto.crmOfferCode && this.crmService) {
+          const crmOfferPrice =
+            await this.crmService.resolveValidOfferForCustomerItem(
+              itemDto.crmOfferCode,
+              userId,
+              item.id,
+              queryRunner.manager,
+              true,
+            );
+          if (crmOfferPrice !== null && crmOfferPrice > 0) {
+            unitPublicPrice = crmOfferPrice;
+            merchantBasePrice =
+              itemCommRate > 0
+                ? Math.round((crmOfferPrice / (1 + itemCommRate / 100)) * 100) /
+                  100
+                : crmOfferPrice;
+            itemCommAmount =
+              Math.round((crmOfferPrice - merchantBasePrice) * 100) / 100;
+          }
+        }
+
         const totalLinePrice =
           unitPublicPrice * itemDto.quantity + customizationExtra;
         const priceAtOrder =
@@ -1710,6 +1798,15 @@ export class PaymentService {
       let feeAmount = 0;
 
       if (effectiveIsPartialPayment) {
+        if (subtotal <= 0) {
+          throw new BadRequestException({
+            statusCode: 400,
+            code: 'FREE_ORDER_NO_INSTALLMENTS',
+            message:
+              'No se permiten planes de pago en cuotas para órdenes con monto $0.00.',
+          });
+        }
+
         if (!user.identification || user.identification.trim().length === 0) {
           throw new BadRequestException({
             statusCode: 400,
@@ -1938,6 +2035,8 @@ export class PaymentService {
         incomingCents === 0 && (schedule?.isDeferredZeroInitial || hasPreOrderItem),
       );
 
+      const activeExchangeRate = await this.resolveCurrentExchangeRate();
+
       const order = queryRunner.manager.create(Order, {
         store,
         user,
@@ -1952,6 +2051,7 @@ export class PaymentService {
           ? PreOrderStatus.AWAITING_STOCK
           : PreOrderStatus.NONE,
         status: schedule ? schedule.orderStatus : OrderStatus.PENDING,
+        exchangeRate: activeExchangeRate,
       });
 
       if (effectiveIsPartialPayment && schedule) {
@@ -2111,6 +2211,7 @@ export class PaymentService {
           store,
           status: PaymentStatus.WAITING_VERIFICATION,
           installmentIndex: effectiveIsPartialPayment ? 1 : null,
+          exchangeRate: activeExchangeRate,
         });
 
         savedPayment = await queryRunner.manager.save(payment);

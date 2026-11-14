@@ -7,6 +7,7 @@ import { CommissionPaymentReport } from './entities/commission-payment-report.en
 import { PlatformPaymentMethod } from './entities/platform-payment-method.entity';
 import { Store } from 'src/store/entities/store.entity';
 import { Order } from 'src/order/entities/order.entity';
+import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { CommissionService } from './commission.service';
 import { StoreCommissionBillingService } from './commission-billing.service';
 import { CommissionController } from './commission.controller';
@@ -27,6 +28,7 @@ import { PlatformSettingsModule } from 'src/platform-settings/platform-settings.
       PlatformPaymentMethod,
       Store,
       Order,
+      OrderItem,
     ]),
     FinancialAuthModule,
     MailModule,

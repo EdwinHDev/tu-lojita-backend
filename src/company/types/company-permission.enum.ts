@@ -38,6 +38,10 @@ export enum CompanyPermission {
   COLLABORATORS_VIEW = 'team:view',
   COLLABORATORS_MANAGE = 'collaborators:manage',
   ROLES_MANAGE = 'roles:manage',
+
+  // CRM y Fidelización
+  CRM_ACCESS = 'crm:access',
+  CRM_MANAGE = 'crm:manage',
 }
 
 export const ALL_COMPANY_PERMISSIONS = Object.values(CompanyPermission);
@@ -68,6 +72,20 @@ export const PERMISSION_CATALOG: PermissionMetadata[] = [
     module: 'Sucursales',
     name: 'Bloquear Clientes',
     description: 'Permite restringir o desbloquear compradores conflictivos en la sucursal.',
+  },
+
+  // Módulo: CRM y Fidelización
+  {
+    key: CompanyPermission.CRM_ACCESS,
+    module: 'CRM',
+    name: 'Ver Clientes y Segmentación CRM',
+    description: 'Permite acceder al mini CRM empresarial, directorio de clientes, favoritos, historial consolidado y métricas RFM.',
+  },
+  {
+    key: CompanyPermission.CRM_MANAGE,
+    module: 'CRM',
+    name: 'Gestionar CRM y Enviar Ofertas Especiales',
+    description: 'Permite agregar notas, etiquetas, recordatorios y emitir ofertas especiales dirigidas a clientes con producto en favoritos.',
   },
 
   // Módulo: Pedidos
@@ -260,6 +278,8 @@ export const DEFAULT_ROLE_PRESETS: RolePreset[] = [
       CompanyPermission.DISPUTES_RESPOND,
       CompanyPermission.DISPUTES_RESOLVE,
       CompanyPermission.COLLABORATORS_VIEW,
+      CompanyPermission.CRM_ACCESS,
+      CompanyPermission.CRM_MANAGE,
     ],
   },
   {
@@ -276,6 +296,7 @@ export const DEFAULT_ROLE_PRESETS: RolePreset[] = [
       CompanyPermission.FINANCES_VIEW_SUMMARY,
       CompanyPermission.INSTALLMENTS_VIEW,
       CompanyPermission.INSTALLMENTS_APPROVE,
+      CompanyPermission.CRM_ACCESS,
     ],
   },
   {

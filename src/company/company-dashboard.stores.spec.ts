@@ -377,4 +377,31 @@ describe('CompanyDashboardService - getCompanyStores & getDashboardStats', () =>
       totalCustomers: { count: 0, newThisMonth: 0 },
     });
   });
+
+  it('falls back to parent company.logo when branch store.logo is empty or null', async () => {
+    const storeWithoutLogo: any = {
+      ...storeA,
+      id: 'store-no-logo',
+      logo: null,
+      company: { id: companyId, logo: '/img/company-fallback.webp' },
+    };
+    const storeWithBlankLogo: any = {
+      ...storeB,
+      id: 'store-blank-logo',
+      logo: '   ',
+      company: { id: companyId, logo: '/img/company-fallback.webp' },
+    };
+    const { service } = setup({
+      allStores: [storeWithoutLogo, storeWithBlankLogo],
+    });
+    const owner = { id: ownerId, role: 'COMPANY', isCollaborator: false };
+
+    const storesRes = await service.getCompanyStores(companyId, owner);
+    expect(storesRes.stores[0].logo).toBe('/img/company-fallback.webp');
+    expect(storesRes.stores[1].logo).toBe('/img/company-fallback.webp');
+
+    const summaryRes = await service.getStoresSummary(companyId, owner);
+    expect(summaryRes.stores[0].logo).toBe('/img/company-fallback.webp');
+    expect(summaryRes.stores[1].logo).toBe('/img/company-fallback.webp');
+  });
 });

@@ -1,8 +1,18 @@
-import { Controller, Get, Patch, Post, Param, Body } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Param,
+  Body,
+} from '@nestjs/common';
 import { PlatformSettingsService, PLATFORM_KEYS } from './platform-settings.service';
 import { ExchangeRateSyncService } from './exchange-rate-sync.service';
 import { Auth } from 'src/auth/decorators/auth.decorator';
+import { GetUser } from 'src/auth/decorators/get-user.decorator';
+import { User } from 'src/user/entities/user.entity';
 import { UserRole } from 'src/user/types/user-role.enum';
+import { PriceType } from 'src/item/types/price-type.enum';
 
 @Auth(UserRole.ADMIN)
 @Controller('admin/platform-settings')
@@ -55,6 +65,34 @@ export class PlatformSettingsController {
       );
     }
     return this.service.getAiImageGovernanceConfig();
+  }
+
+  @Get('price-types')
+  getPriceTypesGovernance() {
+    return this.service.getPriceTypesGovernanceStatus();
+  }
+
+  @Patch('price-types')
+  updatePriceTypesGovernance(
+    @Body() dto: { enabledPriceTypes: PriceType[] },
+    @GetUser() user: User,
+  ) {
+    return this.service.updateEnabledPriceTypesAndCascade(
+      dto?.enabledPriceTypes || [],
+      user,
+    );
+  }
+
+  @Get('crm-offer/config')
+  getCrmOfferConfig() {
+    return this.service.getCrmOfferConfig();
+  }
+
+  @Patch('crm-offer/config')
+  updateCrmOfferConfig(
+    @Body() dto: { enabled?: boolean; feePerCampaign?: number },
+  ) {
+    return this.service.setCrmOfferConfig(dto || {});
   }
 
   @Patch(':key')

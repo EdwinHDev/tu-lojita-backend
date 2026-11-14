@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreateOrderItemDto {
   @IsUUID('4', { message: 'El ID del item debe ser un UUID válido (v4)' })
@@ -22,4 +22,8 @@ export class CreateOrderItemDto {
 
   @IsOptional()
   bookingDate?: string;
+
+  @IsString()
+  @IsOptional()
+  crmOfferCode?: string;
 }

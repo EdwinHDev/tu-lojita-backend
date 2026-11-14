@@ -103,7 +103,7 @@ export class FavoriteService {
       .leftJoinAndSelect('item.category', 'category')
       .leftJoinAndSelect('item.variants', 'variants')
       .where('fav.userId = :userId', { userId })
-      .andWhere('item.isActive = true AND item.isDeleted = false')
+      .andWhere('item.isDeleted = false')
       .orderBy('fav.createdAt', 'DESC')
       .getMany();
 
@@ -123,9 +123,34 @@ export class FavoriteService {
         ? Math.round((priceWhenAdded - currentPrice) * 100) / 100
         : 0;
 
-      const inStock =
-        !item.trackInventory ||
-        (item.stockQuantity != null && Number(item.stockQuantity) > 0);
+      let inStock = !item.trackInventory;
+      if (item.trackInventory) {
+        if (item.hasVariants) {
+          const variants = Array.isArray(item.variants) ? item.variants : [];
+          const activeVariants = variants.filter((v) => v.isActive);
+          inStock =
+            activeVariants.length > 0 &&
+            activeVariants.some((v) => Number(v.stockQuantity ?? 0) > 0);
+        } else {
+          inStock =
+            item.stockQuantity != null && Number(item.stockQuantity) > 0;
+        }
+      }
+
+      const storeStatus = item.store?.status
+        ? String(item.store.status).toUpperCase()
+        : null;
+      const isStoreSuspended = storeStatus === 'SUSPENDED';
+      const isStoreInactive =
+        storeStatus === 'INACTIVE' || storeStatus === 'CLOSED';
+      const isItemActive = item.isActive ?? true;
+      const isItemDeleted = Boolean(item.isDeleted);
+      const canPurchase =
+        !isStoreSuspended &&
+        !isStoreInactive &&
+        isItemActive &&
+        !isItemDeleted &&
+        inStock;
 
       return {
         id: fav.id,
@@ -135,6 +160,9 @@ export class FavoriteService {
         priceDropped,
         priceDifference,
         inStock,
+        isStoreSuspended,
+        isStoreInactive,
+        canPurchase,
         createdAt: fav.createdAt,
         item: {
           ...item,

@@ -89,6 +89,9 @@ export class Order extends TimestampEntity {
   @Column('boolean', { default: false })
   isFullyPaid: boolean;
 
+  @Column('decimal', { precision: 12, scale: 4, nullable: true })
+  exchangeRate?: number | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt?: Date | null;
 

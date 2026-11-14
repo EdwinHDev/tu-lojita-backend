@@ -2,11 +2,12 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan, MoreThan, In } from 'typeorm';
+import { Repository, Between, LessThan, MoreThan, In, Not } from 'typeorm';
 import { StoreCommissionBilling } from './entities/store-commission-billing.entity';
 import { CommissionPaymentReport } from './entities/commission-payment-report.entity';
 import { CommissionConfigRange } from './entities/commission-config-range.entity';
@@ -15,6 +16,7 @@ import { PlatformPaymentMethod } from './entities/platform-payment-method.entity
 import { Store } from 'src/store/entities/store.entity';
 import { StoreStatus } from 'src/store/types/status.enum';
 import { Order } from 'src/order/entities/order.entity';
+import { OrderItem } from 'src/order-item/entities/order-item.entity';
 import { OrderStatus } from 'src/order/types';
 import { BillingStatus, PaymentReportStatus, FineType } from './types';
 import { MailService } from 'src/common/mail/mail.service';
@@ -22,8 +24,11 @@ import { NotificationService } from 'src/notification/notification.service';
 import { NotificationType } from 'src/notification/entities/notification.entity';
 import { PlatformSettingsService } from 'src/platform-settings/platform-settings.service';
 import { formatDualPrice } from 'src/common/utils/currency-format.utils';
+import { resolveOrderItemImageUrl } from 'src/common/utils/order-item-image.utils';
 import { User } from 'src/user/entities/user.entity';
+import { UserRole } from 'src/user/types/user-role.enum';
 import { SalesLedgerQueryDto } from './dto/sales-ledger-query.dto';
+import { CommissionOrdersQueryDto } from './dto/commission-orders-query.dto';
 
 @Injectable()
 export class StoreCommissionBillingService {
@@ -48,6 +53,9 @@ export class StoreCommissionBillingService {
     private readonly notificationService: NotificationService,
     @Optional()
     private readonly platformSettingsService?: PlatformSettingsService,
+    @Optional()
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository?: Repository<OrderItem>,
   ) {}
 
   private resolveStoreOwner(store?: Store | null): User | null {
@@ -231,11 +239,353 @@ export class StoreCommissionBillingService {
   // ----------------------------------------------------
   // DEUDAS Y REPORTES PARA EL COMERCIO
   // ----------------------------------------------------
-  async getStoreDebtHub(storeId: string) {
+  private async loadAuthorizedStore(storeId: string, actor?: any) {
     const store = await this.storeRepository.findOne({
       where: { id: storeId },
+      relations: ['owner', 'company', 'company.owner'],
     });
     if (!store) throw new NotFoundException('Tienda no encontrada');
+
+    if (!actor) return store;
+
+    if (actor.role === UserRole.ADMIN) {
+      return store;
+    }
+
+    if (actor.isCollaborator) {
+      const sameCompany = Boolean(
+        actor.company?.id &&
+          store.company?.id &&
+          actor.company.id === store.company.id,
+      );
+      const allowedBranchIds: string[] = Array.isArray(actor.allowedBranchIds)
+        ? actor.allowedBranchIds
+        : [];
+      const hasBranchAccess = Boolean(
+        actor.hasFullBranchAccess || allowedBranchIds.includes(storeId),
+      );
+      if (!sameCompany || !hasBranchAccess) {
+        throw new ForbiddenException(
+          'No tienes autorización para consultar las comisiones de esta tienda',
+        );
+      }
+      return store;
+    }
+
+    const isStoreOwner = Boolean(store.owner?.id && store.owner.id === actor.id);
+    const isCompanyOwner = Boolean(
+      (store.company?.owner?.id && store.company.owner.id === actor.id) ||
+        (actor.company?.id &&
+          store.company?.id &&
+          actor.company.id === store.company.id),
+    );
+    if (!isStoreOwner && !isCompanyOwner) {
+      throw new ForbiddenException(
+        'No tienes autorización para consultar las comisiones de esta tienda',
+      );
+    }
+
+    return store;
+  }
+
+  private getCommissionEligibleOrdersWhere(storeId: string) {
+    return {
+      store: { id: storeId },
+      status: In([OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]),
+      isCommissionVoided: false,
+      platformCommissionAmount: MoreThan(0),
+    };
+  }
+
+  private readonly commissionOrderSelectFields: (keyof Order)[] = [
+    'id',
+    'totalAmount',
+    'finalAmount',
+    'platformCommissionRate',
+    'platformCommissionAmount',
+    'isPartialPayment',
+    'status',
+    'createdAt',
+  ];
+
+  private async attachCommissionOrderSummaries(
+    orders: Order[],
+    paidOrderIdsMap: Map<string, { billingId: string; paidDate?: Date }> = new Map(),
+    store?: Store,
+  ) {
+    if (orders.length === 0) return [];
+
+    const summaryByOrderId = new Map<
+      string,
+      {
+        itemImageUrl: string | null;
+        firstItemTitle: string | null;
+        itemsCount: number;
+        items: Array<{
+          id: string;
+          title: string;
+          quantity: number;
+          price: number;
+          variantLabel: string | null;
+          imageUrl: string | null;
+        }>;
+      }
+    >();
+
+    if (this.orderItemRepository) {
+      const orderIds = orders.map((o) => o.id);
+      const orderItems = await this.orderItemRepository
+        .createQueryBuilder('oi')
+        .leftJoin('oi.order', 'ord')
+        .leftJoin('oi.item', 'item')
+        .leftJoin('oi.variant', 'variant')
+        .select([
+          'oi.id',
+          'oi.title',
+          'oi.quantity',
+          'oi.price',
+          'oi.variantLabel',
+          'oi.variantId',
+          'ord.id',
+          'item.id',
+          'item.title',
+          'item.mainImage',
+          'item.images',
+          'variant.id',
+          'variant.imageUrl',
+          'variant.axisValues',
+        ])
+        .where('ord.id IN (:...orderIds)', { orderIds })
+        .orderBy('oi.id', 'ASC')
+        .getMany();
+
+      for (const oi of orderItems) {
+        const orderId = oi.order?.id;
+        if (!orderId) continue;
+
+        const existing = summaryByOrderId.get(orderId) || {
+          itemImageUrl: null,
+          firstItemTitle: null,
+          itemsCount: 0,
+          items: [],
+        };
+        const qty = Number(oi.quantity) || 1;
+        existing.itemsCount += qty;
+        const itemTitle = oi.title || oi.item?.title || 'Producto';
+        if (!existing.firstItemTitle) {
+          existing.firstItemTitle = itemTitle;
+        }
+        const img = resolveOrderItemImageUrl(oi);
+        if (!existing.itemImageUrl) {
+          existing.itemImageUrl = img;
+        }
+        existing.items.push({
+          id: oi.id,
+          title: itemTitle,
+          quantity: qty,
+          price: parseFloat(oi.price?.toString() || '0'),
+          variantLabel: oi.variantLabel || null,
+          imageUrl: img,
+        });
+        summaryByOrderId.set(orderId, existing);
+      }
+    }
+
+    return orders.map((order) => {
+      const summary = summaryByOrderId.get(order.id);
+      const comm = parseFloat(order.platformCommissionAmount?.toString() || '0');
+      const rate = parseFloat(order.platformCommissionRate?.toString() || '0');
+      let commissionStatus: 'PENDING' | 'COLLECTED' | 'EXEMPT';
+      if (store?.isCommissionExempt || comm <= 0 || rate <= 0) {
+        commissionStatus = 'EXEMPT';
+      } else if (paidOrderIdsMap.has(order.id)) {
+        commissionStatus = 'COLLECTED';
+      } else {
+        commissionStatus = 'PENDING';
+      }
+
+      const settlement = paidOrderIdsMap.get(order.id);
+
+      return {
+        ...order,
+        itemImageUrl: summary?.itemImageUrl ?? null,
+        firstItemTitle: summary?.firstItemTitle ?? null,
+        itemsCount: summary?.itemsCount ?? 0,
+        items: summary?.items ?? [],
+        commissionStatus,
+        settlementBillingId: settlement?.billingId ?? null,
+        settlementDate: settlement?.paidDate ?? null,
+      };
+    });
+  }
+
+  async getStoreCommissionOrders(
+    storeId: string,
+    query: CommissionOrdersQueryDto = {},
+    actor?: any,
+  ) {
+    const store = await this.loadAuthorizedStore(storeId, actor);
+
+    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 50);
+    const offset = Math.max(Number(query.offset) || 0, 0);
+    const filter = query.filter || 'all';
+
+    // 1. Obtener los IDs de órdenes cuya comisión ya fue saldada en facturaciones verificadas (PAID)
+    const paidBillings =
+      typeof this.billingRepository.find === 'function'
+        ? await this.billingRepository.find({
+            where: {
+              store: { id: storeId },
+              status: BillingStatus.PAID,
+            },
+            select: ['id', 'associatedOrderIds', 'createdAt', 'periodEndDate'],
+            order: { createdAt: 'DESC' },
+          })
+        : [];
+
+    const paidOrderIdsMap = new Map<
+      string,
+      { billingId: string; paidDate?: Date }
+    >();
+    for (const b of paidBillings) {
+      if (Array.isArray(b.associatedOrderIds)) {
+        for (const oid of b.associatedOrderIds) {
+          if (!paidOrderIdsMap.has(oid)) {
+            paidOrderIdsMap.set(oid, {
+              billingId: b.id,
+              paidDate: b.createdAt || b.periodEndDate,
+            });
+          }
+        }
+      }
+    }
+    const paidOrderIds = Array.from(paidOrderIdsMap.keys());
+
+    // 2. Construir la cláusula WHERE según el filtro contable
+    let whereClause: any;
+    const baseConfirmedWhere = {
+      store: { id: storeId },
+      status: In([OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]),
+      isCommissionVoided: false,
+    };
+
+    if (filter === 'exempt') {
+      if (store.isCommissionExempt) {
+        whereClause = { ...baseConfirmedWhere };
+      } else {
+        whereClause = {
+          ...baseConfirmedWhere,
+          platformCommissionAmount: 0,
+        };
+      }
+    } else if (filter === 'collected') {
+      if (paidOrderIds.length === 0) {
+        whereClause = null;
+      } else {
+        whereClause = {
+          ...baseConfirmedWhere,
+          id: In(paidOrderIds),
+        };
+      }
+    } else if (filter === 'pending') {
+      if (store.isCommissionExempt) {
+        whereClause = null;
+      } else if (paidOrderIds.length === 0) {
+        whereClause = {
+          ...baseConfirmedWhere,
+          platformCommissionAmount: MoreThan(0),
+        };
+      } else {
+        whereClause = {
+          ...baseConfirmedWhere,
+          id: Not(In(paidOrderIds)),
+          platformCommissionAmount: MoreThan(0),
+        };
+      }
+    } else {
+      // 'all'
+      whereClause = { ...baseConfirmedWhere };
+    }
+
+    let orders: Order[] = [];
+    let total = 0;
+
+    if (whereClause !== null) {
+      const [fetchedOrders, count] = await this.orderRepository.findAndCount({
+        where: whereClause,
+        select: this.commissionOrderSelectFields,
+        order: { createdAt: 'DESC' },
+        take: limit,
+        skip: offset,
+      });
+      orders = fetchedOrders;
+      total = count;
+    }
+
+    // 3. Contadores de resumen para alimentar las pestañas de la UI
+    let allCount = 0;
+    let pendingCount = 0;
+    let collectedCount = 0;
+    let exemptCount = 0;
+
+    try {
+      if (typeof this.orderRepository.count === 'function') {
+        allCount = await this.orderRepository.count({
+          where: baseConfirmedWhere,
+        });
+        if (store.isCommissionExempt) {
+          exemptCount = allCount;
+          pendingCount = 0;
+          collectedCount = 0;
+        } else {
+          exemptCount = await this.orderRepository.count({
+            where: {
+              ...baseConfirmedWhere,
+              platformCommissionAmount: 0,
+            },
+          });
+          if (paidOrderIds.length > 0) {
+            collectedCount = await this.orderRepository.count({
+              where: {
+                ...baseConfirmedWhere,
+                id: In(paidOrderIds),
+              },
+            });
+          }
+          pendingCount = Math.max(allCount - exemptCount - collectedCount, 0);
+        }
+      } else {
+        allCount = total;
+        pendingCount = total;
+      }
+    } catch (_) {
+      allCount = total;
+      pendingCount = total;
+    }
+
+    const items = await this.attachCommissionOrderSummaries(
+      orders,
+      paidOrderIdsMap,
+      store,
+    );
+
+    return {
+      items,
+      total,
+      limit,
+      offset,
+      hasMore: offset + items.length < total,
+      summaryCounts: {
+        all: allCount,
+        pending: pendingCount,
+        collected: collectedCount,
+        exempt: exemptCount,
+      },
+    };
+  }
+
+  async getStoreDebtHub(storeId: string, actor?: any) {
+    const store = await this.loadAuthorizedStore(storeId, actor);
 
     const settings = await this.settingsRepository.findOne({ where: {} });
 
@@ -254,27 +604,16 @@ export class StoreCommissionBillingService {
       order: { createdAt: 'DESC' },
     });
 
-    // Buscar órdenes recientes efectivamente pagadas/abonadas que generaron comisión
-    const recentOrders = await this.orderRepository.find({
-      where: {
-        store: { id: storeId },
-        status: In([OrderStatus.FULLY_PAID, OrderStatus.PARTIALLY_PAID]),
-        isCommissionVoided: false,
-        platformCommissionAmount: MoreThan(0),
-      },
-      select: [
-        'id',
-        'totalAmount',
-        'finalAmount',
-        'platformCommissionRate',
-        'platformCommissionAmount',
-        'isPartialPayment',
-        'status',
-        'createdAt',
-      ],
+    // Mantener resumen liviano de últimas 20 órdenes con resumen de miniatura para compatibilidad
+    const rawRecentOrders = await this.orderRepository.find({
+      where: this.getCommissionEligibleOrdersWhere(storeId),
+      select: this.commissionOrderSelectFields,
       order: { createdAt: 'DESC' },
-      take: 50,
+      take: 20,
     });
+    const recentOrders = await this.attachCommissionOrderSummaries(
+      rawRecentOrders,
+    );
 
     // Buscar comprobantes de pago de la tienda (historial completo)
     const paymentReports = await this.reportRepository.find({

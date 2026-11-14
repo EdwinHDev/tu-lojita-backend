@@ -27,6 +27,7 @@ import {
   formatTimeInTimezone,
   getLocalDate,
 } from 'src/common/utils/timezone.utils';
+import { resolveOrderItemImageUrl } from 'src/common/utils/order-item-image.utils';
 
 import {
   DashboardAnalyticsQueryDto,
@@ -347,8 +348,7 @@ export class CompanyDashboardService {
     const recentSales: RecentSaleDto[] = orders.map((order) => {
       const timezone = order.store?.timezone || 'America/Caracas';
       const firstItem = order.orderItems?.[0];
-      const itemImageUrl =
-        this.resolveOrderItemImageUrl(firstItem) || undefined;
+      const itemImageUrl = resolveOrderItemImageUrl(firstItem) || undefined;
       const count = order.orderItems?.length || 0;
       const itemTitle =
         (firstItem?.title || firstItem?.item?.title || 'Producto') +
@@ -373,78 +373,6 @@ export class CompanyDashboardService {
     };
   }
 
-  private resolveOrderItemImageUrl(orderItem: any): string | null {
-    if (!orderItem) return null;
-
-    if (orderItem.variant?.imageUrl) {
-      return orderItem.variant.imageUrl;
-    }
-
-    if (
-      orderItem.variant?.axisValues &&
-      typeof orderItem.variant.axisValues === 'object'
-    ) {
-      for (const val of Object.values(orderItem.variant.axisValues)) {
-        if (typeof val === 'string') {
-          const parts = val.split('|');
-          for (const part of parts) {
-            const trimmed = part.trim();
-            if (
-              trimmed.startsWith('http://') ||
-              trimmed.startsWith('https://')
-            ) {
-              return trimmed;
-            }
-          }
-        }
-      }
-    }
-
-    if (orderItem.item?.variants && Array.isArray(orderItem.item.variants)) {
-      const matchedVariant = orderItem.item.variants.find(
-        (v: any) =>
-          (orderItem.variantId && v.id === orderItem.variantId) ||
-          (orderItem.variant?.id && v.id === orderItem.variant.id),
-      );
-      if (matchedVariant) {
-        if (matchedVariant.imageUrl) {
-          return matchedVariant.imageUrl;
-        }
-        if (
-          matchedVariant.axisValues &&
-          typeof matchedVariant.axisValues === 'object'
-        ) {
-          for (const val of Object.values(matchedVariant.axisValues)) {
-            if (typeof val === 'string') {
-              const parts = val.split('|');
-              for (const part of parts) {
-                const trimmed = part.trim();
-                if (
-                  trimmed.startsWith('http://') ||
-                  trimmed.startsWith('https://')
-                ) {
-                  return trimmed;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (orderItem.item?.mainImage) {
-      return orderItem.item.mainImage;
-    }
-    if (
-      Array.isArray(orderItem.item?.images) &&
-      orderItem.item.images.length > 0
-    ) {
-      return orderItem.item.images[0];
-    }
-
-    return null;
-  }
-
   /**
    * Obtener resumen de tiendas
    */
@@ -456,7 +384,7 @@ export class CompanyDashboardService {
 
     let stores = await this.storeRepository.find({
       where: { company: { id: companyId }, isDeleted: false },
-      relations: ['items', 'addresses'],
+      relations: ['items', 'addresses', 'company'],
       order: { createdAt: 'DESC' },
     });
 
@@ -472,7 +400,7 @@ export class CompanyDashboardService {
       hasMultipleBranches: totalCompanyStores > 1,
       productsCount: store.items?.length || 0,
       address: store.addresses?.[0]?.address || undefined,
-      logo: store.logo,
+      logo: store.logo?.trim() || store.company?.logo?.trim() || '',
       instagram: store.instagram,
       tiktok: store.tiktok,
       phone: store.phone,
@@ -495,7 +423,7 @@ export class CompanyDashboardService {
 
     let stores = await this.storeRepository.find({
       where: { company: { id: companyId }, isDeleted: false },
-      relations: ['items', 'addresses', 'aiSettings'],
+      relations: ['items', 'addresses', 'aiSettings', 'company'],
       order: { createdAt: 'DESC' },
     });
 
@@ -613,7 +541,7 @@ export class CompanyDashboardService {
           branchName: store.branchName,
           hasMultipleBranches: totalCompanyStores > 1,
           address: store.addresses?.[0]?.address || undefined,
-          logo: store.logo,
+          logo: store.logo?.trim() || store.company?.logo?.trim() || '',
           status: store.status,
           productsCount: (store.items || []).filter((i) => !i.isDeleted).length,
           salesToday: salesTodayAmount,

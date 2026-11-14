@@ -23,6 +23,12 @@ export class Installment extends TimestampEntity {
   @Column({ type: 'timestamptz', nullable: true })
   paymentDate?: Date | null;
 
+  @Column('decimal', { precision: 12, scale: 4, nullable: true })
+  paidExchangeRate?: number | null;
+
+  @Column('decimal', { precision: 14, scale: 2, nullable: true })
+  paidAmountBs?: number | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   dueDate?: Date | null;
 

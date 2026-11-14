@@ -50,7 +50,10 @@ import {
 import { StoreStrike } from './entities/store-strike.entity';
 import { StorePaymentMethod } from 'src/store-payment-method/entities/store-payment-method.entity';
 import { CommissionPaymentReport } from 'src/commission/entities/commission-payment-report.entity';
-import { PaymentReportStatus } from 'src/commission/types';
+import { StoreCommissionBilling } from 'src/commission/entities/store-commission-billing.entity';
+import { BillingStatus, PaymentReportStatus } from 'src/commission/types';
+import { CompanySubscription } from 'src/subscription/entities/company-subscription.entity';
+import { SubscriptionStatus } from 'src/subscription/types';
 import { CompanyPermission } from 'src/company/types/company-permission.enum';
 import { BlockCustomerDto } from './dto/block-customer.dto';
 import { CreateMediationRequestDto } from './dto/create-mediation-request.dto';
@@ -644,7 +647,22 @@ export class StoreService {
     }
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: User) {
+    if (!user) {
+      throw new ForbiddenException(
+        'Se requiere un usuario autorizado para eliminar la sucursal.',
+      );
+    }
+
+    const preflight = await this.validateLifecyclePreflight(id, user);
+    if (!preflight.canProceed) {
+      throw new ConflictException({
+        message:
+          'No es posible eliminar la sucursal porque existen bloqueos por suspensión, deuda o dependencias activas.',
+        blockers: preflight.blockers,
+      });
+    }
+
     return this.executeSoftDeleteStore(id);
   }
 
@@ -691,13 +709,253 @@ export class StoreService {
   }
 
   /**
-   * Realiza validaciones pre-vuelo (candados): órdenes en curso, disputas abiertas, cuotas pendientes.
+   * Evalúa bloqueos por suspensión vigente, deuda de comisiones, facturación impaga o suscripción suspendida
+   * tanto en la sucursal objetivo como a nivel de su empresa matriz y sucursales hermanas.
    */
-  async validateLifecyclePreflight(storeId: string, user: User) {
-    const store = await this.assertBranchAdminAccess(storeId, user);
+  private async evaluateSuspensionAndDebtLocks(store: Store) {
+    const blockers: string[] = [];
+    const isStoreSuspended = store.status === StoreStatus.SUSPENDED;
+    const localDebt =
+      parseFloat(store.accumulatedCommissionDebt?.toString() || '0') || 0;
+
+    let hasSuspendedBilling = false;
+    let hasUnpaidBilling = false;
+    let hasPendingReports = false;
+    let hasSuspendedSubscription = false;
+    let hasSubscriptionDebt = false;
+    let hasCompanySiblingDebt = false;
+    let hasCompanySuspendedSibling = false;
+
+    if (isStoreSuspended) {
+      blockers.push(
+        'Esta sucursal se encuentra suspendida por la plataforma. Debe regularizar su situación con administración antes de desactivarla, reactivarla o eliminarla.',
+      );
+    }
+
+    if (localDebt > 0) {
+      blockers.push(
+        `Esta sucursal posee una deuda acumulada de comisiones de $${localDebt.toFixed(2)} pendiente con la plataforma.`,
+      );
+    }
+
+    // Reportes de pago de comisiones pendientes de revisión para la sucursal
+    if (
+      typeof this.commissionPaymentReportRepository?.createQueryBuilder ===
+      'function'
+    ) {
+      const pendingReportsCount = await this.commissionPaymentReportRepository
+        .createQueryBuilder('report')
+        .innerJoin('report.billing', 'billing')
+        .innerJoin('billing.store', 'billingStore')
+        .where('billingStore.id = :storeId', { storeId: store.id })
+        .andWhere('report.status = :status', {
+          status: PaymentReportStatus.PENDING_REVIEW,
+        })
+        .getCount();
+
+      if (pendingReportsCount > 0) {
+        hasPendingReports = true;
+        blockers.push(
+          `Esta sucursal tiene ${pendingReportsCount} reporte(s) de pago de comisiones pendiente(s) de revisión.`,
+        );
+      }
+    }
+
+    // Facturación de comisiones impaga o suspendida de la sucursal
+    const billingRepo =
+      typeof this.dataSource?.getRepository === 'function'
+        ? this.dataSource.getRepository(StoreCommissionBilling)
+        : null;
+
+    if (billingRepo && typeof billingRepo.createQueryBuilder === 'function') {
+      const suspendedBillingCount = await billingRepo
+        .createQueryBuilder('billing')
+        .innerJoin('billing.store', 'billingStore')
+        .where('billingStore.id = :storeId', { storeId: store.id })
+        .andWhere('billing.status = :status', {
+          status: BillingStatus.SUSPENDED,
+        })
+        .getCount();
+
+      const unpaidBillingCount = await billingRepo
+        .createQueryBuilder('billing')
+        .innerJoin('billing.store', 'billingStore')
+        .where('billingStore.id = :storeId', { storeId: store.id })
+        .andWhere('billing.status IN (:...statuses)', {
+          statuses: [
+            BillingStatus.PENDING,
+            BillingStatus.PAYMENT_REPORTED,
+            BillingStatus.OVERDUE,
+            BillingStatus.SUSPENDED,
+          ],
+        })
+        .getCount();
+
+      hasSuspendedBilling = suspendedBillingCount > 0;
+      hasUnpaidBilling = unpaidBillingCount > 0;
+
+      if (unpaidBillingCount > 0) {
+        blockers.push(
+          hasSuspendedBilling
+            ? 'Esta sucursal tiene facturación de comisiones suspendida por incumplimiento de pago.'
+            : `Esta sucursal tiene ${unpaidBillingCount} factura(s) de comisiones pendiente(s) o vencida(s) con la plataforma.`,
+        );
+      }
+    }
+
+    // Validaciones a nivel de empresa (sucursales hermanas y suscripción)
+    const companyId = store.company?.id;
+    if (companyId) {
+      if (typeof this.storeRepository?.count === 'function') {
+        const indebtedCompanyBranchesCount = await this.storeRepository.count({
+          where: {
+            company: { id: companyId },
+            isDeleted: false,
+            accumulatedCommissionDebt: MoreThan(0),
+          },
+        });
+
+        const suspendedCompanyBranchesCount = await this.storeRepository.count({
+          where: {
+            company: { id: companyId },
+            isDeleted: false,
+            status: StoreStatus.SUSPENDED,
+          },
+        });
+
+        if (indebtedCompanyBranchesCount > 0 && localDebt <= 0) {
+          hasCompanySiblingDebt = true;
+          blockers.push(
+            'La empresa tiene deuda de comisiones pendiente en otra sucursal. Debe saldar todas las deudas de la empresa antes de desactivar o eliminar esta sede.',
+          );
+        }
+
+        if (suspendedCompanyBranchesCount > 0 && !isStoreSuspended) {
+          hasCompanySuspendedSibling = true;
+          blockers.push(
+            'La empresa tiene otra sucursal suspendida por la plataforma. Debe regularizarla antes de desactivar o eliminar esta sede.',
+          );
+        }
+      }
+
+      if (billingRepo && typeof billingRepo.createQueryBuilder === 'function') {
+        const siblingUnpaidBillingsCount = await billingRepo
+          .createQueryBuilder('billing')
+          .innerJoin('billing.store', 'sibling')
+          .innerJoin('sibling.company', 'siblingCompany')
+          .where('siblingCompany.id = :companyId', { companyId })
+          .andWhere('sibling.isDeleted = false')
+          .andWhere('sibling.id != :storeId', { storeId: store.id })
+          .andWhere('billing.status IN (:...statuses)', {
+            statuses: [
+              BillingStatus.PENDING,
+              BillingStatus.PAYMENT_REPORTED,
+              BillingStatus.OVERDUE,
+              BillingStatus.SUSPENDED,
+            ],
+          })
+          .getCount();
+
+        if (siblingUnpaidBillingsCount > 0) {
+          hasCompanySiblingDebt = true;
+          blockers.push(
+            'La empresa tiene facturación de comisiones pendiente, vencida o suspendida en otra sucursal.',
+          );
+        }
+      }
+
+      if (
+        typeof this.commissionPaymentReportRepository?.createQueryBuilder ===
+        'function'
+      ) {
+        const siblingPendingReportsCount =
+          await this.commissionPaymentReportRepository
+            .createQueryBuilder('report')
+            .innerJoin('report.billing', 'billing')
+            .innerJoin('billing.store', 'sibling')
+            .innerJoin('sibling.company', 'siblingCompany')
+            .where('siblingCompany.id = :companyId', { companyId })
+            .andWhere('sibling.isDeleted = false')
+            .andWhere('sibling.id != :storeId', { storeId: store.id })
+            .andWhere('report.status = :status', {
+              status: PaymentReportStatus.PENDING_REVIEW,
+            })
+            .getCount();
+
+        if (siblingPendingReportsCount > 0) {
+          hasCompanySiblingDebt = true;
+          blockers.push(
+            'La empresa tiene reporte(s) de pago de comisiones en revisión en otra sucursal.',
+          );
+        }
+      }
+
+      const subscriptionRepo =
+        typeof this.dataSource?.getRepository === 'function'
+          ? this.dataSource.getRepository(CompanySubscription)
+          : null;
+
+      if (
+        subscriptionRepo &&
+        typeof subscriptionRepo.createQueryBuilder === 'function'
+      ) {
+        const suspendedOrIndebtedSubs = await subscriptionRepo
+          .createQueryBuilder('sub')
+          .leftJoin('sub.company', 'subCompany')
+          .where('subCompany.id = :companyId', { companyId })
+          .andWhere('(sub.status = :suspended OR sub.accumulatedDebt > 0)', {
+            suspended: SubscriptionStatus.SUSPENDED,
+          })
+          .getMany();
+
+        if (suspendedOrIndebtedSubs.length > 0) {
+          hasSuspendedSubscription = suspendedOrIndebtedSubs.some(
+            (sub) => sub.status === SubscriptionStatus.SUSPENDED,
+          );
+          hasSubscriptionDebt = suspendedOrIndebtedSubs.some(
+            (sub) => parseFloat(sub.accumulatedDebt?.toString() || '0') > 0,
+          );
+
+          blockers.push(
+            hasSuspendedSubscription
+              ? 'La suscripción de la empresa se encuentra suspendida por incumplimiento de pago.'
+              : 'La empresa posee deuda pendiente en su suscripción con la plataforma.',
+          );
+        }
+      }
+    }
+
+    const hasSuspendedLock =
+      isStoreSuspended ||
+      hasSuspendedBilling ||
+      hasSuspendedSubscription ||
+      hasCompanySuspendedSibling;
+
+    const hasFinancialLock =
+      localDebt > 0 ||
+      hasUnpaidBilling ||
+      hasPendingReports ||
+      hasSubscriptionDebt ||
+      hasCompanySiblingDebt;
+
+    const shouldRestoreSuspendedOnCancel = hasSuspendedLock || hasFinancialLock;
+
+    return {
+      isStoreSuspended,
+      hasSuspendedLock,
+      hasFinancialLock,
+      shouldRestoreSuspendedOnCancel,
+      localDebt,
+      blockers,
+    };
+  }
+
+  /**
+   * Evalúa bloqueos operativos (órdenes activas, disputas abiertas, cuotas pendientes).
+   */
+  private async getOperationalLifecycleBlockers(storeId: string) {
     const blockers: string[] = [];
 
-    // 1. Órdenes activas (PENDING, PARTIALLY_PAID)
     const activeOrdersCount = await this.orderRepository.count({
       where: {
         store: { id: storeId },
@@ -711,7 +969,6 @@ export class StoreService {
       );
     }
 
-    // 2. Reclamos o disputas abiertas
     const openDisputesCount = await this.disputeRepository
       .createQueryBuilder('dispute')
       .innerJoin('dispute.order', 'order')
@@ -731,7 +988,6 @@ export class StoreService {
       );
     }
 
-    // 3. Cuotas activas pendientes de pago
     const pendingInstallmentsCount = await this.installmentRepository
       .createQueryBuilder('installment')
       .innerJoin('installment.order', 'order')
@@ -747,7 +1003,28 @@ export class StoreService {
       );
     }
 
-    // 4. Conteo de sucursales activas en la empresa
+    return {
+      activeOrdersCount,
+      openDisputesCount,
+      pendingInstallmentsCount,
+      blockers,
+    };
+  }
+
+  /**
+   * Realiza validaciones pre-vuelo (candados): suspensión, deuda, órdenes en curso, disputas abiertas, cuotas pendientes.
+   */
+  async validateLifecyclePreflight(storeId: string, user: User) {
+    const store = await this.assertBranchAdminAccess(storeId, user);
+
+    const [locks, operational] = await Promise.all([
+      this.evaluateSuspensionAndDebtLocks(store),
+      this.getOperationalLifecycleBlockers(storeId),
+    ]);
+
+    const blockers = [...locks.blockers, ...operational.blockers];
+
+    // Conteo de sucursales activas en la empresa
     let totalCompanyBranches = 1;
     let isLastBranch = false;
     if (store.company?.id) {
@@ -767,13 +1044,17 @@ export class StoreService {
       canProceed: blockers.length === 0,
       blockers,
       details: {
-        activeOrdersCount,
-        openDisputesCount,
-        pendingInstallmentsCount,
+        activeOrdersCount: operational.activeOrdersCount,
+        openDisputesCount: operational.openDisputesCount,
+        pendingInstallmentsCount: operational.pendingInstallmentsCount,
         isLastBranch,
         totalCompanyBranches,
         currentStatus: store.status,
         deletionScheduledAt: store.deletionScheduledAt,
+        isSuspended: locks.isStoreSuspended,
+        accumulatedCommissionDebt: locks.localDebt,
+        hasSuspendedLock: locks.hasSuspendedLock,
+        hasFinancialLock: locks.hasFinancialLock,
       },
     };
   }
@@ -789,12 +1070,18 @@ export class StoreService {
     const preflight = await this.validateLifecyclePreflight(storeId, user);
     if (!preflight.canProceed) {
       throw new ConflictException({
-        message: 'No es posible proceder debido a dependencias activas.',
+        message:
+          'No es posible proceder debido a suspensiones, deudas o dependencias activas.',
         blockers: preflight.blockers,
       });
     }
 
     const store = await this.assertBranchAdminAccess(storeId, user);
+    if (store.status === StoreStatus.SUSPENDED) {
+      throw new ForbiddenException(
+        'No es posible desactivar o eliminar una sucursal suspendida.',
+      );
+    }
 
     const targetEmail =
       store.company?.owner?.email || store.owner?.email || user.email;
@@ -888,11 +1175,18 @@ export class StoreService {
     }
 
     const store = await this.assertBranchAdminAccess(storeId, user);
+    if (store.status === StoreStatus.SUSPENDED) {
+      throw new ForbiddenException(
+        'No es posible desactivar una sucursal suspendida.',
+      );
+    }
+
     const targetEmail =
       store.company?.owner?.email || store.owner?.email || user.email;
 
     await this.validateOtpCode(targetEmail, otpCode);
 
+    const previousStatus = store.status;
     store.status = StoreStatus.INACTIVE;
     const updated = await this.storeRepository.save(store);
 
@@ -901,17 +1195,31 @@ export class StoreService {
       user,
       'BRANCH_DEACTIVATED',
       `Se desactivó la sucursal "${store.name} - ${store.branchName || 'Principal'}"`,
-      { storeId: store.id, previousStatus: 'ACTIVE' },
+      { storeId: store.id, previousStatus },
     );
 
     return updated;
   }
 
   /**
-   * Reactiva una sucursal inactiva o con eliminación cancelada.
+   * Reactiva una sucursal inactiva o con eliminación cancelada (bloqueada si está suspendida o con deuda).
    */
   async executeReactivateBranch(storeId: string, user: User) {
     const store = await this.assertBranchAdminAccess(storeId, user);
+    const locks = await this.evaluateSuspensionAndDebtLocks(store);
+
+    if (
+      store.status === StoreStatus.SUSPENDED ||
+      locks.hasSuspendedLock ||
+      locks.hasFinancialLock
+    ) {
+      throw new ForbiddenException({
+        message:
+          locks.blockers[0] ||
+          'No es posible reactivar esta sucursal porque se encuentra suspendida o tiene obligaciones pendientes con la plataforma.',
+        blockers: locks.blockers,
+      });
+    }
 
     store.status = StoreStatus.ACTIVE;
     store.deletionScheduledAt = null;
@@ -945,6 +1253,12 @@ export class StoreService {
     }
 
     const store = await this.assertBranchAdminAccess(storeId, user);
+    if (store.status === StoreStatus.SUSPENDED) {
+      throw new ForbiddenException(
+        'No es posible programar la eliminación de una sucursal suspendida.',
+      );
+    }
+
     const targetEmail =
       store.company?.owner?.email || store.owner?.email || user.email;
 
@@ -973,6 +1287,8 @@ export class StoreService {
 
   /**
    * Cancela la eliminación programada dentro del período de gracia de 7 días.
+   * Si la sucursal está suspendida o posee deudas/facturación pendiente, conserva o restaura
+   * el estado SUSPENDED y jamás la activa.
    */
   async executeCancelScheduledDeletion(storeId: string, user: User) {
     const store = await this.assertBranchAdminAccess(storeId, user);
@@ -983,23 +1299,34 @@ export class StoreService {
       );
     }
 
+    const locks = await this.evaluateSuspensionAndDebtLocks(store);
+
     store.deletionScheduledAt = null;
-    store.status = StoreStatus.ACTIVE;
+    store.status = locks.shouldRestoreSuspendedOnCancel
+      ? StoreStatus.SUSPENDED
+      : StoreStatus.ACTIVE;
     const updated = await this.storeRepository.save(store);
+
+    const statusDetail = locks.shouldRestoreSuspendedOnCancel
+      ? 'La sucursal permanece SUSPENDIDA por sanción o deuda pendiente con la plataforma.'
+      : 'Sucursal reactivada.';
 
     await this.logStoreActivity(
       store,
       user,
       'BRANCH_DELETION_CANCELLED',
-      `Se canceló la eliminación programada de la sucursal "${store.name} - ${store.branchName || 'Principal'}". Sucursal reactivada.`,
-      { storeId: store.id },
+      `Se canceló la eliminación programada de la sucursal "${store.name} - ${store.branchName || 'Principal'}". ${statusDetail}`,
+      {
+        storeId: store.id,
+        resultingStatus: updated.status,
+      },
     );
 
     return updated;
   }
 
   /**
-   * Ejecuta la baja lógica (soft delete) definitiva. Invocada por el cron a los 7 días.
+   * Ejecuta la baja lógica (soft delete) definitiva. Invocada por eliminación directa o cron tras vencer el plazo.
    */
   async executeSoftDeleteStore(storeId: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
@@ -1009,6 +1336,15 @@ export class StoreService {
 
     if (!store) {
       throw new NotFoundException(`Sucursal ${storeId} no encontrada`);
+    }
+
+    const locks = await this.evaluateSuspensionAndDebtLocks(store);
+    if (locks.blockers.length > 0) {
+      throw new ConflictException({
+        message:
+          'No es posible eliminar definitivamente una sucursal suspendida o con obligaciones pendientes.',
+        blockers: locks.blockers,
+      });
     }
 
     store.isDeleted = true;
@@ -1029,6 +1365,68 @@ export class StoreService {
     );
 
     return updated;
+  }
+
+  /**
+   * Evalúa nuevamente bloqueos antes de ejecutar la auto-eliminación programada (cron).
+   * Aborta y sanea registros suspendidos o endeudados programados antes de este candado.
+   */
+  async executeScheduledDeletionIfEligible(storeId: string): Promise<{
+    deleted: boolean;
+    reason?: 'NOT_FOUND' | 'LOCKED_BY_SUSPENSION_OR_DEBT' | 'OPERATIONAL_BLOCKERS';
+    blockers?: string[];
+    store?: Store;
+  }> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      relations: ['company'],
+    });
+
+    if (!store || store.isDeleted) {
+      return { deleted: false, reason: 'NOT_FOUND' };
+    }
+
+    const [locks, operational] = await Promise.all([
+      this.evaluateSuspensionAndDebtLocks(store),
+      this.getOperationalLifecycleBlockers(store.id),
+    ]);
+
+    if (locks.blockers.length > 0) {
+      store.deletionScheduledAt = null;
+      if (locks.shouldRestoreSuspendedOnCancel) {
+        store.status = StoreStatus.SUSPENDED;
+      }
+      await this.storeRepository.save(store);
+
+      await this.logStoreActivity(
+        store,
+        null,
+        'BRANCH_AUTO_DELETION_BLOCKED',
+        `Se abortó la eliminación programada de la sucursal "${store.name} - ${store.branchName || 'Principal'}" por suspensión o deuda pendiente.`,
+        {
+          storeId: store.id,
+          resultingStatus: store.status,
+          blockers: locks.blockers,
+        },
+      );
+
+      return {
+        deleted: false,
+        reason: 'LOCKED_BY_SUSPENSION_OR_DEBT',
+        blockers: locks.blockers,
+      };
+    }
+
+    if (operational.blockers.length > 0) {
+      return {
+        deleted: false,
+        reason: 'OPERATIONAL_BLOCKERS',
+        blockers: operational.blockers,
+      };
+    }
+
+    const deletedStore = await this.executeSoftDeleteStore(store.id);
+    return { deleted: true, store: deletedStore };
   }
 
   /**
